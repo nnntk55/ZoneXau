@@ -12,7 +12,7 @@ import yfinance as yf
 # CONFIGURATION
 # ==========================================
 SYMBOL = "GC=F"
-ASSET_NAME = "ทองคำ (XAUUSD)"
+ASSET_NAME = "XAUUSD"
 
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
@@ -20,22 +20,24 @@ STOCH_LOW_THRESHOLD = 20
 TELEGRAM_BOT_TOKEN = "8890934674:AAH4Srm5b-QhKZ1t1aQjiE5U2Kpdnyrl6Og"
 TELEGRAM_CHAT_ID = "8303217156"
 
-# ตัวแปรเก็บสถานะปัจจุบันของบอท สำหรับแสดงผลบน Dashboard ด้วย
+# ตัวแปรเก็บสถานะปัจจุบันของบอท สำหรับแสดงผลบน Dashboard
 bot_state = {
     "current_stage": 1,
     "target_direction": "-",
     "stage3_prealert_sent": None,
     "last_check": "กำลังเริ่มทำงาน...",
     "k_4h": 0.0,
+    "d_4h": 0.0,
     "k_1h": 0.0,
+    "d_1h": 0.0,
     "k_15m": 0.0,
-    "latest_price": 0.0,
+    "d_15m": 0.0,
 }
 
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (หน้าเว็บ Dashboard มินิมอล ดูง่ายบนมือถือ)
+# HTML TEMPLATE (Dashboard แสดงเฉพาะ K และ D)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -43,7 +45,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zonexau Radar Dashboard</title>
+    <title>Zonetrigger Xau Dashboard</title>
     <meta http-equiv="refresh" content="30"> <!-- รีเฟรชหน้าเว็บอัตโนมัติทุก 30 วินาที -->
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
@@ -51,38 +53,44 @@ HTML_TEMPLATE = """
         h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; }
         .subtitle { text-align: center; font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
         .card { background: #334155; padding: 15px; border-radius: 12px; margin-bottom: 12px; }
-        .label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-        .value { font-size: 1.25rem; font-weight: bold; color: #f1f5f9; margin-top: 4px; }
+        .label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .value { font-size: 1.25rem; font-weight: bold; color: #f1f5f9; }
         .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; }
         .badge-stage1 { background: #eab308; color: #000; }
         .badge-stage2 { background: #f97316; color: #fff; }
         .badge-stage3 { background: #ef4444; color: #fff; }
+        .stoch-row { display: flex; justify-content: space-between; font-size: 0.95rem; margin-top: 6px; background: #1e293b; padding: 8px 12px; border-radius: 8px; }
         .status-footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 15px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📊 Zonexau Radar</h1>
-        <div class="subtitle">ระบบเรดาร์วิเคราะห์ทองคำ 24/7</div>
-        
-        <div class="card">
-            <div class="label">ราคาทองคำล่าสุด (GC=F)</div>
-            <div class="value">${{ "%.2f"|format(state.latest_price) }}</div>
-        </div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7</div>
 
         <div class="card">
-            <div class="label">สถานะปัจจุบันของเรดาร์</div>
-            <div class="value" style="margin-top: 8px;">
+            <div class="label">สถานะเรดาร์ปัจจุบัน</div>
+            <div class="value" style="margin-top: 4px;">
                 <span class="badge badge-stage{{ state.current_stage }}">Stage {{ state.current_stage }} ({{ state.target_direction }})</span>
             </div>
         </div>
 
         <div class="card">
-            <div class="label">ค่า Stoch RSI ล่าสุด</div>
-            <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.95rem;">
-                <span>4H: <b>{{ "%.2f"|format(state.k_4h) }}</b></span>
-                <span>1H: <b>{{ "%.2f"|format(state.k_1h) }}</b></span>
-                <span>15M: <b>{{ "%.2f"|format(state.k_15m) }}</b></span>
+            <div class="label">ค่า Stochastic RSI (K / D)</div>
+            
+            <div class="stoch-row">
+                <span>Timeframe <b>4H</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_4h) }}</b> | D: <b>{{ "%.2f"|format(state.d_4h) }}</b></span>
+            </div>
+            
+            <div class="stoch-row">
+                <span>Timeframe <b>1H</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_1h) }}</b> | D: <b>{{ "%.2f"|format(state.d_1h) }}</b></span>
+            </div>
+            
+            <div class="stoch-row">
+                <span>Timeframe <b>15M</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_15m) }}</b> | D: <b>{{ "%.2f"|format(state.d_15m) }}</b></span>
             </div>
         </div>
 
@@ -151,9 +159,6 @@ def fetch_data(symbol, period, interval):
 def run_bot_loop():
   global bot_state
   print(f"[{datetime.now()}] 🚀 Zonexau Bot & Dashboard Started...")
-  send_telegram_notification(
-      "🚀 *Zonexau Radar Bot Started* (ระบบคลาวด์พร้อม Dashboard ทำงานแล้ว)"
-  )
 
   while True:
     try:
@@ -162,40 +167,43 @@ def run_bot_loop():
       df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
 
       if df_4h is not None and df_1h is not None:
-        k_4h, _ = calculate_stochastic_rsi(df_4h)
-        k_1h, _ = calculate_stochastic_rsi(df_1h)
+        k_4h, d_4h = calculate_stochastic_rsi(df_4h)
+        k_1h, d_1h = calculate_stochastic_rsi(df_1h)
 
-        k_4h_val = float(k_4h.iloc[-1]) if k_4h is not None else 0.0
-        k_1h_val = float(k_1h.iloc[-1]) if k_1h is not None else 0.0
-        latest_px = float(df_4h["Close"].iloc[-1])
+        bot_state["k_4h"] = float(k_4h.iloc[-1]) if k_4h is not None else 0.0
+        bot_state["d_4h"] = float(d_4h.iloc[-1]) if d_4h is not None else 0.0
 
-        # อัปเดตค่าใส่ตัวแปรกลางให้ Dashboard อ่าน
-        bot_state["k_4h"] = k_4h_val
-        bot_state["k_1h"] = k_1h_val
-        bot_state["latest_price"] = latest_px
+        bot_state["k_1h"] = float(k_1h.iloc[-1]) if k_1h is not None else 0.0
+        bot_state["d_1h"] = float(d_1h.iloc[-1]) if d_1h is not None else 0.0
+
         bot_state["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if df_15m is not None:
-          k_15m, _ = calculate_stochastic_rsi(df_15m)
+          k_15m, d_15m = calculate_stochastic_rsi(df_15m)
           bot_state["k_15m"] = (
               float(k_15m.iloc[-1]) if k_15m is not None else 0.0
+          )
+          bot_state["d_15m"] = (
+              float(d_15m.iloc[-1]) if d_15m is not None else 0.0
           )
 
         # STAGE 1: เช็ก 4H
         if bot_state["current_stage"] == 1:
-          if k_4h_val > STOCH_HIGH_THRESHOLD:
+          if bot_state["k_4h"] > STOCH_HIGH_THRESHOLD:
             bot_state["target_direction"] = "HIGH"
             msg = (
                 f"📢 *[{ASSET_NAME} Stage 1 สำเร็จ]*: 4H Stoch RSI เข้าโซน HIGH"
-                f" แล้ว! (K = {k_4h_val:.2f})\n👉 ย้ายเข้าสู่ Stage 2 (รอ 1H)"
+                f" แล้ว! (K = {bot_state['k_4h']:.2f})\n👉 ย้ายเข้าสู่ Stage 2"
+                " (รอ 1H)"
             )
             send_telegram_notification(msg)
             bot_state["current_stage"] = 2
-          elif k_4h_val < STOCH_LOW_THRESHOLD:
+          elif bot_state["k_4h"] < STOCH_LOW_THRESHOLD:
             bot_state["target_direction"] = "LOW"
             msg = (
                 f"📢 *[{ASSET_NAME} Stage 1 สำเร็จ]*: 4H Stoch RSI เข้าโซน LOW"
-                f" แล้ว! (K = {k_4h_val:.2f})\n👉 ย้ายเข้าสู่ Stage 2 (รอ 1H)"
+                f" แล้ว! (K = {bot_state['k_4h']:.2f})\n👉 ย้ายเข้าสู่ Stage 2"
+                " (รอ 1H)"
             )
             send_telegram_notification(msg)
             bot_state["current_stage"] = 2
@@ -204,23 +212,23 @@ def run_bot_loop():
         elif bot_state["current_stage"] == 2:
           if (
               bot_state["target_direction"] == "HIGH"
-              and k_1h_val > STOCH_HIGH_THRESHOLD
+              and bot_state["k_1h"] > STOCH_HIGH_THRESHOLD
           ):
             msg = (
                 f"📢 *[{ASSET_NAME} Stage 2 สำเร็จ]*: 1H Stoch RSI ยืนยันโซน"
-                f" HIGH แล้ว! (K = {k_1h_val:.2f})\n👉 เข้าสู่ Stage 3 (รอ 15M"
-                " Trigger)"
+                f" HIGH แล้ว! (K = {bot_state['k_1h']:.2f})\n👉 เข้าสู่ Stage 3"
+                " (รอ 15M Trigger)"
             )
             send_telegram_notification(msg)
             bot_state["current_stage"] = 3
           elif (
               bot_state["target_direction"] == "LOW"
-              and k_1h_val < STOCH_LOW_THRESHOLD
+              and bot_state["k_1h"] < STOCH_LOW_THRESHOLD
           ):
             msg = (
                 f"📢 *[{ASSET_NAME} Stage 2 สำเร็จ]*: 1H Stoch RSI ยืนยันโซน"
-                f" LOW แล้ว! (K = {k_1h_val:.2f})\n👉 เข้าสู่ Stage 3 (รอ 15M"
-                " Trigger)"
+                f" LOW แล้ว! (K = {bot_state['k_1h']:.2f})\n👉 เข้าสู่ Stage 3"
+                " (รอ 15M Trigger)"
             )
             send_telegram_notification(msg)
             bot_state["current_stage"] = 3
@@ -279,16 +287,15 @@ def run_bot_loop():
     except Exception as e:
       print(f"[{datetime.now()}] Main Loop Error: {e}")
 
-    time.sleep(60)  # เช็กรอบทุกๆ 1 นาที
+    time.sleep(60)
 
 
 if __name__ == "__main__":
-  # รันบอทเทรดใน Thread แยก
   bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
   bot_thread.start()
 
-  # รันเว็บ Flask (Dashboard)
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
+
 
 
