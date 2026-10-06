@@ -12,7 +12,7 @@ import yfinance as yf
 # CONFIGURATION
 # ==========================================
 SYMBOL = "GC=F"
-ASSET_NAME = "XAUUSD"
+ASSET_NAME = "ทองคำ (XAUUSD)"
 
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
@@ -37,7 +37,7 @@ bot_state = {
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Dashboard แสดงเฉพาะ K และ D)
+# HTML TEMPLATE (Dashboard ปรับหัวข้อและเครื่องหมาย K/D)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -45,12 +45,12 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zonetrigger Xau Dashboard</title>
+    <title>Zone Trigger XAUUSD</title>
     <meta http-equiv="refresh" content="30"> <!-- รีเฟรชหน้าเว็บอัตโนมัติทุก 30 วินาที -->
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-        h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; }
+        h1 { font-size: 1.35rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
         .subtitle { text-align: center; font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
         .card { background: #334155; padding: 15px; border-radius: 12px; margin-bottom: 12px; }
         .label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
@@ -59,13 +59,13 @@ HTML_TEMPLATE = """
         .badge-stage1 { background: #eab308; color: #000; }
         .badge-stage2 { background: #f97316; color: #fff; }
         .badge-stage3 { background: #ef4444; color: #fff; }
-        .stoch-row { display: flex; justify-content: space-between; font-size: 0.95rem; margin-top: 6px; background: #1e293b; padding: 8px 12px; border-radius: 8px; }
+        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; margin-top: 6px; background: #1e293b; padding: 10px 12px; border-radius: 8px; }
         .status-footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 15px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📊 Zonexau Radar</h1>
+        <h1>📊 Zone Trigger XAUUSD</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7</div>
 
         <div class="card">
@@ -76,21 +76,21 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="card">
-            <div class="label">ค่า Stochastic RSI (K / D)</div>
+            <div class="label">ค่า Stochastic RSI (K & D)</div>
             
             <div class="stoch-row">
                 <span>Timeframe <b>4H</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_4h) }}</b> | D: <b>{{ "%.2f"|format(state.d_4h) }}</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_4h) }}</b> {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_4h) }}</b></span>
             </div>
             
             <div class="stoch-row">
                 <span>Timeframe <b>1H</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_1h) }}</b> | D: <b>{{ "%.2f"|format(state.d_1h) }}</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_1h) }}</b> {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_1h) }}</b></span>
             </div>
             
             <div class="stoch-row">
                 <span>Timeframe <b>15M</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_15m) }}</b> | D: <b>{{ "%.2f"|format(state.d_15m) }}</b></span>
+                <span>K: <b>{{ "%.2f"|format(state.k_15m) }}</b> {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_15m) }}</b></span>
             </div>
         </div>
 
@@ -158,7 +158,7 @@ def fetch_data(symbol, period, interval):
 
 def run_bot_loop():
   global bot_state
-  print(f"[{datetime.now()}] 🚀 Zonexau Bot & Dashboard Started...")
+  print(f"[{datetime.now()}] 🚀 Zone Trigger XAUUSD Started...")
 
   while True:
     try:
@@ -296,6 +296,7 @@ if __name__ == "__main__":
 
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
+
 
 
 
