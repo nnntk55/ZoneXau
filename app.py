@@ -25,7 +25,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 bot_state = {
     "current_stage": 1,
-    "target_mode": "AUTO",  # AUTO, BUY_ONLY, SELL_ONLY
+    "target_mode": "AUTO",  # AUTO, LOW_ONLY, HIGH_ONLY
     "active_direction": "LOW",  # LOW (Buy) หรือ HIGH (Sell)
     "last_check": "กำลังเริ่มทำงาน...",
     "k_4h": 0.0,
@@ -107,7 +107,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (พร้อมโหมดเลือกทิศทางพิเศษ)</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (แจ้งเตือนพร้อมรูปอัตโนมัติ)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -126,7 +126,7 @@ HTML_TEMPLATE = """
                 <div class="label">โหมดทิศทางเป้าหมาย</div>
                 <div class="value" style="margin-top: 4px;">
                     <span class="badge {% if state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                        {% if state.active_direction == 'LOW' %}🟢 โหมด BUY (Low Zone){% else %}🔴 โหมด SELL (High Zone){% endif %}
+                        {% if state.active_direction == 'LOW' %}🟢 โหมด LOW (Buy){% else %}🔴 โหมด HIGH (Sell){% endif %}
                     </span>
                     <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 5px;">({{ state.target_mode }})</span>
                 </div>
@@ -195,15 +195,15 @@ HTML_TEMPLATE = """
             <div class="label" style="margin-bottom: 8px;">ตั้งค่าโหมดสัญญาณพิเศษ & ทดสอบระบบ</div>
             <div class="btn-container">
                 <a href="{{ url_for('set_mode', mode='auto') }}" class="btn">🔄 โหมด Auto (สลับฝั่งอัตโนมัติ)</a>
-                <a href="{{ url_for('set_mode', mode='buy') }}" class="btn btn-green">🟢 ล็อคหา Low Zone</a>
-                <a href="{{ url_for('set_mode', mode='sell') }}" class="btn btn-red">🔴 ล็อคหา High Zone</a>
+                <a href="{{ url_for('set_mode', mode='low') }}" class="btn btn-green">🟢 ล็อคหา LOW (Buy)</a>
+                <a href="{{ url_for('set_mode', mode='high') }}" class="btn btn-red">🔴 ล็อคหา HIGH (Sell)</a>
                 <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบ Telegram</a>
             </div>
         </div>
 
         <div class="status-footer">
             อัปเดตล่าสุด: {{ state.last_check }}<br>
-            (พิมพ์คำสั่งใน Telegram: <b>sum</b> = ดูสรุป, <b>buy</b> = โหมดซื้อ, <b>sell</b> = โหมดขาย, <b>auto</b> = โหมดออโต้)
+            (พิมพ์คำสั่งใน Telegram: <b>sum</b> = ดูสรุป, <b>low</b> = โหมดซื้อ, <b>high</b> = โหมดขาย, <b>auto</b> = โหมดออโต้)
         </div>
     </div>
 </body>
@@ -222,18 +222,18 @@ def set_mode(mode):
     if mode == "auto":
         bot_state["target_mode"] = "AUTO"
         bot_state["flash_msg"] = "🔄 เปลี่ยนเป็นโหมด Auto เรียบร้อย!"
-    elif mode == "buy":
-        bot_state["target_mode"] = "BUY_ONLY"
+    elif mode == "low":
+        bot_state["target_mode"] = "LOW_ONLY"
         bot_state["active_direction"] = "LOW"
         bot_state["current_stage"] = 1
         reset_notifications()
-        bot_state["flash_msg"] = "🟢 ล็อคเป้าหมายเฉพาะฝั่ง BUY (Low Zone) แล้ว!"
-    elif mode == "sell":
-        bot_state["target_mode"] = "SELL_ONLY"
+        bot_state["flash_msg"] = "🟢 ล็อคเป้าหมายเฉพาะฝั่ง LOW (Buy) แล้ว!"
+    elif mode == "high":
+        bot_state["target_mode"] = "HIGH_ONLY"
         bot_state["active_direction"] = "HIGH"
         bot_state["current_stage"] = 1
         reset_notifications()
-        bot_state["flash_msg"] = "🔴 ล็อคเป้าหมายเฉพาะฝั่ง SELL (High Zone) แล้ว!"
+        bot_state["flash_msg"] = "🔴 ล็อคเป้าหมายเฉพาะฝั่ง HIGH (Sell) แล้ว!"
     
     bot_state["flash_type"] = "success"
     return redirect(url_for("home"))
@@ -242,7 +242,7 @@ def set_mode(mode):
 @app.route("/send-test")
 def send_test():
     success = send_telegram_notification(
-        "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบพร้อมรับคำสั่ง `sum`, `buy`, `sell`, `auto` แล้ว)"
+        "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบพร้อมรับคำสั่ง `sum`, `low`, `high`, `auto` แล้ว)"
     )
     if success:
         bot_state["flash_msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -264,18 +264,18 @@ def telegram_webhook():
             
             if text == "sum":
                 threading.Thread(target=send_summary_report, args=(chat_id,)).start()
-            elif text == "buy":
-                bot_state["target_mode"] = "BUY_ONLY"
+            elif text == "low":
+                bot_state["target_mode"] = "LOW_ONLY"
                 bot_state["active_direction"] = "LOW"
                 bot_state["current_stage"] = 1
                 reset_notifications()
-                send_telegram_notification("🟢 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *BUY (Low Zone)*")
-            elif text == "sell":
-                bot_state["target_mode"] = "SELL_ONLY"
+                send_telegram_notification("🟢 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *LOW (Buy)*")
+            elif text == "high":
+                bot_state["target_mode"] = "HIGH_ONLY"
                 bot_state["active_direction"] = "HIGH"
                 bot_state["current_stage"] = 1
                 reset_notifications()
-                send_telegram_notification("🔴 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *SELL (High Zone)*")
+                send_telegram_notification("🔴 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *HIGH (Sell)*")
             elif text == "auto":
                 bot_state["target_mode"] = "AUTO"
                 send_telegram_notification("🔄 สั่งการผ่าน Telegram: เปลี่ยนเป็นโหมด *Auto* เรียบร้อย")
@@ -316,12 +316,16 @@ def send_telegram_notification(message):
         return False
 
 
-def send_telegram_photo(chat_id, photo_bytes, caption):
+def send_telegram_photo_with_caption(photo_bytes, caption):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not photo_bytes:
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("chart.png", photo_bytes, "image/png")}
-        data = {"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"}
-        requests.post(url, data=data, files=files, timeout=15)
+        data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
+        res = requests.post(url, data=data, files=files, timeout=15)
+        if res.status_code == 200:
+            log_signal(caption)
     except Exception as e:
         print(f"Telegram Photo Error: {e}")
 
@@ -388,16 +392,16 @@ def send_summary_report(chat_id):
 
         if df_4h is not None:
             p4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H")
-            if p4: send_telegram_photo(chat_id, p4, "📈 กราฟ [4H]")
+            if p4: send_telegram_photo_with_caption(p4, "📈 กราฟ [4H]")
         if df_1h is not None:
             p1 = generate_stoch_chart(df_1h, "Stoch RSI - 1H")
-            if p1: send_telegram_photo(chat_id, p1, "📈 กราฟ [1H]")
+            if p1: send_telegram_photo_with_caption(p1, "📈 กราฟ [1H]")
         if df_15m is not None:
             p15 = generate_stoch_chart(df_15m, "Stoch RSI - 15M")
-            if p15: send_telegram_photo(chat_id, p15, "📈 กราฟ [15M]")
+            if p15: send_telegram_photo_with_caption(p15, "📈 กราฟ [15M]")
         if df_5m is not None:
             p5 = generate_stoch_chart(df_5m, "Stoch RSI - 5M")
-            if p5: send_telegram_photo(chat_id, p5, "📈 กราฟ [5M]")
+            if p5: send_telegram_photo_with_caption(p5, "📈 กราฟ [5M]")
 
     except Exception as e:
         print(f"Summary Report Error: {e}")
@@ -466,34 +470,34 @@ def run_bot_loop():
                 is_low_mode = (bot_state["active_direction"] == "LOW")
 
                 # ==========================================
-                # 4 STAGES LOGIC (รองรับทั้ง LOW / HIGH)
+                # 4 STAGES LOGIC (พร้อมส่งรูปแนบตาม Timeframe)
                 # ==========================================
                 
-                # STAGE 1: 4H Condition (< 45 สำหรับ Low หรือ > 55 สำหรับ High)
+                # STAGE 1: 4H Condition
                 if bot_state["current_stage"] == 1:
                     cond_s1 = (bot_state["k_4h"] < 45) if is_low_mode else (bot_state["k_4h"] > 55)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                     if cond_s1:
                         if not bot_state["stage1_notified"]:
-                            send_telegram_notification(
-                                f"📢 *[{ASSET_NAME} Stage 1]*: กราฟ 4 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_4h']:.2f})"
-                            )
+                            img_bytes = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
+                            msg = f"📢 *[{ASSET_NAME} Stage 1]*: กราฟ 4 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_4h']:.2f})"
+                            send_telegram_photo_with_caption(img_bytes, msg)
                             bot_state["stage1_notified"] = True
                         bot_state["current_stage"] = 2
                     else:
                         bot_state["stage1_notified"] = False
 
-                # STAGE 2: 1H Condition (< 20 สำหรับ Low หรือ > 80 สำหรับ High)
+                # STAGE 2: 1H Condition
                 elif bot_state["current_stage"] == 2:
                     cond_s2 = (bot_state["k_1h"] < 20) if is_low_mode else (bot_state["k_1h"] > 80)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                     if cond_s2:
                         if not bot_state["stage2_notified"]:
-                            send_telegram_notification(
-                                f"📢 *[{ASSET_NAME} Stage 2]*: กราฟ 1 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_1h']:.2f})"
-                            )
+                            img_bytes = generate_stoch_chart(df_1h, "Stoch RSI - 1H Timeframe")
+                            msg = f"📢 *[{ASSET_NAME} Stage 2]*: กราฟ 1 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_1h']:.2f})"
+                            send_telegram_photo_with_caption(img_bytes, msg)
                             bot_state["stage2_notified"] = True
                         bot_state["current_stage"] = 3
                     else:
@@ -502,16 +506,16 @@ def run_bot_loop():
                             bot_state["current_stage"] = 1
                             reset_notifications()
 
-                # STAGE 3: 15M Condition (< 20 สำหรับ Low หรือ > 80 สำหรับ High)
+                # STAGE 3: 15M Condition
                 elif bot_state["current_stage"] == 3:
                     cond_s3 = (bot_state["k_15m"] < 20) if is_low_mode else (bot_state["k_15m"] > 80)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                     if cond_s3:
                         if not bot_state["stage3_notified"]:
-                            send_telegram_notification(
-                                f"📢 *[{ASSET_NAME} Stage 3]*: กราฟ 15 นาทีเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_15m']:.2f})"
-                            )
+                            img_bytes = generate_stoch_chart(df_15m, "Stoch RSI - 15M Timeframe")
+                            msg = f"📢 *[{ASSET_NAME} Stage 3]*: กราฟ 15 นาทีเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_15m']:.2f})"
+                            send_telegram_photo_with_caption(img_bytes, msg)
                             bot_state["stage3_notified"] = True
                         bot_state["current_stage"] = 4
                     else:
@@ -519,7 +523,7 @@ def run_bot_loop():
                             bot_state["current_stage"] = 1
                             reset_notifications()
 
-                # STAGE 4: 5M Trigger & Cross -> Reset and Switch/Wait for next round
+                # STAGE 4: 5M Trigger & Cross -> Reset and Switch/Wait
                 elif bot_state["current_stage"] == 4:
                     latest_k = float(k_5m.iloc[-1])
                     latest_d = float(d_5m.iloc[-1])
@@ -527,30 +531,29 @@ def run_bot_loop():
                     prev_d = float(d_5m.iloc[-2])
 
                     if is_low_mode:
-                        # Bullish Cross (K < 20 และ K ตัด D ขึ้น)
                         is_cross = (prev_k < prev_d) and (latest_k > latest_d)
                         triggered = (latest_k < 20 and is_cross)
-                        action_text = "BUY (🟢)"
+                        action_text = "BUY (🟢 LOW)"
                     else:
-                        # Bearish Cross (K > 80 และ K ตัด D ลง)
                         is_cross = (prev_k > prev_d) and (latest_k < latest_d)
                         triggered = (latest_k > 80 and is_cross)
-                        action_text = "SELL (🔴)"
+                        action_text = "SELL (🔴 HIGH)"
 
                     if triggered:
-                        send_telegram_notification(
+                        img_bytes = generate_stoch_chart(df_5m, "Stoch RSI - 5M Timeframe")
+                        msg = (
                             f"🔥 *[{ASSET_NAME} Stage 4 Trigger]*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
                             f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) สำเร็จ!\n"
                             f"✅ ส่งสัญญาณเข้าเทรด **{action_text}**\n"
                             f"🛑 พักระบบและสลับไปรอสัญญาณฝั่งตรงข้ามรอบถัดไป"
                         )
+                        send_telegram_photo_with_caption(img_bytes, msg)
                         
-                        # พักระบบและสลับฝั่งอัตโนมัติ (หรือสลับตามโหมดที่เลือก)
                         if bot_state["target_mode"] == "AUTO":
                             bot_state["active_direction"] = "HIGH" if is_low_mode else "LOW"
-                        elif bot_state["target_mode"] == "BUY_ONLY":
+                        elif bot_state["target_mode"] == "LOW_ONLY":
                             bot_state["active_direction"] = "LOW"
-                        elif bot_state["target_mode"] == "SELL_ONLY":
+                        elif bot_state["target_mode"] == "HIGH_ONLY":
                             bot_state["active_direction"] = "HIGH"
 
                         bot_state["current_stage"] = 1
