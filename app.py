@@ -195,8 +195,8 @@ HTML_TEMPLATE = """
             <div class="label" style="margin-bottom: 8px;">ตั้งค่าโหมดสัญญาณพิเศษ & ทดสอบระบบ</div>
             <div class="btn-container">
                 <a href="{{ url_for('set_mode', mode='auto') }}" class="btn">🔄 โหมด Auto (สลับฝั่งอัตโนมัติ)</a>
-                <a href="{{ url_for('set_mode', mode='buy') }}" class="btn btn-green">🟢 ล็อคหา BUY (Low Zone)</a>
-                <a href="{{ url_for('set_mode', mode='sell') }}" class="btn btn-red">🔴 ล็อคหา SELL (High Zone)</a>
+                <a href="{{ url_for('set_mode', mode='buy') }}" class="btn btn-green">🟢 ล็อคหา Low Zone</a>
+                <a href="{{ url_for('set_mode', mode='sell') }}" class="btn btn-red">🔴 ล็อคหา High Zone</a>
                 <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบ Telegram</a>
             </div>
         </div>
