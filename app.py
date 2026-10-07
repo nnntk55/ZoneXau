@@ -25,7 +25,6 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 bot_state = {
     "current_stage": 1,
-    "target_direction": "LOW",
     "last_check": "กำลังเริ่มทำงาน...",
     "k_4h": 0.0,
     "d_4h": 0.0,
@@ -33,20 +32,24 @@ bot_state = {
     "d_1h": 0.0,
     "k_15m": 0.0,
     "d_15m": 0.0,
+    "k_5m": 0.0,
+    "d_5m": 0.0,
     "flash_msg": None,
     "flash_type": None,
     "signal_logs": [],
     "chart_4h": None,
     "chart_1h": None,
     "chart_15m": None,
+    "chart_5m": None,
     "stage1_notified": False,
     "stage2_notified": False,
+    "stage3_notified": False,
 }
 
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Responsive Mobile-Friendly)
+# HTML TEMPLATE (Responsive Mobile-Friendly 4 Stages)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -67,10 +70,11 @@ HTML_TEMPLATE = """
         .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
         .badge-stage1 { background: #eab308; color: #000; }
         .badge-stage2 { background: #f97316; color: #fff; }
-        .badge-stage3 { background: #ef4444; color: #fff; }
+        .badge-stage3 { background: #3b82f6; color: #fff; }
+        .badge-stage4 { background: #ef4444; color: #fff; }
         .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
         
-        .charts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; }
         @media (max-width: 850px) {
             .charts-grid { grid-template-columns: 1fr; }
         }
@@ -94,7 +98,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (ตามเงื่อนไขคุณนิน)</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (4H ➔ 1H ➔ 15M ➔ 5M)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -116,6 +120,7 @@ HTML_TEMPLATE = """
                 <span><b>4H</b> ➔ K: {{ "%.2f"|format(state.k_4h) }} {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_4h) }}</span>
                 <span><b>1H</b> ➔ K: {{ "%.2f"|format(state.k_1h) }} {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_1h) }}</span>
                 <span><b>15M</b> ➔ K: {{ "%.2f"|format(state.k_15m) }} {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_15m) }}</span>
+                <span><b>5M</b> ➔ K: {{ "%.2f"|format(state.k_5m) }} {% if state.k_5m > state.d_5m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_5m) }}</span>
             </div>
 
             <div class="charts-grid">
@@ -137,6 +142,13 @@ HTML_TEMPLATE = """
                 <div class="chart-box">
                     <div class="chart-title">Timeframe 15M</div>
                     <img src="data:image/png;base64,{{ state.chart_15m }}" class="chart-img" alt="15M Chart">
+                </div>
+                {% endif %}
+
+                {% if state.chart_5m %}
+                <div class="chart-box">
+                    <div class="chart-title">Timeframe 5M</div>
+                    <img src="data:image/png;base64,{{ state.chart_5m }}" class="chart-img" alt="5M Chart">
                 </div>
                 {% endif %}
             </div>
@@ -306,6 +318,7 @@ def send_summary_report(chat_id):
         df_4h = fetch_data(SYMBOL, period="60d", interval="4h")
         df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
         df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
+        df_5m = fetch_data(SYMBOL, period="2d", interval="5m")
 
         caption = (
             f"📊 *รายงานสรุปสถานะ - {ASSET_NAME}*\n"
@@ -313,6 +326,7 @@ def send_summary_report(chat_id):
             f"• 4H  ➔ K: {bot_state['k_4h']:.2f} | D: {bot_state['d_4h']:.2f}\n"
             f"• 1H  ➔ K: {bot_state['k_1h']:.2f} | D: {bot_state['d_1h']:.2f}\n"
             f"• 15M ➔ K: {bot_state['k_15m']:.2f} | D: {bot_state['d_15m']:.2f}\n"
+            f"• 5M  ➔ K: {bot_state['k_5m']:.2f} | D: {bot_state['d_5m']:.2f}\n"
             f"🕒 อัปเดตล่าสุด: {bot_state['last_check']}"
         )
 
@@ -330,23 +344,22 @@ def send_summary_report(chat_id):
         if df_4h is not None:
             p4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
             if p4:
-                send_telegram_photo(
-                    chat_id, p4, "📈 กราฟ Stoch RSI [4H Timeframe]"
-                )
+                send_telegram_photo(chat_id, p4, "📈 กราฟ Stoch RSI [4H]")
 
         if df_1h is not None:
             p1 = generate_stoch_chart(df_1h, "Stoch RSI - 1H Timeframe")
             if p1:
-                send_telegram_photo(
-                    chat_id, p1, "📈 กราฟ Stoch RSI [1H Timeframe]"
-                )
+                send_telegram_photo(chat_id, p1, "📈 กราฟ Stoch RSI [1H]")
 
         if df_15m is not None:
             p15 = generate_stoch_chart(df_15m, "Stoch RSI - 15M Timeframe")
             if p15:
-                send_telegram_photo(
-                    chat_id, p15, "📈 กราฟ Stoch RSI [15M Timeframe]"
-                )
+                send_telegram_photo(chat_id, p15, "📈 กราฟ Stoch RSI [15M]")
+
+        if df_5m is not None:
+            p5 = generate_stoch_chart(df_5m, "Stoch RSI - 5M Timeframe")
+            if p5:
+                send_telegram_photo(chat_id, p5, "📈 กราฟ Stoch RSI [5M]")
 
     except Exception as e:
         print(f"Summary Report Error: {e}")
@@ -383,18 +396,20 @@ def fetch_data(symbol, period, interval):
 
 def run_bot_loop():
     global bot_state
-    print(f"[{datetime.now()}] 🚀 Zone Trigger XAUUSD Started...")
+    print(f"[{datetime.now()}] 🚀 Zone Trigger XAUUSD (4 Stages) Started...")
 
     while True:
         try:
             df_4h = fetch_data(SYMBOL, period="60d", interval="4h")
             df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
             df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
+            df_5m = fetch_data(SYMBOL, period="2d", interval="5m")
 
-            if df_4h is not None and df_1h is not None and df_15m is not None:
+            if df_4h is not None and df_1h is not None and df_15m is not None and df_5m is not None:
                 k_4h, d_4h = calculate_stochastic_rsi(df_4h)
                 k_1h, d_1h = calculate_stochastic_rsi(df_1h)
                 k_15m, d_15m = calculate_stochastic_rsi(df_15m)
+                k_5m, d_5m = calculate_stochastic_rsi(df_5m)
 
                 bot_state["k_4h"] = float(k_4h.iloc[-1]) if k_4h is not None else 0.0
                 bot_state["d_4h"] = float(d_4h.iloc[-1]) if d_4h is not None else 0.0
@@ -405,7 +420,9 @@ def run_bot_loop():
                 bot_state["k_15m"] = float(k_15m.iloc[-1]) if k_15m is not None else 0.0
                 bot_state["d_15m"] = float(d_15m.iloc[-1]) if d_15m is not None else 0.0
 
-                # สร้างกราฟ Base64 สำหรับแสดงผลบนเว็บ
+                bot_state["k_5m"] = float(k_5m.iloc[-1]) if k_5m is not None else 0.0
+                bot_state["d_5m"] = float(d_5m.iloc[-1]) if d_5m is not None else 0.0
+
                 raw_c4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
                 if raw_c4:
                     bot_state["chart_4h"] = base64.b64encode(raw_c4).decode("utf-8")
@@ -418,10 +435,14 @@ def run_bot_loop():
                 if raw_c15:
                     bot_state["chart_15m"] = base64.b64encode(raw_c15).decode("utf-8")
 
+                raw_c5 = generate_stoch_chart(df_5m, "Stoch RSI - 5M Timeframe")
+                if raw_c5:
+                    bot_state["chart_5m"] = base64.b64encode(raw_c5).decode("utf-8")
+
                 bot_state["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 # ==========================================
-                # STAGE LOGIC ตามที่คุณนินกำหนด
+                # 4 STAGES LOGIC
                 # ==========================================
                 
                 # STAGE 1: 4H Stoch K < 45
@@ -434,7 +455,6 @@ def run_bot_loop():
                             bot_state["stage1_notified"] = True
                         bot_state["current_stage"] = 2
                     else:
-                        # ถ้าราคาดีดกลับขึ้นไปเกิน 45 ให้รีเซ็ตสถานะ Stage 1 ใหม่ได้
                         bot_state["stage1_notified"] = False
 
                 # STAGE 2: 1H Stoch K < 20
@@ -447,34 +467,50 @@ def run_bot_loop():
                             bot_state["stage2_notified"] = True
                         bot_state["current_stage"] = 3
                     else:
-                        # เช็กย้อนกลับ ถ้า 4H หลุดจากเงื่อนไข Stage 1 ให้ถอยกลับมา Stage 1
                         if bot_state["k_4h"] >= 45:
                             bot_state["current_stage"] = 1
                             bot_state["stage1_notified"] = False
                             bot_state["stage2_notified"] = False
 
-                # STAGE 3: 15M Stoch K < 20 และเกิด Bullish Cross (K > D)
+                # STAGE 3: 15M Stoch K < 20
                 elif bot_state["current_stage"] == 3:
-                    latest_k = float(k_15m.iloc[-1])
-                    latest_d = float(d_15m.iloc[-1])
-                    prev_k = float(k_15m.iloc[-2])
-                    prev_d = float(d_15m.iloc[-2])
+                    if bot_state["k_15m"] < 20:
+                        if not bot_state["stage3_notified"]:
+                            send_telegram_notification(
+                                f"📢 *[{ASSET_NAME} Stage 3]*: กราฟ 15 นาทีเข้าสู่ LOW ZONE แล้ว! (K = {bot_state['k_15m']:.2f})"
+                            )
+                            bot_state["stage3_notified"] = True
+                        bot_state["current_stage"] = 4
+                    else:
+                        if bot_state["k_1h"] >= 30:
+                            bot_state["current_stage"] = 1
+                            bot_state["stage1_notified"] = False
+                            bot_state["stage2_notified"] = False
+                            bot_state["stage3_notified"] = False
+
+                # STAGE 4: 5M Stoch K < 20 และเกิด Bullish Cross (K > D) -> Trigger & Pause
+                elif bot_state["current_stage"] == 4:
+                    latest_k = float(k_5m.iloc[-1])
+                    latest_d = float(d_5m.iloc[-1])
+                    prev_k = float(k_5m.iloc[-2])
+                    prev_d = float(d_5m.iloc[-2])
 
                     is_bullish_cross = (prev_k < prev_d) and (latest_k > latest_d)
 
                     if latest_k < 20 and is_bullish_cross:
                         send_telegram_notification(
-                            f"🔥 *[{ASSET_NAME} Stage 3 Trigger]*: 15M Stoch K < 20 และเกิดการตัดกัน (K > D) แล้ว!\n"
+                            f"🔥 *[{ASSET_NAME} Stage 4 Trigger]*: 5M Stoch K < 20 และเกิดการตัดกัน (K > D) แล้ว!\n"
                             f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) ขึ้นมาแล้ว! 🟢\n"
-                            f"✅ ส่งสัญญาณเข้าซื้อ (BUY) พร้อมรีเซ็ตระบบกลับ Stage 1"
+                            f"✅ ส่งสัญญาณครบถ้วน พักระบบและรอสัญญาณ High ของ Stage 1 รอบถัดไป"
                         )
-                        # รีเซ็ตระบบกลับ Stage 1
+                        # รีเซ็ตและหยุดพัก (รอให้ 4H กลับขึ้นไปหรือเปลี่ยนรอบใหม่เพื่อเริ่ม Stage 1 ฝั่ง High/Low ถัดไป)
                         bot_state["current_stage"] = 1
                         bot_state["stage1_notified"] = False
                         bot_state["stage2_notified"] = False
+                        bot_state["stage3_notified"] = False
                     else:
-                        # ถ้าระหว่างรอ Stage 3 แล้ว 1H หรือ 4H หลุดโซนไปไกล อาจจะให้ถอยกลับได้ตามความเหมาะสม
-                        if bot_state["k_1h"] >= 30: # ป้องกันค้างสถานะนานเกินไปถ้า 1H หลุด
+                        if bot_state["k_15m"] >= 30:
+                            # ถ้า 15M หลุดโซนไปแล้วแต่ 5M ยังไม่ตัด ให้ถอยกลับมาเช็กใหม่
                             pass
 
         except Exception as e:
