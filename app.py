@@ -20,16 +20,12 @@ matplotlib.use("Agg")
 SYMBOL = "GC=F"
 ASSET_NAME = "ทองคำ (XAUUSD)"
 
-STOCH_HIGH_THRESHOLD = 80
-STOCH_LOW_THRESHOLD = 20
-
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 bot_state = {
     "current_stage": 1,
-    "target_direction": "-",
-    "stage3_prealert_sent": None,
+    "target_direction": "LOW",
     "last_check": "กำลังเริ่มทำงาน...",
     "k_4h": 0.0,
     "d_4h": 0.0,
@@ -43,12 +39,14 @@ bot_state = {
     "chart_4h": None,
     "chart_1h": None,
     "chart_15m": None,
+    "stage1_notified": False,
+    "stage2_notified": False,
 }
 
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Responsive: แนวนอนบนคอม / แนวตั้งเต็มตาบนมือถือ)
+# HTML TEMPLATE (Responsive Mobile-Friendly)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -72,10 +70,9 @@ HTML_TEMPLATE = """
         .badge-stage3 { background: #ef4444; color: #fff; }
         .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
         
-        /* Responsive Grid: จอใหญ่เรียงแนวนอน 3 คอลัมน์ / มือถือปรับเป็นแนวตั้งอัตโนมัติ */
         .charts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
         @media (max-width: 850px) {
-            .charts-grid { grid-template-columns: 1fr; } /* มือถือแสดงแนวตั้งเต็มจอ อ่านง่าย */
+            .charts-grid { grid-template-columns: 1fr; }
         }
 
         .chart-box { background: #1e293b; padding: 10px; border-radius: 10px; border: 1px solid #475569; text-align: center; }
@@ -97,7 +94,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (Responsive Mobile-Friendly)</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (ตามเงื่อนไขคุณนิน)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -108,7 +105,7 @@ HTML_TEMPLATE = """
         <div class="card">
             <div class="label">สถานะเรดาร์ปัจจุบัน</div>
             <div class="value" style="margin-top: 4px;">
-                <span class="badge badge-stage{{ state.current_stage }}">Stage {{ state.current_stage }} ({{ state.target_direction }})</span>
+                <span class="badge badge-stage{{ state.current_stage }}">Stage {{ state.current_stage }}</span>
             </div>
         </div>
 
@@ -121,7 +118,6 @@ HTML_TEMPLATE = """
                 <span><b>15M</b> ➔ K: {{ "%.2f"|format(state.k_15m) }} {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_15m) }}</span>
             </div>
 
-            <!-- กราฟที่จะสลับเป็นแนวนอนบนคอม และแนวตั้งเต็มตาบนมือถืออัตโนมัติ -->
             <div class="charts-grid">
                 {% if state.chart_4h %}
                 <div class="chart-box">
@@ -312,9 +308,8 @@ def send_summary_report(chat_id):
         df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
 
         caption = (
-            f"📊 *รายงานสรุปสถานะรายวัน - {ASSET_NAME}*\n"
-            f"📌 สถานะเรดาร์: Stage {bot_state['current_stage']}"
-            f" ({bot_state['target_direction']})\n"
+            f"📊 *รายงานสรุปสถานะ - {ASSET_NAME}*\n"
+            f"📌 สถานะเรดาร์: Stage {bot_state['current_stage']}\n"
             f"• 4H  ➔ K: {bot_state['k_4h']:.2f} | D: {bot_state['d_4h']:.2f}\n"
             f"• 1H  ➔ K: {bot_state['k_1h']:.2f} | D: {bot_state['d_1h']:.2f}\n"
             f"• 15M ➔ K: {bot_state['k_15m']:.2f} | D: {bot_state['d_15m']:.2f}\n"
@@ -396,9 +391,10 @@ def run_bot_loop():
             df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
             df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
 
-            if df_4h is not None and df_1h is not None:
+            if df_4h is not None and df_1h is not None and df_15m is not None:
                 k_4h, d_4h = calculate_stochastic_rsi(df_4h)
                 k_1h, d_1h = calculate_stochastic_rsi(df_1h)
+                k_15m, d_15m = calculate_stochastic_rsi(df_15m)
 
                 bot_state["k_4h"] = float(k_4h.iloc[-1]) if k_4h is not None else 0.0
                 bot_state["d_4h"] = float(d_4h.iloc[-1]) if d_4h is not None else 0.0
@@ -406,6 +402,10 @@ def run_bot_loop():
                 bot_state["k_1h"] = float(k_1h.iloc[-1]) if k_1h is not None else 0.0
                 bot_state["d_1h"] = float(d_1h.iloc[-1]) if d_1h is not None else 0.0
 
+                bot_state["k_15m"] = float(k_15m.iloc[-1]) if k_15m is not None else 0.0
+                bot_state["d_15m"] = float(d_15m.iloc[-1]) if d_15m is not None else 0.0
+
+                # สร้างกราฟ Base64 สำหรับแสดงผลบนเว็บ
                 raw_c4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
                 if raw_c4:
                     bot_state["chart_4h"] = base64.b64encode(raw_c4).decode("utf-8")
@@ -414,121 +414,68 @@ def run_bot_loop():
                 if raw_c1:
                     bot_state["chart_1h"] = base64.b64encode(raw_c1).decode("utf-8")
 
-                if df_15m is not None:
-                    k_15m, d_15m = calculate_stochastic_rsi(df_15m)
-                    bot_state["k_15m"] = (
-                        float(k_15m.iloc[-1]) if k_15m is not None else 0.0
-                    )
-                    bot_state["d_15m"] = (
-                        float(d_15m.iloc[-1]) if d_15m is not None else 0.0
-                    )
-
-                    raw_c15 = generate_stoch_chart(
-                        df_15m, "Stoch RSI - 15M Timeframe"
-                    )
-                    if raw_c15:
-                        bot_state["chart_15m"] = base64.b64encode(
-                            raw_c15
-                        ).decode("utf-8")
+                raw_c15 = generate_stoch_chart(df_15m, "Stoch RSI - 15M Timeframe")
+                if raw_c15:
+                    bot_state["chart_15m"] = base64.b64encode(raw_c15).decode("utf-8")
 
                 bot_state["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # STAGE 1
+                # ==========================================
+                # STAGE LOGIC ตามที่คุณนินกำหนด
+                # ==========================================
+                
+                # STAGE 1: 4H Stoch K < 45
                 if bot_state["current_stage"] == 1:
-                    if bot_state["k_4h"] > STOCH_HIGH_THRESHOLD:
-                        bot_state["target_direction"] = "HIGH"
-                        msg = (
-                            f"📢 *[{ASSET_NAME} Stage 1 สำเร็จ]*: 4H Stoch RSI เข้าโซน HIGH"
-                            f" แล้ว! (K = {bot_state['k_4h']:.2f})\n👉 ย้ายเข้าสู่ Stage 2"
-                            " (รอ 1H)"
-                        )
-                        send_telegram_notification(msg)
+                    if bot_state["k_4h"] < 45:
+                        if not bot_state["stage1_notified"]:
+                            send_telegram_notification(
+                                f"📢 *[{ASSET_NAME} Stage 1]*: กราฟ 4 ชั่วโมงเข้าสู่ LOW ZONE แล้ว! (K = {bot_state['k_4h']:.2f})"
+                            )
+                            bot_state["stage1_notified"] = True
                         bot_state["current_stage"] = 2
-                    elif bot_state["k_4h"] < STOCH_LOW_THRESHOLD:
-                        bot_state["target_direction"] = "LOW"
-                        msg = (
-                            f"📢 *[{ASSET_NAME} Stage 1 สำเร็จ]*: 4H Stoch RSI เข้าโซน LOW"
-                            f" แล้ว! (K = {bot_state['k_4h']:.2f})\n👉 ย้ายเข้าสู่ Stage 2"
-                            " (รอ 1H)"
-                        )
-                        send_telegram_notification(msg)
-                        bot_state["current_stage"] = 2
+                    else:
+                        # ถ้าราคาดีดกลับขึ้นไปเกิน 45 ให้รีเซ็ตสถานะ Stage 1 ใหม่ได้
+                        bot_state["stage1_notified"] = False
 
-                # STAGE 2
+                # STAGE 2: 1H Stoch K < 20
                 elif bot_state["current_stage"] == 2:
-                    if (
-                        bot_state["target_direction"] == "HIGH"
-                        and bot_state["k_1h"] > STOCH_HIGH_THRESHOLD
-                    ):
-                        msg = (
-                            f"📢 *[{ASSET_NAME} Stage 2 สำเร็จ]*: 1H Stoch RSI ยืนยันโซน"
-                            f" HIGH แล้ว! (K = {bot_state['k_1h']:.2f})\n👉 เข้าสู่ Stage 3"
-                            " (รอ 15M Trigger)"
-                        )
-                        send_telegram_notification(msg)
+                    if bot_state["k_1h"] < 20:
+                        if not bot_state["stage2_notified"]:
+                            send_telegram_notification(
+                                f"📢 *[{ASSET_NAME} Stage 2]*: กราฟ 1 ชั่วโมงเข้าสู่ LOW ZONE แล้ว! (K = {bot_state['k_1h']:.2f})"
+                            )
+                            bot_state["stage2_notified"] = True
                         bot_state["current_stage"] = 3
-                    elif (
-                        bot_state["target_direction"] == "LOW"
-                        and bot_state["k_1h"] < STOCH_LOW_THRESHOLD
-                    ):
-                        msg = (
-                            f"📢 *[{ASSET_NAME} Stage 2 สำเร็จ]*: 1H Stoch RSI ยืนยันโซน"
-                            f" LOW แล้ว! (K = {bot_state['k_1h']:.2f})\n👉 เข้าสู่ Stage 3"
-                            " (รอ 15M Trigger)"
-                        )
-                        send_telegram_notification(msg)
-                        bot_state["current_stage"] = 3
+                    else:
+                        # เช็กย้อนกลับ ถ้า 4H หลุดจากเงื่อนไข Stage 1 ให้ถอยกลับมา Stage 1
+                        if bot_state["k_4h"] >= 45:
+                            bot_state["current_stage"] = 1
+                            bot_state["stage1_notified"] = False
+                            bot_state["stage2_notified"] = False
 
-                # STAGE 3
+                # STAGE 3: 15M Stoch K < 20 และเกิด Bullish Cross (K > D)
                 elif bot_state["current_stage"] == 3:
-                    if df_15m is not None and not df_15m.empty:
-                        k_15m, d_15m = calculate_stochastic_rsi(df_15m)
-                        latest_k = float(k_15m.iloc[-1])
-                        latest_d = float(d_15m.iloc[-1])
-                        prev_k = float(k_15m.iloc[-2])
-                        prev_d = float(d_15m.iloc[-2])
+                    latest_k = float(k_15m.iloc[-1])
+                    latest_d = float(d_15m.iloc[-1])
+                    prev_k = float(k_15m.iloc[-2])
+                    prev_d = float(d_15m.iloc[-2])
 
-                        is_bullish_cross = (prev_k < prev_d) and (latest_k > latest_d)
-                        is_bearish_cross = (prev_k > prev_d) and (latest_k < latest_d)
+                    is_bullish_cross = (prev_k < prev_d) and (latest_k > latest_d)
 
-                        if bot_state["target_direction"] == "HIGH":
-                            if (
-                                latest_k > 80
-                                and bot_state["stage3_prealert_sent"] != "HIGH"
-                            ):
-                                send_telegram_notification(
-                                    f"⚠️ *[{ASSET_NAME} Pre-Alert Stage 3]*: 15M โซนสูง"
-                                    f" (K={latest_k:.2f}) เตรียมหาจังหวะ SELL"
-                                )
-                                bot_state["stage3_prealert_sent"] = "HIGH"
-
-                            if latest_k > 75 and is_bearish_cross:
-                                send_telegram_notification(
-                                    f"🔥 *[{ASSET_NAME} Stage 3 สำเร็จ]*: 15M HIGH ZONE TRIGGER!"
-                                    f" (Bearish Cross)\nK = {latest_k:.2f} ตัด D ลงมาแล้ว!"
-                                    " 🔴\n✅ รีเซ็ตระบบกลับ Stage 1"
-                                )
-                                bot_state["current_stage"] = 1
-                                bot_state["target_direction"] = "-"
-                                bot_state["stage3_prealert_sent"] = None
-
-                        elif bot_state["target_direction"] == "LOW":
-                            if latest_k < 20 and bot_state["stage3_prealert_sent"] != "LOW":
-                                send_telegram_notification(
-                                    f"⚠️ *[{ASSET_NAME} Pre-Alert Stage 3]*: 15M โซนต่ำ"
-                                    f" (K={latest_k:.2f}) เตรียมหาจังหวะ BUY"
-                                )
-                                bot_state["stage3_prealert_sent"] = "LOW"
-
-                            if latest_k < 25 and is_bullish_cross:
-                                send_telegram_notification(
-                                    f"🔥 *[{ASSET_NAME} Stage 3 สำเร็จ]*: 15M LOW ZONE TRIGGER!"
-                                    f" (Bullish Cross)\nK = {latest_k:.2f} ตัด D ขึ้นมาแล้ว!"
-                                    " 🟢\n✅ รีเซ็ตระบบกลับ Stage 1"
-                                )
-                                bot_state["current_stage"] = 1
-                                bot_state["target_direction"] = "-"
-                                bot_state["stage3_prealert_sent"] = None
+                    if latest_k < 20 and is_bullish_cross:
+                        send_telegram_notification(
+                            f"🔥 *[{ASSET_NAME} Stage 3 Trigger]*: 15M Stoch K < 20 และเกิดการตัดกัน (K > D) แล้ว!\n"
+                            f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) ขึ้นมาแล้ว! 🟢\n"
+                            f"✅ ส่งสัญญาณเข้าซื้อ (BUY) พร้อมรีเซ็ตระบบกลับ Stage 1"
+                        )
+                        # รีเซ็ตระบบกลับ Stage 1
+                        bot_state["current_stage"] = 1
+                        bot_state["stage1_notified"] = False
+                        bot_state["stage2_notified"] = False
+                    else:
+                        # ถ้าระหว่างรอ Stage 3 แล้ว 1H หรือ 4H หลุดโซนไปไกล อาจจะให้ถอยกลับได้ตามความเหมาะสม
+                        if bot_state["k_1h"] >= 30: # ป้องกันค้างสถานะนานเกินไปถ้า 1H หลุด
+                            pass
 
         except Exception as e:
             print(f"Main Loop Error: {e}")
