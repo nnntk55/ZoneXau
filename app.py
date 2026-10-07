@@ -12,7 +12,7 @@ import yfinance as yf
 # CONFIGURATION
 # ==========================================
 SYMBOL = "GC=F"
-ASSET_NAME = "XAUUSD"
+ASSET_NAME = "ทองคำ (XAUUSD)"
 
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
@@ -31,12 +31,14 @@ bot_state = {
     "d_1h": 0.0,
     "k_15m": 0.0,
     "d_15m": 0.0,
+    "flash_msg": None,
+    "flash_type": None,
 }
 
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (เพิ่มปุ่มเช็กการเชื่อมต่อ Telegram)
+# HTML TEMPLATE
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -73,9 +75,9 @@ HTML_TEMPLATE = """
         <h1>📊 Zone Trigger XAUUSD</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7</div>
 
-        {% if msg %}
-            <div class="alert-box {% if 'สำเร็จ' in msg %}alert-success{% else %}alert-error{% endif %}">
-                {{ msg }}
+        {% if state.flash_msg %}
+            <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
+                {{ state.flash_msg }}
             </div>
         {% endif %}
 
@@ -107,7 +109,7 @@ HTML_TEMPLATE = """
 
         <div class="card btn-container">
             <div class="label" style="margin-bottom: 10px;">ทดสอบการเชื่อมต่อ Telegram</div>
-            <a href="{{ url_for('test_telegram') }}" class="btn">🔔 ส่งข้อความทดสอบเข้า Telegram</a>
+            <a href="{{ url_for('send_test') }}" class="btn">🔔 ส่งข้อความทดสอบเข้า Telegram</a>
         </div>
 
         <div class="status-footer">
@@ -122,21 +124,24 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def home():
-  return render_template_string(HTML_TEMPLATE, state=bot_state, msg=None)
+  return render_template_string(HTML_TEMPLATE, state=bot_state)
 
 
-@app.route("/test-telegram")
-def test_telegram():
+@app.route("/send-test")
+def send_test():
   success = send_telegram_notification(
-      "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบ Dashboard ส่งข้อความเข้า Telegram"
-      " เรียบร้อยแล้ว)"
+      "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ส่งข้อความเมื่อกดปุ่มบน Dashboard"
+      " เรียบร้อย)"
   )
-  message = (
-      "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
-      if success
-      else "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token และ Chat ID ใน Environment"
-  )
-  return render_template_string(HTML_TEMPLATE, state=bot_state, msg=message)
+  if success:
+    bot_state["flash_msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
+    bot_state["flash_type"] = "success"
+  else:
+    bot_state["flash_msg"] = (
+        "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
+    )
+    bot_state["flash_type"] = "error"
+  return redirect(url_for("home"))
 
 
 def send_telegram_notification(message):
@@ -309,7 +314,7 @@ def run_bot_loop():
 
               if latest_k < 25 and is_bullish_cross:
                 send_telegram_notification(
-                    f"🔥 *[{ASSET_Name} Stage 3 สำเร็จ]*: 15M LOW ZONE TRIGGER!"
+                    f"🔥 *[{ASSET_NAME} Stage 3 สำเร็จ]*: 15M LOW ZONE TRIGGER!"
                     f" (Bullish Cross)\nK = {latest_k:.2f} ตัด D ขึ้นมาแล้ว!"
                     " 🟢\n✅ รีเซ็ตระบบกลับ Stage 1"
                 )
