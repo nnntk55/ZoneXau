@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 import threading
 import time
-from flask import Flask, render_template_string
+from flask import Flask, redirect, render_template_string, url_for
 import numpy as np
 import pandas as pd
 import requests
@@ -12,16 +12,14 @@ import yfinance as yf
 # CONFIGURATION
 # ==========================================
 SYMBOL = "GC=F"
-ASSET_NAME = "ทองคำ (XAUUSD)"
+ASSET_NAME = "XAUUSD"
 
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
 
-# ดึง Token และ Chat ID จาก Environment Variables ของ Render (ปลอดภัย ไม่หลุดบน GitHub)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# ตัวแปรเก็บสถานะปัจจุบันของบอท สำหรับแสดงผลบน Dashboard
 bot_state = {
     "current_stage": 1,
     "target_direction": "-",
@@ -38,7 +36,7 @@ bot_state = {
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE
+# HTML TEMPLATE (เพิ่มปุ่มเช็กการเชื่อมต่อ Telegram)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -61,6 +59,12 @@ HTML_TEMPLATE = """
         .badge-stage2 { background: #f97316; color: #fff; }
         .badge-stage3 { background: #ef4444; color: #fff; }
         .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; margin-top: 6px; background: #1e293b; padding: 10px 12px; border-radius: 8px; }
+        .btn-container { text-align: center; margin-top: 15px; }
+        .btn { background-color: #0ea5e9; color: white; padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
+        .btn:hover { background-color: #0284c7; }
+        .alert-box { padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; text-align: center; }
+        .alert-success { background-color: #065f46; color: #d1fae5; }
+        .alert-error { background-color: #991b1b; color: #fee2e2; }
         .status-footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 15px; }
     </style>
 </head>
@@ -68,6 +72,12 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7</div>
+
+        {% if msg %}
+            <div class="alert-box {% if 'สำเร็จ' in msg %}alert-success{% else %}alert-error{% endif %}">
+                {{ msg }}
+            </div>
+        {% endif %}
 
         <div class="card">
             <div class="label">สถานะเรดาร์ปัจจุบัน</div>
@@ -95,6 +105,11 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
+        <div class="card btn-container">
+            <div class="label" style="margin-bottom: 10px;">ทดสอบการเชื่อมต่อ Telegram</div>
+            <a href="{{ url_for('test_telegram') }}" class="btn">🔔 ส่งข้อความทดสอบเข้า Telegram</a>
+        </div>
+
         <div class="status-footer">
             อัปเดตล่าสุด: {{ state.last_check }}<br>
             (รีเฟรชอัตโนมัติทุกๆ 30 วินาที)
@@ -107,7 +122,21 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def home():
-  return render_template_string(HTML_TEMPLATE, state=bot_state)
+  return render_template_string(HTML_TEMPLATE, state=bot_state, msg=None)
+
+
+@app.route("/test-telegram")
+def test_telegram():
+  success = send_telegram_notification(
+      "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบ Dashboard ส่งข้อความเข้า Telegram"
+      " เรียบร้อยแล้ว)"
+  )
+  message = (
+      "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
+      if success
+      else "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token และ Chat ID ใน Environment"
+  )
+  return render_template_string(HTML_TEMPLATE, state=bot_state, msg=message)
 
 
 def send_telegram_notification(message):
@@ -280,7 +309,7 @@ def run_bot_loop():
 
               if latest_k < 25 and is_bullish_cross:
                 send_telegram_notification(
-                    f"🔥 *[{ASSET_NAME} Stage 3 สำเร็จ]*: 15M LOW ZONE TRIGGER!"
+                    f"🔥 *[{ASSET_Name} Stage 3 สำเร็จ]*: 15M LOW ZONE TRIGGER!"
                     f" (Bullish Cross)\nK = {latest_k:.2f} ตัด D ขึ้นมาแล้ว!"
                     " 🟢\n✅ รีเซ็ตระบบกลับ Stage 1"
                 )
@@ -300,4 +329,3 @@ if __name__ == "__main__":
 
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
-
