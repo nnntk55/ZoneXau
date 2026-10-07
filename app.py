@@ -1,18 +1,26 @@
+
 from datetime import datetime
+import io
 import os
 import threading
 import time
-from flask import Flask, redirect, render_template_string, url_for
+from flask import Flask, redirect, render_template_string, request, url_for
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
 
+matplotlib.use(
+    "Agg"
+)  # ป้องกันปัญหาเรื่อง GUI เวลาเรนเดอร์กราฟบนเซิร์ฟเวอร์คลาวด์
+
 # ==========================================
 # CONFIGURATION
 # ==========================================
 SYMBOL = "GC=F"
-ASSET_NAME = "ทองคำ (XAUUSD)"
+ASSET_NAME = "XAUUSD"
 
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
@@ -33,12 +41,13 @@ bot_state = {
     "d_15m": 0.0,
     "flash_msg": None,
     "flash_type": None,
+    "signal_logs": [],  # เก็บประวัติการแจ้งเตือน
 }
 
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE
+# HTML TEMPLATE (เพิ่มตารางประวัติ Signal Log)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -50,7 +59,7 @@ HTML_TEMPLATE = """
     <meta http-equiv="refresh" content="30">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .container { max-width: 600px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
         h1 { font-size: 1.35rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
         .subtitle { text-align: center; font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
         .card { background: #334155; padding: 15px; border-radius: 12px; margin-bottom: 12px; }
@@ -67,13 +76,16 @@ HTML_TEMPLATE = """
         .alert-box { padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; text-align: center; }
         .alert-success { background-color: #065f46; color: #d1fae5; }
         .alert-error { background-color: #991b1b; color: #fee2e2; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85rem; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #475569; }
+        th { color: #38bdf8; }
         .status-footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 15px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (พร้อม Telegram Command)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -90,31 +102,45 @@ HTML_TEMPLATE = """
 
         <div class="card">
             <div class="label">ค่า Stochastic RSI (K & D)</div>
-            
             <div class="stoch-row">
                 <span>Timeframe <b>4H</b></span>
                 <span>K: <b>{{ "%.2f"|format(state.k_4h) }}</b> {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_4h) }}</b></span>
             </div>
-            
             <div class="stoch-row">
                 <span>Timeframe <b>1H</b></span>
                 <span>K: <b>{{ "%.2f"|format(state.k_1h) }}</b> {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_1h) }}</b></span>
             </div>
-            
             <div class="stoch-row">
                 <span>Timeframe <b>15M</b></span>
                 <span>K: <b>{{ "%.2f"|format(state.k_15m) }}</b> {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_15m) }}</b></span>
             </div>
         </div>
 
+        <div class="card">
+            <div class="label">ประวัติการแจ้งเตือนล่าสุด (Signal Log)</div>
+            {% if state.signal_logs %}
+                <table>
+                    <tr><th>เวลา</th><th>ข้อความแจ้งเตือน</th></tr>
+                    {% for log in state.signal_logs[:5] %}
+                    <tr>
+                        <td style="color: #94a3b8; white-space: nowrap;">{{ log.time }}</td>
+                        <td>{{ log.text }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            {% else %}
+                <div style="font-size: 0.85rem; color: #94a3b8; text-align: center; padding: 10px;">ยังไม่มีประวัติการแจ้งเตือนในรอบนี้</div>
+            {% endif %}
+        </div>
+
         <div class="card btn-container">
-            <div class="label" style="margin-bottom: 10px;">ทดสอบการเชื่อมต่อ Telegram</div>
+            <div class="label" style="margin-bottom: 10px;">ทดสอบระบบส่ง Telegram</div>
             <a href="{{ url_for('send_test') }}" class="btn">🔔 ส่งข้อความทดสอบเข้า Telegram</a>
         </div>
 
         <div class="status-footer">
             อัปเดตล่าสุด: {{ state.last_check }}<br>
-            (รีเฟรชอัตโนมัติทุกๆ 30 วินาที)
+            (พิมพ์คำว่า <b>sum</b> ใน Telegram เพื่อรับสรุปและกราฟด่วน)
         </div>
     </div>
 </body>
@@ -130,8 +156,7 @@ def home():
 @app.route("/send-test")
 def send_test():
   success = send_telegram_notification(
-      "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ส่งข้อความเมื่อกดปุ่มบน Dashboard"
-      " เรียบร้อย)"
+      "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบพร้อมรับคำสั่ง `sum` แล้ว)"
   )
   if success:
     bot_state["flash_msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -144,9 +169,35 @@ def send_test():
   return redirect(url_for("home"))
 
 
+# Endpoint รับ webhook จาก Telegram เมื่อเราพิมพ์ข้อความไปหาบอท
+@app.route("/telegram-webhook", methods=["POST"])
+def telegram_webhook():
+  try:
+    data = request.get_json()
+    if "message" in data and "text" in data["message"]:
+      text = data["message"]["text"].strip().lower()
+      chat_id = data["message"]["chat"]["id"]
+
+      # ถ้าเราพิมพ์คำว่า "sum"
+      if text == "sum":
+        send_summary_report(chat_id)
+    return "OK", 200
+  except Exception as e:
+    print(f"Webhook Error: {e}")
+    return "OK", 200
+
+
+def log_signal(text):
+  global bot_state
+  timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  bot_state["signal_logs"].insert(0, {"time": timestamp, "text": text})
+  # เก็บประวัติไว้ไม่เกิน 50 รายการล่าสุด
+  if len(bot_state["signal_logs"]) > 50:
+    bot_state["signal_logs"].pop()
+
+
 def send_telegram_notification(message):
   if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-    print(f"[{datetime.now()}] Telegram Token/Chat ID not set in environment.")
     return False
   try:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -156,10 +207,130 @@ def send_telegram_notification(message):
         "parse_mode": "Markdown",
     }
     res = requests.post(url, json=payload, timeout=10)
+    if res.status_code == 200:
+      log_signal(message)
     return res.status_code == 200
   except Exception as e:
-    print(f"[{datetime.now()}] Telegram Error: {e}")
+    print(f"Telegram Error: {e}")
     return False
+
+
+def send_telegram_photo(chat_id, photo_bytes, caption):
+  try:
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    files = {"photo": ("chart.png", photo_bytes, "image/png")}
+    data = {"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"}
+    requests.post(url, data=data, files=files, timeout=15)
+  except Exception as e:
+    print(f"Telegram Photo Error: {e}")
+
+
+def generate_stoch_chart(df, title):
+  """สร้างรูปกราฟ Stoch RSI (K & D) ย้อนหลัง 30 แท่งล่าสุด"""
+  try:
+    if df is None or len(df) < 30:
+      return None
+    k, d = calculate_stochastic_rsi(df)
+    if k is None or d is None:
+      return None
+
+    sub_k = k.iloc[-30:]
+    sub_d = d.iloc[-30:]
+
+    plt.figure(figsize=(6, 3), facecolor="#1e293b")
+    ax = plt.axes()
+    ax.set_facecolor("#0f172a")
+
+    ax.plot(
+        range(len(sub_k)),
+        sub_k,
+        label="Stoch K",
+        color="#38bdf8",
+        linewidth=2,
+    )
+    ax.plot(
+        range(len(sub_d)),
+        sub_d,
+        label="Stoch D",
+        color="#f97316",
+        linewidth=1.5,
+    )
+
+    ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=1)
+    ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=1)
+
+    plt.title(title, color="#f8fafc", fontsize=10, fontweight="bold")
+    plt.legend(loc="upper left", facecolor="#1e293b", labelcolor="#f8fafc")
+    plt.tick_params(colors="#94a3b8", labelsize=8)
+    ax.spines["bottom"].set_color("#475569")
+    ax.spines["top"].set_color("#475569")
+    ax.spines["left"].set_color("#475569")
+    ax.spines["right"].set_color("#475569")
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=150, facecolor="#1e293b")
+    buf.seek(0)
+    plt.close()
+    return buf.getvalue()
+  except Exception as e:
+    print(f"Chart Gen Error: {e}")
+    return None
+
+
+def send_summary_report(chat_id):
+  """ฟังก์ชันตอบกลับเมื่อพิมพ์คำว่า sum"""
+  try:
+    df_4h = fetch_data(SYMBOL, period="60d", interval="4h")
+    df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
+    df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
+
+    caption = (
+        f"📊 *รายงานสรุปสถานะรายวัน - {ASSET_NAME}*\n"
+        f"📌 สถานะเรดาร์: Stage {bot_state['current_stage']}"
+        f" ({bot_state['target_direction']})\n"
+        f"• 4H  ➔ K: {bot_state['k_4h']:.2f} | D: {bot_state['d_4h']:.2f}\n"
+        f"• 1H  ➔ K: {bot_state['k_1h']:.2f} | D: {bot_state['d_1h']:.2f}\n"
+        f"• 15M ➔ K: {bot_state['k_15m']:.2f} | D: {bot_state['d_15m']:.2f}\n"
+        f"🕒 อัปเดตล่าสุด: {bot_state['last_check']}"
+    )
+
+    # ส่งข้อความสรุปก่อน
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    requests.post(
+        url,
+        json={
+            "chat_id": chat_id,
+            "text": caption,
+            "parse_mode": "Markdown",
+        },
+        timeout=10,
+    )
+
+    # ส่งรูปกราฟทีละ Timeframe ตามคำขอ
+    if df_4h is not None:
+      p4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
+      if p4:
+        send_telegram_photo(
+            chat_id, p4, "📈 กราฟ Stoch RSI [4H Timeframe]"
+        )
+
+    if df_1h is not None:
+      p1 = generate_stoch_chart(df_1h, "Stoch RSI - 1H Timeframe")
+      if p1:
+        send_telegram_photo(
+            chat_id, p1, "📈 กราฟ Stoch RSI [1H Timeframe]"
+        )
+
+    if df_15m is not None:
+      p15 = generate_stoch_chart(df_15m, "Stoch RSI - 15M Timeframe")
+      if p15:
+        send_telegram_photo(
+            chat_id, p15, "📈 กราฟ Stoch RSI [15M Timeframe]"
+        )
+
+  except Exception as e:
+    print(f"Summary Report Error: {e}")
 
 
 def calculate_stochastic_rsi(
@@ -167,16 +338,13 @@ def calculate_stochastic_rsi(
 ):
   if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
     return None, None
-
   delta = df["Close"].diff()
   gain = delta.where(delta > 0, 0).rolling(window=rsi_period).mean()
   loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
   rs = gain / loss
   rsi = 100 - (100 / (1 + rs))
-
   lowest_rsi = rsi.rolling(window=stoch_period).min()
   highest_rsi = rsi.rolling(window=stoch_period).max()
-
   stoch_rsi_raw = (rsi - lowest_rsi) / (highest_rsi - lowest_rsi) * 100
   k = stoch_rsi_raw.rolling(window=k_period).mean()
   d = k.rolling(window=d_period).mean()
@@ -190,7 +358,7 @@ def fetch_data(symbol, period, interval):
       data.columns = data.columns.droplevel(1)
     return data if data is not None and not data.empty else None
   except Exception as e:
-    print(f"[{datetime.now()}] Fetch Data Error ({interval}): {e}")
+    print(f"Fetch Data Error ({interval}): {e}")
     return None
 
 
@@ -225,7 +393,7 @@ def run_bot_loop():
               float(d_15m.iloc[-1]) if d_15m is not None else 0.0
           )
 
-        # STAGE 1: เช็ก 4H
+        # STAGE 1
         if bot_state["current_stage"] == 1:
           if bot_state["k_4h"] > STOCH_HIGH_THRESHOLD:
             bot_state["target_direction"] = "HIGH"
@@ -246,7 +414,7 @@ def run_bot_loop():
             send_telegram_notification(msg)
             bot_state["current_stage"] = 2
 
-        # STAGE 2: เช็ก 1H
+        # STAGE 2
         elif bot_state["current_stage"] == 2:
           if (
               bot_state["target_direction"] == "HIGH"
@@ -271,7 +439,7 @@ def run_bot_loop():
             send_telegram_notification(msg)
             bot_state["current_stage"] = 3
 
-        # STAGE 3: เช็ก 15M
+        # STAGE 3
         elif bot_state["current_stage"] == 3:
           if df_15m is not None and not df_15m.empty:
             k_15m, d_15m = calculate_stochastic_rsi(df_15m)
@@ -323,7 +491,7 @@ def run_bot_loop():
                 bot_state["stage3_prealert_sent"] = None
 
     except Exception as e:
-      print(f"[{datetime.now()}] Main Loop Error: {e}")
+      print(f"Main Loop Error: {e}")
 
     time.sleep(60)
 
