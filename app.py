@@ -17,8 +17,9 @@ ASSET_NAME = "ทองคำ (XAUUSD)"
 STOCH_HIGH_THRESHOLD = 80
 STOCH_LOW_THRESHOLD = 20
 
-TELEGRAM_BOT_TOKEN = "8890934674:AAH4Srm5b-QhKZ1t1aQjiE5U2Kpdnyrl6Og"
-TELEGRAM_CHAT_ID = "8303217156"
+# ดึง Token และ Chat ID จาก Environment Variables ของ Render (ปลอดภัย ไม่หลุดบน GitHub)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # ตัวแปรเก็บสถานะปัจจุบันของบอท สำหรับแสดงผลบน Dashboard
 bot_state = {
@@ -37,7 +38,7 @@ bot_state = {
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Dashboard ปรับหัวข้อและเครื่องหมาย K/D)
+# HTML TEMPLATE
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -46,7 +47,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zone Trigger XAUUSD</title>
-    <meta http-equiv="refresh" content="30"> <!-- รีเฟรชหน้าเว็บอัตโนมัติทุก 30 วินาที -->
+    <meta http-equiv="refresh" content="30">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
@@ -110,6 +111,9 @@ def home():
 
 
 def send_telegram_notification(message):
+  if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print(f"[{datetime.now()}] Telegram Token/Chat ID not set in environment.")
+    return False
   try:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
@@ -296,7 +300,4 @@ if __name__ == "__main__":
 
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
-
-
-
 
