@@ -48,7 +48,7 @@ bot_state = {
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (เพิ่มช่องแสดงรูปกราฟบนเว็บ)
+# HTML TEMPLATE (Responsive: แนวนอนบนคอม / แนวตั้งเต็มตาบนมือถือ)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -59,35 +59,45 @@ HTML_TEMPLATE = """
     <title>Zone Trigger XAUUSD</title>
     <meta http-equiv="refresh" content="30">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-        .container { max-width: 650px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-        h1 { font-size: 1.35rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
-        .subtitle { text-align: center; font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
-        .card { background: #334155; padding: 15px; border-radius: 12px; margin-bottom: 12px; }
-        .label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-        .value { font-size: 1.25rem; font-weight: bold; color: #f1f5f9; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 15px; }
+        .container { max-width: 1100px; margin: 0 auto; background: #1e293b; padding: 15px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; }
+        .subtitle { text-align: center; font-size: 0.8rem; color: #94a3b8; margin-bottom: 15px; }
+        .card { background: #334155; padding: 12px; border-radius: 12px; margin-bottom: 10px; }
+        .label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .value { font-size: 1.15rem; font-weight: bold; color: #f1f5f9; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
         .badge-stage1 { background: #eab308; color: #000; }
         .badge-stage2 { background: #f97316; color: #fff; }
         .badge-stage3 { background: #ef4444; color: #fff; }
-        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; margin-top: 6px; background: #1e293b; padding: 10px 12px; border-radius: 8px; }
-        .btn-container { text-align: center; margin-top: 15px; }
-        .btn { background-color: #0ea5e9; color: white; padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
+        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
+        
+        /* Responsive Grid: จอใหญ่เรียงแนวนอน 3 คอลัมน์ / มือถือปรับเป็นแนวตั้งอัตโนมัติ */
+        .charts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+        @media (max-width: 850px) {
+            .charts-grid { grid-template-columns: 1fr; } /* มือถือแสดงแนวตั้งเต็มจอ อ่านง่าย */
+        }
+
+        .chart-box { background: #1e293b; padding: 10px; border-radius: 10px; border: 1px solid #475569; text-align: center; }
+        .chart-title { font-size: 0.85rem; font-weight: bold; color: #38bdf8; margin-bottom: 6px; }
+        .chart-img { width: 100%; border-radius: 6px; height: auto; }
+
+        .btn-container { text-align: center; margin-top: 10px; }
+        .btn { background-color: #0ea5e9; color: white; padding: 10px 16px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
         .btn:hover { background-color: #0284c7; }
-        .alert-box { padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; text-align: center; }
+        .alert-box { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 0.8rem; text-align: center; }
         .alert-success { background-color: #065f46; color: #d1fae5; }
         .alert-error { background-color: #991b1b; color: #fee2e2; }
-        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85rem; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #475569; }
+        table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 0.8rem; }
+        th, td { padding: 6px; text-align: left; border-bottom: 1px solid #475569; }
         th { color: #38bdf8; }
-        .chart-img { width: 100%; border-radius: 8px; margin-top: 8px; border: 1px solid #475569; }
-        .status-footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 15px; }
+        .status-footer { text-align: center; font-size: 0.7rem; color: #64748b; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (พร้อม Telegram Command)</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 24/7 (Responsive Mobile-Friendly)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -103,30 +113,37 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="card">
-            <div class="label">ค่า Stochastic RSI (K & D)</div>
+            <div class="label">ค่า Stochastic RSI (K & D) & กราฟเรดาร์</div>
+            
             <div class="stoch-row">
-                <span>Timeframe <b>4H</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_4h) }}</b> {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_4h) }}</b></span>
+                <span><b>4H</b> ➔ K: {{ "%.2f"|format(state.k_4h) }} {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_4h) }}</span>
+                <span><b>1H</b> ➔ K: {{ "%.2f"|format(state.k_1h) }} {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_1h) }}</span>
+                <span><b>15M</b> ➔ K: {{ "%.2f"|format(state.k_15m) }} {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_15m) }}</span>
             </div>
-            {% if state.chart_4h %}
-                <img src="data:image/png;base64,{{ state.chart_4h }}" class="chart-img" alt="4H Chart">
-            {% endif %}
 
-            <div class="stoch-row" style="margin-top: 12px;">
-                <span>Timeframe <b>1H</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_1h) }}</b> {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_1h) }}</b></span>
-            </div>
-            {% if state.chart_1h %}
-                <img src="data:image/png;base64,{{ state.chart_1h }}" class="chart-img" alt="1H Chart">
-            {% endif %}
+            <!-- กราฟที่จะสลับเป็นแนวนอนบนคอม และแนวตั้งเต็มตาบนมือถืออัตโนมัติ -->
+            <div class="charts-grid">
+                {% if state.chart_4h %}
+                <div class="chart-box">
+                    <div class="chart-title">Timeframe 4H</div>
+                    <img src="data:image/png;base64,{{ state.chart_4h }}" class="chart-img" alt="4H Chart">
+                </div>
+                {% endif %}
 
-            <div class="stoch-row" style="margin-top: 12px;">
-                <span>Timeframe <b>15M</b></span>
-                <span>K: <b>{{ "%.2f"|format(state.k_15m) }}</b> {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: <b>{{ "%.2f"|format(state.d_15m) }}</b></span>
+                {% if state.chart_1h %}
+                <div class="chart-box">
+                    <div class="chart-title">Timeframe 1H</div>
+                    <img src="data:image/png;base64,{{ state.chart_1h }}" class="chart-img" alt="1H Chart">
+                </div>
+                {% endif %}
+
+                {% if state.chart_15m %}
+                <div class="chart-box">
+                    <div class="chart-title">Timeframe 15M</div>
+                    <img src="data:image/png;base64,{{ state.chart_15m }}" class="chart-img" alt="15M Chart">
+                </div>
+                {% endif %}
             </div>
-            {% if state.chart_15m %}
-                <img src="data:image/png;base64,{{ state.chart_15m }}" class="chart-img" alt="15M Chart">
-            {% endif %}
         </div>
 
         <div class="card">
@@ -142,12 +159,12 @@ HTML_TEMPLATE = """
                     {% endfor %}
                 </table>
             {% else %}
-                <div style="font-size: 0.85rem; color: #94a3b8; text-align: center; padding: 10px;">ยังไม่มีประวัติการแจ้งเตือนในรอบนี้</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; text-align: center; padding: 8px;">ยังไม่มีประวัติการแจ้งเตือนในรอบนี้</div>
             {% endif %}
         </div>
 
         <div class="card btn-container">
-            <div class="label" style="margin-bottom: 10px;">ทดสอบระบบส่ง Telegram</div>
+            <div class="label" style="margin-bottom: 8px;">ทดสอบระบบส่ง Telegram</div>
             <a href="{{ url_for('send_test') }}" class="btn">🔔 ส่งข้อความทดสอบเข้า Telegram</a>
         </div>
 
@@ -389,7 +406,6 @@ def run_bot_loop():
                 bot_state["k_1h"] = float(k_1h.iloc[-1]) if k_1h is not None else 0.0
                 bot_state["d_1h"] = float(d_1h.iloc[-1]) if d_1h is not None else 0.0
 
-                # อัปเดตรูปกราฟแสดงบนหน้าเว็บแบบสดๆ ทุกรอบลูป
                 raw_c4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
                 if raw_c4:
                     bot_state["chart_4h"] = base64.b64encode(raw_c4).decode("utf-8")
