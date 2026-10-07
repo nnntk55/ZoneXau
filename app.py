@@ -107,7 +107,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (แจ้งเตือนพร้อมรูปอัตโนมัติ)</div>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (Stage 3: 15M < 5 หรือ > 95)</div>
 
         {% if state.flash_msg %}
             <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -470,10 +470,10 @@ def run_bot_loop():
                 is_low_mode = (bot_state["active_direction"] == "LOW")
 
                 # ==========================================
-                # 4 STAGES LOGIC (พร้อมส่งรูปแนบตาม Timeframe)
+                # 4 STAGES LOGIC (Stage 3: 15M < 5 หรือ > 95)
                 # ==========================================
                 
-                # STAGE 1: 4H Condition
+                # STAGE 1: 4H Condition (< 45 สำหรับ Low หรือ > 55 สำหรับ High)
                 if bot_state["current_stage"] == 1:
                     cond_s1 = (bot_state["k_4h"] < 45) if is_low_mode else (bot_state["k_4h"] > 55)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
@@ -488,7 +488,7 @@ def run_bot_loop():
                     else:
                         bot_state["stage1_notified"] = False
 
-                # STAGE 2: 1H Condition
+                # STAGE 2: 1H Condition (< 20 สำหรับ Low หรือ > 80 สำหรับ High)
                 elif bot_state["current_stage"] == 2:
                     cond_s2 = (bot_state["k_1h"] < 20) if is_low_mode else (bot_state["k_1h"] > 80)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
@@ -506,10 +506,10 @@ def run_bot_loop():
                             bot_state["current_stage"] = 1
                             reset_notifications()
 
-                # STAGE 3: 15M Condition
+                # STAGE 3: 15M Condition (< 5 สำหรับ Low หรือ > 95 สำหรับ High)
                 elif bot_state["current_stage"] == 3:
-                    cond_s3 = (bot_state["k_15m"] < 20) if is_low_mode else (bot_state["k_15m"] > 80)
-                    zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
+                    cond_s3 = (bot_state["k_15m"] < 5) if is_low_mode else (bot_state["k_15m"] > 95)
+                    zone_name = "LOW ZONE (< 5)" if is_low_mode else "HIGH ZONE (> 95)"
 
                     if cond_s3:
                         if not bot_state["stage3_notified"]:
@@ -559,7 +559,7 @@ def run_bot_loop():
                         bot_state["current_stage"] = 1
                         reset_notifications()
                     else:
-                        if bot_state["k_15m"] >= 30 if is_low_mode else bot_state["k_15m"] <= 70:
+                        if bot_state["k_15m"] >= 15 if is_low_mode else bot_state["k_15m"] <= 85:
                             pass
 
         except Exception as e:
