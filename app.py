@@ -253,12 +253,15 @@ def send_test():
     return redirect(url_for("home"))
 
 
-@app.route("/telegram-webhook", methods=["POST"])
+@app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     global bot_state
+    if request.method == "GET":
+        return "Webhook is active!", 200
+        
     try:
-        data = request.get_json()
-        if "message" in data and "text" in data["message"]:
+        data = request.get_json(silent=True)
+        if data and "message" in data and "text" in data["message"]:
             text = data["message"]["text"].strip().lower()
             chat_id = data["message"]["chat"]["id"]
             
