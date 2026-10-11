@@ -15,43 +15,79 @@ import yfinance as yf
 matplotlib.use("Agg")
 
 # ==========================================
-# CONFIGURATION
+# CONFIGURATION & ASSETS DEFINITION
 # ==========================================
-SYMBOL = "GC=F"
-ASSET_NAME = "XAUUSD"
-
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-bot_state = {
-    "current_stage": 1,
-    "target_mode": "AUTO",  # AUTO, LOW_ONLY, HIGH_ONLY
-    "active_direction": "LOW",  # LOW (Buy) หรือ HIGH (Sell)
-    "last_check": "กำลังเริ่มทำงาน...",
-    "k_4h": 0.0,
-    "d_4h": 0.0,
-    "k_1h": 0.0,
-    "d_1h": 0.0,
-    "k_15m": 0.0,
-    "d_15m": 0.0,
-    "k_5m": 0.0,
-    "d_5m": 0.0,
-    "flash_msg": None,
-    "flash_type": None,
-    "signal_logs": [],
-    "chart_4h": None,
-    "chart_1h": None,
-    "chart_15m": None,
-    "chart_5m": None,
-    "stage1_notified": False,
-    "stage2_notified": False,
-    "stage3_notified": False,
+ASSETS = {
+    "xau": {
+        "symbol": "GC=F",
+        "name": "XAUUSD",
+        "state": {
+            "current_stage": 1,
+            "target_mode": "AUTO",
+            "active_direction": "LOW",
+            "last_check": "กำลังเริ่มทำงาน...",
+            "k_1w": 0.0, "d_1w": 0.0,
+            "k_1d": 0.0, "d_1d": 0.0,
+            "k_4h": 0.0, "d_4h": 0.0,
+            "k_1h": 0.0, "d_1h": 0.0,
+            "k_15m": 0.0, "d_15m": 0.0,
+            "k_5m": 0.0, "d_5m": 0.0,
+            "signal_logs": [],
+            "stage1_notified": False,
+            "stage2_notified": False,
+            "stage3_notified": False,
+        }
+    },
+    "us30": {
+        "symbol": "YM=F",
+        "name": "US30",
+        "state": {
+            "current_stage": 1,
+            "target_mode": "AUTO",
+            "active_direction": "LOW",
+            "last_check": "กำลังเริ่มทำงาน...",
+            "k_1w": 0.0, "d_1w": 0.0,
+            "k_1d": 0.0, "d_1d": 0.0,
+            "k_4h": 0.0, "d_4h": 0.0,
+            "k_1h": 0.0, "d_1h": 0.0,
+            "k_15m": 0.0, "d_15m": 0.0,
+            "k_5m": 0.0, "d_5m": 0.0,
+            "signal_logs": [],
+            "stage1_notified": False,
+            "stage2_notified": False,
+            "stage3_notified": False,
+        }
+    },
+    "oil": {
+        "symbol": "CL=F",
+        "name": "USOIL",
+        "state": {
+            "current_stage": 1,
+            "target_mode": "AUTO",
+            "active_direction": "LOW",
+            "last_check": "กำลังเริ่มทำงาน...",
+            "k_1w": 0.0, "d_1w": 0.0,
+            "k_1d": 0.0, "d_1d": 0.0,
+            "k_4h": 0.0, "d_4h": 0.0,
+            "k_1h": 0.0, "d_1h": 0.0,
+            "k_15m": 0.0, "d_15m": 0.0,
+            "k_5m": 0.0, "d_5m": 0.0,
+            "signal_logs": [],
+            "stage1_notified": False,
+            "stage2_notified": False,
+            "stage3_notified": False,
+        }
+    }
 }
 
+global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Responsive Mobile-Friendly)
+# HTML TEMPLATE (Responsive Dashboard)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -59,7 +95,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zone Trigger XAUUSD</title>
+    <title>Multi-Asset Zone Trigger Radar</title>
     <meta http-equiv="refresh" content="30">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 15px; }
@@ -76,17 +112,8 @@ HTML_TEMPLATE = """
         .badge-stage4 { background: #ef4444; color: #fff; }
         .badge-dir-low { background: #065f46; color: #d1fae5; }
         .badge-dir-high { background: #991b1b; color: #fee2e2; }
-        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
+        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
         
-        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; }
-        @media (max-width: 850px) {
-            .charts-grid { grid-template-columns: 1fr; }
-        }
-
-        .chart-box { background: #1e293b; padding: 10px; border-radius: 10px; border: 1px solid #475569; text-align: center; }
-        .chart-title { font-size: 0.85rem; font-weight: bold; color: #38bdf8; margin-bottom: 6px; }
-        .chart-img { width: 100%; border-radius: 6px; height: auto; }
-
         .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
         .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
         .btn:hover { background-color: #0284c7; }
@@ -106,104 +133,51 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>📊 Zone Trigger XAUUSD</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI ทองคำ 4 Stages (Stage 3: 15M < 5 หรือ > 95)</div>
+        <h1>📊 Multi-Asset Zone Trigger Radar</h1>
+        <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes (1W, 1D, 4H, 1H, 15M, 5M)</div>
 
-        {% if state.flash_msg %}
-            <div class="alert-box {% if state.flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
-                {{ state.flash_msg }}
+        {% if flash_msg %}
+            <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
+                {{ flash_msg }}
             </div>
         {% endif %}
 
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
-            <div class="card" style="flex: 1; margin-bottom: 0;">
-                <div class="label">สถานะเรดาร์ปัจจุบัน</div>
-                <div class="value" style="margin-top: 4px;">
-                    <span class="badge badge-stage{{ state.current_stage }}">Stage {{ state.current_stage }}</span>
-                </div>
-            </div>
-            <div class="card" style="flex: 1; margin-bottom: 0;">
-                <div class="label">โหมดทิศทางเป้าหมาย</div>
-                <div class="value" style="margin-top: 4px;">
-                    <span class="badge {% if state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                        {% if state.active_direction == 'LOW' %}🟢 โหมด LOW (Buy){% else %}🔴 โหมด HIGH (Sell){% endif %}
+        {% for key, asset in assets.items() %}
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 1rem; font-weight: bold; color: #38bdf8;">📌 {{ asset.name }} (คำสั่ง: {{ key }})</span>
+                <div>
+                    <span class="badge badge-stage{{ asset.state.current_stage }}">Stage {{ asset.state.current_stage }}</span>
+                    <span class="badge {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
                     </span>
-                    <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 5px;">({{ state.target_mode }})</span>
                 </div>
             </div>
-        </div>
 
-        <div class="card">
-            <div class="label">ค่า Stochastic RSI (K & D) & กราฟเรดาร์</div>
-            
             <div class="stoch-row">
-                <span><b>4H</b> ➔ K: {{ "%.2f"|format(state.k_4h) }} {% if state.k_4h > state.d_4h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_4h) }}</span>
-                <span><b>1H</b> ➔ K: {{ "%.2f"|format(state.k_1h) }} {% if state.k_1h > state.d_1h %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_1h) }}</span>
-                <span><b>15M</b> ➔ K: {{ "%.2f"|format(state.k_15m) }} {% if state.k_15m > state.d_15m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_15m) }}</span>
-                <span><b>5M</b> ➔ K: {{ "%.2f"|format(state.k_5m) }} {% if state.k_5m > state.d_5m %}&gt;{% else %}&lt;{% endif %} D: {{ "%.2f"|format(state.d_5m) }}</span>
+                <span><b>1W</b> ➔ K:{{ "%.1f"|format(asset.state.k_1w) }}|D:{{ "%.1f"|format(asset.state.d_1w) }}</span>
+                <span><b>1D</b> ➔ K:{{ "%.1f"|format(asset.state.k_1d) }}|D:{{ "%.1f"|format(asset.state.d_1d) }}</span>
+                <span><b>4H</b> ➔ K:{{ "%.1f"|format(asset.state.k_4h) }}|D:{{ "%.1f"|format(asset.state.d_4h) }}</span>
+                <span><b>1H</b> ➔ K:{{ "%.1f"|format(asset.state.k_1h) }}|D:{{ "%.1f"|format(asset.state.d_1h) }}</span>
+                <span><b>15M</b> ➔ K:{{ "%.1f"|format(asset.state.k_15m) }}|D:{{ "%.1f"|format(asset.state.d_15m) }}</span>
+                <span><b>5M</b> ➔ K:{{ "%.1f"|format(asset.state.k_5m) }}|D:{{ "%.1f"|format(asset.state.d_5m) }}</span>
             </div>
 
-            <div class="charts-grid">
-                {% if state.chart_4h %}
-                <div class="chart-box">
-                    <div class="chart-title">Timeframe 4H</div>
-                    <img src="data:image/png;base64,{{ state.chart_4h }}" class="chart-img" alt="4H Chart">
-                </div>
-                {% endif %}
-
-                {% if state.chart_1h %}
-                <div class="chart-box">
-                    <div class="chart-title">Timeframe 1H</div>
-                    <img src="data:image/png;base64,{{ state.chart_1h }}" class="chart-img" alt="1H Chart">
-                </div>
-                {% endif %}
-
-                {% if state.chart_15m %}
-                <div class="chart-box">
-                    <div class="chart-title">Timeframe 15M</div>
-                    <img src="data:image/png;base64,{{ state.chart_15m }}" class="chart-img" alt="15M Chart">
-                </div>
-                {% endif %}
-
-                {% if state.chart_5m %}
-                <div class="chart-box">
-                    <div class="chart-title">Timeframe 5M</div>
-                    <img src="data:image/png;base64,{{ state.chart_5m }}" class="chart-img" alt="5M Chart">
-                </div>
-                {% endif %}
+            <div style="margin-top: 8px; font-size: 0.75rem; color: #94a3b8; text-align: right;">
+                อัปเดต: {{ asset.state.last_check }}
             </div>
         </div>
+        {% endfor %}
 
         <div class="card">
-            <div class="label">ประวัติการแจ้งเตือนล่าสุด (Signal Log)</div>
-            {% if state.signal_logs %}
-                <table>
-                    <tr><th>เวลา</th><th>ข้อความแจ้งเตือน</th></tr>
-                    {% for log in state.signal_logs[:5] %}
-                    <tr>
-                        <td style="color: #94a3b8; white-space: nowrap;">{{ log.time }}</td>
-                        <td>{{ log.text }}</td>
-                    </tr>
-                    {% endfor %}
-                </table>
-            {% else %}
-                <div style="font-size: 0.8rem; color: #94a3b8; text-align: center; padding: 8px;">ยังไม่มีประวัติการแจ้งเตือนในรอบนี้</div>
-            {% endif %}
-        </div>
-
-        <div class="card">
-            <div class="label" style="margin-bottom: 8px;">ตั้งค่าโหมดสัญญาณพิเศษ & ทดสอบระบบ</div>
+            <div class="label" style="margin-bottom: 8px;">ทดสอบระบบ Telegram</div>
             <div class="btn-container">
-                <a href="{{ url_for('set_mode', mode='auto') }}" class="btn">🔄 โหมด Auto (สลับฝั่งอัตโนมัติ)</a>
-                <a href="{{ url_for('set_mode', mode='low') }}" class="btn btn-green">🟢 ล็อคหา LOW (Buy)</a>
-                <a href="{{ url_for('set_mode', mode='high') }}" class="btn btn-red">🔴 ล็อคหา HIGH (Sell)</a>
-                <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบ Telegram</a>
+                <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบส่งข้อความ</a>
             </div>
         </div>
 
         <div class="status-footer">
-            อัปเดตล่าสุด: {{ state.last_check }}<br>
-            (พิมพ์คำสั่งใน Telegram: <b>sum</b> = ดูสรุป, <b>low</b> = โหมดซื้อ, <b>high</b> = โหมดขาย, <b>auto</b> = โหมดออโต้)
+            พิมพ์เรียกดูรายงานใน Telegram: <b>xau</b> (ทองคำ), <b>us30</b> (ดาวโจนส์), <b>oil</b> (น้ำมันดิบ)
         </div>
     </div>
 </body>
@@ -213,49 +187,30 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def home():
-    return render_template_string(HTML_TEMPLATE, state=bot_state)
-
-
-@app.route("/set-mode/<mode>")
-def set_mode(mode):
-    global bot_state
-    if mode == "auto":
-        bot_state["target_mode"] = "AUTO"
-        bot_state["flash_msg"] = "🔄 เปลี่ยนเป็นโหมด Auto เรียบร้อย!"
-    elif mode == "low":
-        bot_state["target_mode"] = "LOW_ONLY"
-        bot_state["active_direction"] = "LOW"
-        bot_state["current_stage"] = 1
-        reset_notifications()
-        bot_state["flash_msg"] = "🟢 ล็อคเป้าหมายเฉพาะฝั่ง LOW (Buy) แล้ว!"
-    elif mode == "high":
-        bot_state["target_mode"] = "HIGH_ONLY"
-        bot_state["active_direction"] = "HIGH"
-        bot_state["current_stage"] = 1
-        reset_notifications()
-        bot_state["flash_msg"] = "🔴 ล็อคเป้าหมายเฉพาะฝั่ง HIGH (Sell) แล้ว!"
-    
-    bot_state["flash_type"] = "success"
-    return redirect(url_for("home"))
+    global global_flash
+    msg = global_flash["msg"]
+    ftype = global_flash["type"]
+    global_flash["msg"] = None  # Clear after read
+    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
 
 
 @app.route("/send-test")
 def send_test():
+    global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบการเชื่อมต่อสำเร็จ!* (ระบบพร้อมรับคำสั่ง `sum`, `low`, `high`, `auto` แล้ว)"
+        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (พร้อมรับคำสั่ง `xau`, `us30`, `oil` แล้ว)"
     )
     if success:
-        bot_state["flash_msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
-        bot_state["flash_type"] = "success"
+        global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
+        global_flash["type"] = "success"
     else:
-        bot_state["flash_msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
-        bot_state["flash_type"] = "error"
+        global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
+        global_flash["type"] = "error"
     return redirect(url_for("home"))
 
 
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
-    global bot_state
     if request.method == "GET":
         return "Webhook is active!", 200
         
@@ -265,23 +220,8 @@ def telegram_webhook():
             text = data["message"]["text"].strip().lower()
             chat_id = data["message"]["chat"]["id"]
             
-            if text == "sum":
-                threading.Thread(target=send_summary_report, args=(chat_id,)).start()
-            elif text == "low":
-                bot_state["target_mode"] = "LOW_ONLY"
-                bot_state["active_direction"] = "LOW"
-                bot_state["current_stage"] = 1
-                reset_notifications()
-                send_telegram_notification("🟢 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *LOW (Buy)*")
-            elif text == "high":
-                bot_state["target_mode"] = "HIGH_ONLY"
-                bot_state["active_direction"] = "HIGH"
-                bot_state["current_stage"] = 1
-                reset_notifications()
-                send_telegram_notification("🔴 สั่งการผ่าน Telegram: ล็อคเป้าหมายเฉพาะฝั่ง *HIGH (Sell)*")
-            elif text == "auto":
-                bot_state["target_mode"] = "AUTO"
-                send_telegram_notification("🔄 สั่งการผ่าน Telegram: เปลี่ยนเป็นโหมด *Auto* เรียบร้อย")
+            if text in ASSETS:
+                threading.Thread(target=send_summary_report, args=(text, chat_id)).start()
                 
         return "OK", 200
     except Exception as e:
@@ -289,46 +229,39 @@ def telegram_webhook():
         return "OK", 200
 
 
-def reset_notifications():
-    global bot_state
-    bot_state["stage1_notified"] = False
-    bot_state["stage2_notified"] = False
-    bot_state["stage3_notified"] = False
-
-
-def log_signal(text):
-    global bot_state
+def log_signal(asset_key, text):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    bot_state["signal_logs"].insert(0, {"time": timestamp, "text": text})
-    if len(bot_state["signal_logs"]) > 50:
-        bot_state["signal_logs"].pop()
+    ASSETS[asset_key]["state"]["signal_logs"].insert(0, {"time": timestamp, "text": text})
+    if len(ASSETS[asset_key]["state"]["signal_logs"]) > 50:
+        ASSETS[asset_key]["state"]["signal_logs"].pop()
 
 
-def send_telegram_notification(message):
+def send_telegram_notification(message, asset_key=None):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         res = requests.post(url, json=payload, timeout=10)
-        if res.status_code == 200:
-            log_signal(message)
+        if res.status_code == 200 and asset_key:
+            log_signal(asset_key, message)
         return res.status_code == 200
     except Exception as e:
         print(f"Telegram Error: {e}")
         return False
 
 
-def send_telegram_photo_with_caption(photo_bytes, caption):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not photo_bytes:
+def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_key=None):
+    target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat or not photo_bytes:
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("chart.png", photo_bytes, "image/png")}
-        data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
+        data = {"chat_id": target_chat, "caption": caption, "parse_mode": "Markdown"}
         res = requests.post(url, data=data, files=files, timeout=15)
-        if res.status_code == 200:
-            log_signal(caption)
+        if res.status_code == 200 and asset_key:
+            log_signal(asset_key, caption)
     except Exception as e:
         print(f"Telegram Photo Error: {e}")
 
@@ -373,41 +306,53 @@ def generate_stoch_chart(df, title):
         return None
 
 
-def send_summary_report(chat_id):
+def fetch_all_data(symbol):
+    return {
+        "1w": fetch_data(symbol, period="2y", interval="1wk"),
+        "1d": fetch_data(symbol, period="1y", interval="1d"),
+        "4h": fetch_data(symbol, period="60d", interval="4h"),
+        "1h": fetch_data(symbol, period="14d", interval="1h"),
+        "15m": fetch_data(symbol, period="5d", interval="15m"),
+        "5m": fetch_data(symbol, period="2d", interval="5m"),
+    }
+
+
+def send_summary_report(asset_key, chat_id):
     try:
-        df_4h = fetch_data(SYMBOL, period="60d", interval="4h")
-        df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
-        df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
-        df_5m = fetch_data(SYMBOL, period="2d", interval="5m")
+        asset = ASSETS[asset_key]
+        st = asset["state"]
+        dfs = fetch_all_data(asset["symbol"])
 
         caption = (
-            f"📊 *รายงานสรุปสถานะ - {ASSET_NAME}*\n"
-            f"📌 สถานะเรดาร์: Stage {bot_state['current_stage']} | โหมด: {bot_state['active_direction']} ({bot_state['target_mode']})\n"
-            f"• 4H  ➔ K: {bot_state['k_4h']:.2f} | D: {bot_state['d_4h']:.2f}\n"
-            f"• 1H  ➔ K: {bot_state['k_1h']:.2f} | D: {bot_state['d_1h']:.2f}\n"
-            f"• 15M ➔ K: {bot_state['k_15m']:.2f} | D: {bot_state['d_15m']:.2f}\n"
-            f"• 5M  ➔ K: {bot_state['k_5m']:.2f} | D: {bot_state['d_5m']:.2f}\n"
-            f"🕒 อัปเดตล่าสุด: {bot_state['last_check']}"
+            f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
+            f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
+            f"• 1W  ➔ K: {st['k_1w']:.2f} | D: {st['d_1w']:.2f}\n"
+            f"• 1D  ➔ K: {st['k_1d']:.2f} | D: {st['d_1d']:.2f}\n"
+            f"• 4H  ➔ K: {st['k_4h']:.2f} | D: {st['d_4h']:.2f}\n"
+            f"• 1H  ➔ K: {st['k_1h']:.2f} | D: {st['d_1h']:.2f}\n"
+            f"• 15M ➔ K: {st['k_15m']:.2f} | D: {st['d_15m']:.2f}\n"
+            f"• 5M  ➔ K: {st['k_5m']:.2f} | D: {st['d_5m']:.2f}\n"
+            f"🕒 อัปเดตล่าสุด: {st['last_check']}"
         )
 
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": chat_id, "text": caption, "parse_mode": "Markdown"}, timeout=10)
+        if dfs["4h"] is not None:
+            p4 = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H ({asset['name']})")
+            if p4:
+                send_telegram_photo_with_caption(p4, caption, chat_id=chat_id)
+            else:
+                send_telegram_notification(caption)
+        else:
+            send_telegram_notification(caption)
 
-        if df_4h is not None:
-            p4 = generate_stoch_chart(df_4h, "Stoch RSI - 4H")
-            if p4: send_telegram_photo_with_caption(p4, "📈 กราฟ [4H]")
-        if df_1h is not None:
-            p1 = generate_stoch_chart(df_1h, "Stoch RSI - 1H")
-            if p1: send_telegram_photo_with_caption(p1, "📈 กราฟ [1H]")
-        if df_15m is not None:
-            p15 = generate_stoch_chart(df_15m, "Stoch RSI - 15M")
-            if p15: send_telegram_photo_with_caption(p15, "📈 กราฟ [15M]")
-        if df_5m is not None:
-            p5 = generate_stoch_chart(df_5m, "Stoch RSI - 5M")
-            if p5: send_telegram_photo_with_caption(p5, "📈 กราฟ [5M]")
+        # ส่งกราฟอื่น ๆ ต่อเนื่อง
+        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
+            if dfs[tf_key] is not None:
+                img = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})")
+                if img:
+                    send_telegram_photo_with_caption(img, f"📈 กราฟ [{tf_name}]", chat_id=chat_id)
 
     except Exception as e:
-        print(f"Summary Report Error: {e}")
+        print(f"Summary Report Error ({asset_key}): {e}")
 
 
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
@@ -433,105 +378,102 @@ def fetch_data(symbol, period, interval):
             data.columns = data.columns.droplevel(1)
         return data if data is not None and not data.empty else None
     except Exception as e:
-        print(f"Fetch Data Error ({interval}): {e}")
+        print(f"Fetch Data Error ({symbol} - {interval}): {e}")
         return None
 
 
-def run_bot_loop():
-    global bot_state
-    print(f"[{datetime.now()}] 🚀 Zone Trigger XAUUSD Started...")
+def run_asset_radar(asset_key):
+    asset = ASSETS[asset_key]
+    st = asset["state"]
+    symbol = asset["symbol"]
+    name = asset["name"]
+
+    print(f"[{datetime.now()}] 🚀 Radar Started for {name} ({symbol})...")
 
     while True:
         try:
-            df_4h = fetch_data(SYMBOL, period="60d", interval="4h")
-            df_1h = fetch_data(SYMBOL, period="14d", interval="1h")
-            df_15m = fetch_data(SYMBOL, period="5d", interval="15m")
-            df_5m = fetch_data(SYMBOL, period="2d", interval="5m")
+            dfs = fetch_all_data(symbol)
+            if all(dfs[tf] is not None for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]):
+                ks, ds = {}, {}
+                for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
+                    k_val, d_val = calculate_stochastic_rsi(dfs[tf])
+                    ks[tf] = k_val
+                    ds[tf] = d_val
+                    st[f"k_{tf}"] = float(k_val.iloc[-1]) if k_val is not None else 0.0
+                    st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
 
-            if df_4h is not None and df_1h is not None and df_15m is not None and df_5m is not None:
-                k_4h, d_4h = calculate_stochastic_rsi(df_4h)
-                k_1h, d_1h = calculate_stochastic_rsi(df_1h)
-                k_15m, d_15m = calculate_stochastic_rsi(df_15m)
-                k_5m, d_5m = calculate_stochastic_rsi(df_5m)
-
-                bot_state["k_4h"] = float(k_4h.iloc[-1]) if k_4h is not None else 0.0
-                bot_state["d_4h"] = float(d_4h.iloc[-1]) if d_4h is not None else 0.0
-                bot_state["k_1h"] = float(k_1h.iloc[-1]) if k_1h is not None else 0.0
-                bot_state["d_1h"] = float(d_1h.iloc[-1]) if d_1h is not None else 0.0
-                bot_state["k_15m"] = float(k_15m.iloc[-1]) if k_15m is not None else 0.0
-                bot_state["d_15m"] = float(d_15m.iloc[-1]) if d_15m is not None else 0.0
-                bot_state["k_5m"] = float(k_5m.iloc[-1]) if k_5m is not None else 0.0
-                bot_state["d_5m"] = float(d_5m.iloc[-1]) if d_5m is not None else 0.0
-
-                bot_state["chart_4h"] = base64.b64encode(generate_stoch_chart(df_4h, "Stoch RSI - 4H")).decode("utf-8")
-                bot_state["chart_1h"] = base64.b64encode(generate_stoch_chart(df_1h, "Stoch RSI - 1H")).decode("utf-8")
-                bot_state["chart_15m"] = base64.b64encode(generate_stoch_chart(df_15m, "Stoch RSI - 15M")).decode("utf-8")
-                bot_state["chart_5m"] = base64.b64encode(generate_stoch_chart(df_5m, "Stoch RSI - 5M")).decode("utf-8")
-
-                bot_state["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                is_low_mode = (bot_state["active_direction"] == "LOW")
+                st["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                is_low_mode = (st["active_direction"] == "LOW")
 
                 # ==========================================
-                # 4 STAGES LOGIC (Stage 3: 15M < 5 หรือ > 95)
+                # 4 STAGES LOGIC (รวมรายงาน 1W & 1D ตอน Stage 1 ของ 4H)
                 # ==========================================
                 
                 # STAGE 1: 4H Condition (< 45 สำหรับ Low หรือ > 55 สำหรับ High)
-                if bot_state["current_stage"] == 1:
-                    cond_s1 = (bot_state["k_4h"] < 45) if is_low_mode else (bot_state["k_4h"] > 55)
+                if st["current_stage"] == 1:
+                    cond_s1 = (st["k_4h"] < 45) if is_low_mode else (st["k_4h"] > 55)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                     if cond_s1:
-                        if not bot_state["stage1_notified"]:
-                            img_bytes = generate_stoch_chart(df_4h, "Stoch RSI - 4H Timeframe")
-                            msg = f"📢 *[{ASSET_NAME} Stage 1]*: กราฟ 4 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_4h']:.2f})"
-                            send_telegram_photo_with_caption(img_bytes, msg)
-                            bot_state["stage1_notified"] = True
-                        bot_state["current_stage"] = 2
+                        if not st["stage1_notified"]:
+                            img_bytes = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})")
+                            msg = (
+                                f"📢 *[{name} Stage 1]*: กราฟ 4H เข้าสู่ {zone_name} แล้ว! (K = {st['k_4h']:.2f})\n"
+                                f"🌐 *ข้อมูลประกอบภาพใหญ่*:\n"
+                                f"• 1W ➔ K: {st['k_1w']:.2f} | D: {st['d_1w']:.2f}\n"
+                                f"• 1D ➔ K: {st['k_1d']:.2f} | D: {st['d_1d']:.2f}"
+                            )
+                            send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
+                            st["stage1_notified"] = True
+                        st["current_stage"] = 2
                     else:
-                        bot_state["stage1_notified"] = False
+                        st["stage1_notified"] = False
 
                 # STAGE 2: 1H Condition (< 20 สำหรับ Low หรือ > 80 สำหรับ High)
-                elif bot_state["current_stage"] == 2:
-                    cond_s2 = (bot_state["k_1h"] < 20) if is_low_mode else (bot_state["k_1h"] > 80)
+                elif st["current_stage"] == 2:
+                    cond_s2 = (st["k_1h"] < 20) if is_low_mode else (st["k_1h"] > 80)
                     zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                     if cond_s2:
-                        if not bot_state["stage2_notified"]:
-                            img_bytes = generate_stoch_chart(df_1h, "Stoch RSI - 1H Timeframe")
-                            msg = f"📢 *[{ASSET_NAME} Stage 2]*: กราฟ 1 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_1h']:.2f})"
-                            send_telegram_photo_with_caption(img_bytes, msg)
-                            bot_state["stage2_notified"] = True
-                        bot_state["current_stage"] = 3
+                        if not st["stage2_notified"]:
+                            img_bytes = generate_stoch_chart(dfs["1h"], f"Stoch RSI - 1H Timeframe ({name})")
+                            msg = f"📢 *[{name} Stage 2]*: กราฟ 1H เข้าสู่ {zone_name} แล้ว! (K = {st['k_1h']:.2f})"
+                            send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
+                            st["stage2_notified"] = True
+                        st["current_stage"] = 3
                     else:
-                        invalid_4h = (bot_state["k_4h"] >= 45) if is_low_mode else (bot_state["k_4h"] <= 55)
+                        invalid_4h = (st["k_4h"] >= 45) if is_low_mode else (st["k_4h"] <= 55)
                         if invalid_4h:
-                            bot_state["current_stage"] = 1
-                            reset_notifications()
+                            st["current_stage"] = 1
+                            st["stage1_notified"] = False
+                            st["stage2_notified"] = False
+                            st["stage3_notified"] = False
 
                 # STAGE 3: 15M Condition (< 5 สำหรับ Low หรือ > 95 สำหรับ High)
-                elif bot_state["current_stage"] == 3:
-                    cond_s3 = (bot_state["k_15m"] < 5) if is_low_mode else (bot_state["k_15m"] > 95)
+                elif st["current_stage"] == 3:
+                    cond_s3 = (st["k_15m"] < 5) if is_low_mode else (st["k_15m"] > 95)
                     zone_name = "LOW ZONE (< 5)" if is_low_mode else "HIGH ZONE (> 95)"
 
                     if cond_s3:
-                        if not bot_state["stage3_notified"]:
-                            img_bytes = generate_stoch_chart(df_15m, "Stoch RSI - 15M Timeframe")
-                            msg = f"📢 *[{ASSET_NAME} Stage 3]*: กราฟ 15 นาทีเข้าสู่ {zone_name} แล้ว! (K = {bot_state['k_15m']:.2f})"
-                            send_telegram_photo_with_caption(img_bytes, msg)
-                            bot_state["stage3_notified"] = True
-                        bot_state["current_stage"] = 4
+                        if not st["stage3_notified"]:
+                            img_bytes = generate_stoch_chart(dfs["15m"], f"Stoch RSI - 15M Timeframe ({name})")
+                            msg = f"📢 *[{name} Stage 3]*: กราฟ 15M เข้าสู่ {zone_name} แล้ว! (K = {st['k_15m']:.2f})"
+                            send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
+                            st["stage3_notified"] = True
+                        st["current_stage"] = 4
                     else:
-                        if bot_state["k_1h"] >= 30 if is_low_mode else bot_state["k_1h"] <= 70:
-                            bot_state["current_stage"] = 1
-                            reset_notifications()
+                        if st["k_1h"] >= 30 if is_low_mode else st["k_1h"] <= 70:
+                            st["current_stage"] = 1
+                            st["stage1_notified"] = False
+                            st["stage2_notified"] = False
+                            st["stage3_notified"] = False
 
                 # STAGE 4: 5M Trigger & Cross -> Reset and Switch/Wait
-                elif bot_state["current_stage"] == 4:
-                    latest_k = float(k_5m.iloc[-1])
-                    latest_d = float(d_5m.iloc[-1])
-                    prev_k = float(k_5m.iloc[-2])
-                    prev_d = float(d_5m.iloc[-2])
+                elif st["current_stage"] == 4:
+                    latest_k = float(ks["5m"].iloc[-1])
+                    latest_d = float(ds["5m"].iloc[-1])
+                    prev_k = float(ks["5m"].iloc[-2])
+                    prev_d = float(ds["5m"].iloc[-2])
 
                     if is_low_mode:
                         is_cross = (prev_k < prev_d) and (latest_k > latest_d)
@@ -543,37 +485,38 @@ def run_bot_loop():
                         action_text = "SELL (🔴 HIGH)"
 
                     if triggered:
-                        img_bytes = generate_stoch_chart(df_5m, "Stoch RSI - 5M Timeframe")
+                        img_bytes = generate_stoch_chart(dfs["5m"], f"Stoch RSI - 5M Timeframe ({name})")
                         msg = (
-                            f"🔥 *[{ASSET_NAME} Stage 4 Trigger]*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
+                            f"🔥 *[{name} Stage 4 Trigger]*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
                             f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) สำเร็จ!\n"
                             f"✅ ส่งสัญญาณเข้าเทรด **{action_text}**\n"
                             f"🛑 พักระบบและสลับไปรอสัญญาณฝั่งตรงข้ามรอบถัดไป"
                         )
-                        send_telegram_photo_with_caption(img_bytes, msg)
+                        send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
                         
-                        if bot_state["target_mode"] == "AUTO":
-                            bot_state["active_direction"] = "HIGH" if is_low_mode else "LOW"
-                        elif bot_state["target_mode"] == "LOW_ONLY":
-                            bot_state["active_direction"] = "LOW"
-                        elif bot_state["target_mode"] == "HIGH_ONLY":
-                            bot_state["active_direction"] = "HIGH"
+                        if st["target_mode"] == "AUTO":
+                            st["active_direction"] = "HIGH" if is_low_mode else "LOW"
+                        elif st["target_mode"] == "LOW_ONLY":
+                            st["active_direction"] = "LOW"
+                        elif st["target_mode"] == "HIGH_ONLY":
+                            st["active_direction"] = "HIGH"
 
-                        bot_state["current_stage"] = 1
-                        reset_notifications()
-                    else:
-                        if bot_state["k_15m"] >= 15 if is_low_mode else bot_state["k_15m"] <= 85:
-                            pass
+                        st["current_stage"] = 1
+                        st["stage1_notified"] = False
+                        st["stage2_notified"] = False
+                        st["stage3_notified"] = False
 
         except Exception as e:
-            print(f"Main Loop Error: {e}")
+            print(f"Radar Loop Error ({asset_key}): {e}")
 
         time.sleep(60)
 
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
-    bot_thread.start()
+    # รันเธรดเรดาร์แยกอิสระสำหรับแต่ละสินทรัพย์ (XAU, US30, OIL)
+    for key in ASSETS.keys():
+        t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
+        t.start()
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
