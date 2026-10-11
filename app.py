@@ -117,17 +117,10 @@ HTML_TEMPLATE = """
         .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
         .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
         .btn:hover { background-color: #0284c7; }
-        .btn-green { background-color: #10b981; }
-        .btn-green:hover { background-color: #059669; }
-        .btn-red { background-color: #ef4444; }
-        .btn-red:hover { background-color: #dc2626; }
 
         .alert-box { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 0.8rem; text-align: center; }
         .alert-success { background-color: #065f46; color: #d1fae5; }
         .alert-error { background-color: #991b1b; color: #fee2e2; }
-        table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 0.8rem; }
-        th, td { padding: 6px; text-align: left; border-bottom: 1px solid #475569; }
-        th { color: #38bdf8; }
         .status-footer { text-align: center; font-size: 0.7rem; color: #64748b; margin-top: 10px; }
     </style>
 </head>
@@ -177,7 +170,9 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            พิมพ์เรียกดูรายงานใน Telegram: <b>xau</b> (ทองคำ), <b>us30</b> (ดาวโจนส์), <b>oil</b> (น้ำมันดิบ)
+            คำสั่ง Telegram:<br>
+            • เรียกดูรายงาน: <b>xau</b>, <b>us30</b>, <b>oil</b><br>
+            • ล็อคฝั่ง: <b>xau high</b> / <b>xau low</b>, <b>us30 high</b> / <b>us30 low</b>, <b>oil high</b> / <b>oil low</b>
         </div>
     </div>
 </body>
@@ -190,7 +185,7 @@ def home():
     global global_flash
     msg = global_flash["msg"]
     ftype = global_flash["type"]
-    global_flash["msg"] = None  # Clear after read
+    global_flash["msg"] = None
     return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
 
 
@@ -198,7 +193,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (พร้อมรับคำสั่ง `xau`, `us30`, `oil` แล้ว)"
+        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (พร้อมรับคำสั่ง `xau`, `us30`, `oil` และคำสั่งระบุฝั่งแล้ว)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -220,8 +215,27 @@ def telegram_webhook():
             text = data["message"]["text"].strip().lower()
             chat_id = data["message"]["chat"]["id"]
             
+            # ตรวจสอบคำสั่งเรียกดูสรุป
             if text in ASSETS:
                 threading.Thread(target=send_summary_report, args=(text, chat_id)).start()
+            
+            # ตรวจสอบคำสั่งล็อคฝั่ง เช่น "xau high", "us30 low", "oil high" ฯลฯ
+            else:
+                parts = text.split()
+                if len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
+                    asset_key = parts[0]
+                    direction = parts[1].upper()
+                    st = ASSETS[asset_key]["state"]
+                    
+                    st["target_mode"] = f"{direction}_ONLY"
+                    st["active_direction"] = direction
+                    st["current_stage"] = 1
+                    st["stage1_notified"] = False
+                    st["stage2_notified"] = False
+                    st["stage3_notified"] = False
+                    
+                    msg = f"⚙️ *[{ASSETS[asset_key]['name']}]*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
+                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
                 
         return "OK", 200
     except Exception as e:
@@ -236,12 +250,13 @@ def log_signal(asset_key, text):
         ASSETS[asset_key]["state"]["signal_logs"].pop()
 
 
-def send_telegram_notification(message, asset_key=None):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+def send_telegram_notification(message, asset_key=None, chat_id=None):
+    target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat:
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+        payload = {"chat_id": target_chat, "text": message, "parse_mode": "Markdown"}
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 200 and asset_key:
             log_signal(asset_key, message)
@@ -323,6 +338,7 @@ def send_summary_report(asset_key, chat_id):
         st = asset["state"]
         dfs = fetch_all_data(asset["symbol"])
 
+        # 1. ส่งข้อความสรุปสถานะเป็นข้อความเดี่ยวก่อน
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
             f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
@@ -334,18 +350,10 @@ def send_summary_report(asset_key, chat_id):
             f"• 5M  ➔ K: {st['k_5m']:.2f} | D: {st['d_5m']:.2f}\n"
             f"🕒 อัปเดตล่าสุด: {st['last_check']}"
         )
+        send_telegram_notification(caption, chat_id=chat_id)
 
-        if dfs["4h"] is not None:
-            p4 = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H ({asset['name']})")
-            if p4:
-                send_telegram_photo_with_caption(p4, caption, chat_id=chat_id)
-            else:
-                send_telegram_notification(caption)
-        else:
-            send_telegram_notification(caption)
-
-        # ส่งกราฟอื่น ๆ ต่อเนื่อง
-        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
+        # 2. ทยอยส่งรูปกราฟเรียงตามลำดับ Timeframe ปกติ (1W -> 1D -> 4H -> 1H -> 15M -> 5M)
+        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
             if dfs[tf_key] is not None:
                 img = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})")
                 if img:
@@ -406,7 +414,7 @@ def run_asset_radar(asset_key):
                 is_low_mode = (st["active_direction"] == "LOW")
 
                 # ==========================================
-                # 4 STAGES LOGIC (รวมรายงาน 1W & 1D ตอน Stage 1 ของ 4H)
+                # 4 STAGES LOGIC (ตามลำดับ Timeframe ที่กำหนด)
                 # ==========================================
                 
                 # STAGE 1: 4H Condition (< 45 สำหรับ Low หรือ > 55 สำหรับ High)
@@ -513,7 +521,6 @@ def run_asset_radar(asset_key):
 
 
 if __name__ == "__main__":
-    # รันเธรดเรดาร์แยกอิสระสำหรับแต่ละสินทรัพย์ (XAU, US30, OIL)
     for key in ASSETS.keys():
         t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
         t.start()
