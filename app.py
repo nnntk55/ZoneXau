@@ -266,7 +266,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (อัปเดตหน้าแดชบอร์ดและมินิกราฟเรียบร้อย)"
+        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (ลบก้ามปูออกเรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -319,7 +319,8 @@ def telegram_webhook():
                     st["stage2_notified"] = False
                     st["stage3_notified"] = False
                     
-                    msg = f"⚙️ *[{ASSETS[asset_key]['name']}]*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
+                    # เอา [] ออกจากชื่อสินทรัพย์ตอนส่งแจ้งเตือนล็อคฝั่ง
+                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
                 
         return "OK", 200
