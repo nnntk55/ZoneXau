@@ -90,7 +90,7 @@ global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
 
 # ==========================================
-# HTML TEMPLATE (Responsive Dashboard)
+# HTML TEMPLATE (Responsive Dashboard - Highlighted Notes)
 # ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -105,7 +105,7 @@ HTML_TEMPLATE = """
         .container { max-width: 1100px; margin: 0 auto; background: #1e293b; padding: 15px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
         h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; }
         .subtitle { text-align: center; font-size: 0.8rem; color: #94a3b8; margin-bottom: 15px; }
-        .card { background: #334155; padding: 12px; border-radius: 12px; margin-bottom: 10px; }
+        .card { background: #334155; padding: 14px; border-radius: 12px; margin-bottom: 12px; }
         .label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
         .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
         .badge-stage1 { background: #eab308; color: #000; }
@@ -114,16 +114,25 @@ HTML_TEMPLATE = """
         .badge-stage4 { background: #ef4444; color: #fff; }
         .badge-dir-low { background: #065f46; color: #d1fae5; }
         .badge-dir-high { background: #991b1b; color: #fee2e2; }
-        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-top: 6px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
-        .note-box { margin-top: 8px; background: #1e293b; padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; color: #38bdf8; }
+        .stoch-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-top: 8px; background: #1e293b; padding: 8px 10px; border-radius: 8px; flex-wrap: wrap; gap: 5px; }
         
-        .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-        .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
-        .btn:hover { background-color: #0284c7; }
-
-        .alert-box { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 0.8rem; text-align: center; }
-        .alert-success { background-color: #065f46; color: #d1fae5; }
-        .alert-error { background-color: #991b1b; color: #fee2e2; }
+        /* ดีไซน์ช่องโน้ตแผนเทรดให้เด่นชัดและสะดุดตา */
+        .note-box { 
+            margin-top: 10px; 
+            background: linear-gradient(135deg, #1e293b, #0f172a); 
+            border-left: 4px solid #38bdf8; 
+            border-top: 1px solid #475569;
+            border-right: 1px solid #475569;
+            border-bottom: 1px solid #475569;
+            padding: 10px 12px; 
+            border-radius: 8px; 
+            font-size: 0.9rem; 
+            color: #38bdf8; 
+            font-weight: bold;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .note-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; font-weight: normal; }
+        
         .status-footer { text-align: center; font-size: 0.7rem; color: #64748b; margin-top: 10px; }
     </style>
 </head>
@@ -150,6 +159,12 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
+            <!-- ช่องโน้ตแผนเทรดเด่นชัด -->
+            <div class="note-box">
+                <div class="note-title">📝 โน้ตแผนเทรดเด่นประจำตัว</div>
+                <div>{{ asset.state.note }}</div>
+            </div>
+
             <div class="stoch-row">
                 <span><b>1W</b> ➔ K:{{ "%.1f"|format(asset.state.k_1w) }}|D:{{ "%.1f"|format(asset.state.d_1w) }}</span>
                 <span><b>1D</b> ➔ K:{{ "%.1f"|format(asset.state.k_1d) }}|D:{{ "%.1f"|format(asset.state.d_1d) }}</span>
@@ -157,10 +172,6 @@ HTML_TEMPLATE = """
                 <span><b>1H</b> ➔ K:{{ "%.1f"|format(asset.state.k_1h) }}|D:{{ "%.1f"|format(asset.state.d_1h) }}</span>
                 <span><b>15M</b> ➔ K:{{ "%.1f"|format(asset.state.k_15m) }}|D:{{ "%.1f"|format(asset.state.d_15m) }}</span>
                 <span><b>5M</b> ➔ K:{{ "%.1f"|format(asset.state.k_5m) }}|D:{{ "%.1f"|format(asset.state.d_5m) }}</span>
-            </div>
-
-            <div class="note-box">
-                📝 <b>โน้ตแผนเทรด:</b> {{ asset.state.note }}
             </div>
 
             <div style="margin-top: 6px; font-size: 0.75rem; color: #94a3b8; text-align: right;">
@@ -202,15 +213,10 @@ def telegram_webhook():
             text_lower = text.lower()
             chat_id = data["message"]["chat"]["id"]
             
-            # 1. คำสั่งดูสรุปทั้งหมด (sum)
             if text_lower == "sum":
                 threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
-
-            # 2. คำสั่งดูรายงานรายตัว (xau, us30, oil)
             elif text_lower in ASSETS:
                 threading.Thread(target=send_summary_report, args=(text_lower, chat_id)).start()
-            
-            # 3. คำสั่งบันทึกโน้ต (notexau, noteus30, noteoil)
             elif text_lower.startswith("notexau "):
                 note_content = text[8:].strip()
                 ASSETS["xau"]["state"]["note"] = note_content
@@ -223,8 +229,6 @@ def telegram_webhook():
                 note_content = text[8:].strip()
                 ASSETS["oil"]["state"]["note"] = note_content
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
-
-            # 4. คำสั่งล็อคฝั่ง (เช่น xau high, us30 low)
             else:
                 parts = text_lower.split()
                 if len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
@@ -343,7 +347,6 @@ def send_summary_report(asset_key, chat_id):
         st = asset["state"]
         dfs = fetch_all_data(asset["symbol"])
 
-        # เอาบรรทัดตัวเลข Stoch ทั้งหมด และเวลาอัปเดตล่าสุดออก เหลือแค่หัวข้อ สถานะเรดาร์ และโน้ตแผนเทรด
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
             f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
@@ -448,7 +451,7 @@ def run_asset_radar(asset_key):
                     if cond_s1:
                         if not st["stage1_notified"]:
                             img_bytes = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})")
-                            desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
+                            desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะช้อนซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
                             msg = f"📢 *{name} Stage 1*: {desc} (K = {st['k_4h']:.2f})"
                             send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
                             st["stage1_notified"] = True
