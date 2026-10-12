@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import io
 import os
 import threading
@@ -30,7 +30,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "trade_note": "ยังไม่มีบันทึกแผน",
+            "note": "ยังไม่มีบันทึกแผน",
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -53,7 +53,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "trade_note": "ยังไม่มีบันทึกแผน",
+            "note": "ยังไม่มีบันทึกแผน",
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -76,7 +76,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "trade_note": "ยังไม่มีบันทึกแผน",
+            "note": "ยังไม่มีบันทึกแผน",
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -111,7 +111,7 @@ HTML_TEMPLATE = """
         .container { max-width: 1200px; margin: 0 auto; background: #1e293b; padding: 15px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
         h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; }
         .subtitle { text-align: center; font-size: 0.8rem; color: #94a3b8; margin-bottom: 15px; }
-        .card { background: #334155; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
+        .card { background: #334155; padding: 14px; border-radius: 12px; margin-bottom: 12px; }
         .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
         .badge-stage1 { background: #eab308; color: #000; }
         .badge-stage2 { background: #f97316; color: #fff; }
@@ -120,7 +120,23 @@ HTML_TEMPLATE = """
         .badge-dir-low { background: #065f46; color: #d1fae5; }
         .badge-dir-high { background: #991b1b; color: #fee2e2; }
         
-        .tf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 8px; }
+        .note-box { 
+            margin-top: 10px; 
+            background: linear-gradient(135deg, #1e293b, #0f172a); 
+            border-left: 4px solid #38bdf8; 
+            border-top: 1px solid #475569;
+            border-right: 1px solid #475569;
+            border-bottom: 1px solid #475569;
+            padding: 10px 12px; 
+            border-radius: 8px; 
+            font-size: 0.9rem; 
+            color: #ffffff; 
+            font-weight: bold;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .note-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; font-weight: normal; }
+
+        .tf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 10px; }
         @media (max-width: 900px) {
             .tf-grid { grid-template-columns: repeat(3, 1fr); }
         }
@@ -165,8 +181,10 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <div style="font-size: 0.8rem; color: #ffffff; margin-bottom: 8px; background: #1e293b; padding: 6px 10px; border-radius: 6px;">
-                📝 <b>โน้ตแผนการเทรด:</b> {{ asset.state.trade_note }}
+            <!-- โน้ตแผนการเทรด -->
+            <div class="note-box">
+                <div class="note-title">📝 โน้ตแผนการเทรด</div>
+                <div>{{ asset.state.note }}</div>
             </div>
 
             <div class="tf-grid">
@@ -227,7 +245,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            คำสั่ง Telegram: <b>xau</b>, <b>us30</b>, <b>oil</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>xau note [ข้อความ]</b>
+            คำสั่ง Telegram: <b>xau</b>, <b>us30</b>, <b>oil</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>, <b>noteus30 [ข้อความ]</b>, <b>noteoil [ข้อความ]</b>
         </div>
     </div>
 </body>
@@ -271,16 +289,22 @@ def telegram_webhook():
             text_lower = text.lower()
             chat_id = data["message"]["chat"]["id"]
             
-            if text_lower in ASSETS:
+            if text_lower == "sum":
+                threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
+            elif text_lower in ASSETS:
                 threading.Thread(target=send_summary_report, args=(text_lower, chat_id)).start()
-            elif " note " in text_lower:
-                parts = text.split(" note ", 1)
-                asset_key = parts[0].strip().lower()
-                note_text = parts[1].strip()
-                if asset_key in ASSETS:
-                    ASSETS[asset_key]["state"]["trade_note"] = note_text
-                    msg = f"📝 *[{ASSETS[asset_key]['name']}]*: บันทึกโน้ตแผนการเทรดเรียบร้อย: _{note_text}_"
-                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
+            elif text_lower.startswith("notexau "):
+                note_content = text[8:].strip()
+                ASSETS["xau"]["state"]["note"] = note_content
+                send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
+            elif text_lower.startswith("noteus30 "):
+                note_content = text[9:].strip()
+                ASSETS["us30"]["state"]["note"] = note_content
+                send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us30", chat_id=chat_id)
+            elif text_lower.startswith("noteoil "):
+                note_content = text[8:].strip()
+                ASSETS["oil"]["state"]["note"] = note_content
+                send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
             else:
                 parts = text_lower.split()
                 if len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
@@ -305,7 +329,7 @@ def telegram_webhook():
 
 
 def log_signal(asset_key, text):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
     ASSETS[asset_key]["state"]["signal_logs"].insert(0, {"time": timestamp, "text": text})
     if len(ASSETS[asset_key]["state"]["signal_logs"]) > 50:
         ASSETS[asset_key]["state"]["signal_logs"].pop()
@@ -405,7 +429,7 @@ def send_summary_report(asset_key, chat_id):
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
             f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
-            f"📝 *โน้ตแผนการเทรด:* {st['trade_note']}"
+            f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id)
 
@@ -417,6 +441,12 @@ def send_summary_report(asset_key, chat_id):
 
     except Exception as e:
         print(f"Summary Report Error ({asset_key}): {e}")
+
+
+def send_all_summary_report(chat_id):
+    for key in ASSETS.keys():
+        send_summary_report(key, chat_id)
+        time.sleep(1)
 
 
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
@@ -465,10 +495,9 @@ def run_asset_radar(asset_key):
                     ds[tf] = d_val
                     st[f"k_{tf}"] = float(k_val.iloc[-1]) if k_val is not None else 0.0
                     st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
-                    # สร้างมินิกราฟอัปเดตลงแดชบอร์ด
                     st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
 
-                st["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
                 is_low_mode = (st["active_direction"] == "LOW")
 
                 # ==========================================
@@ -483,12 +512,8 @@ def run_asset_radar(asset_key):
                     if cond_s1:
                         if not st["stage1_notified"]:
                             img_b64 = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})", mini=False)
-                            msg = (
-                                f"📢 *[{name} Stage 1]*: กราฟ 4H เข้าสู่ {zone_name} แล้ว! (K = {st['k_4h']:.2f})\n"
-                                f"🌐 *ข้อมูลประกอบภาพใหญ่*:\n"
-                                f"• 1W ➔ K: {st['k_1w']:.2f} | D: {st['d_1w']:.2f}\n"
-                                f"• 1D ➔ K: {st['k_1d']:.2f} | D: {st['d_1d']:.2f}"
-                            )
+                            desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะช้อนซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
+                            msg = f"📢 *{name} Stage 1*: {desc} (K = {st['k_4h']:.2f})"
                             if img_b64:
                                 send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                             st["stage1_notified"] = True
@@ -502,7 +527,7 @@ def run_asset_radar(asset_key):
                     if cond_s2:
                         if not st["stage2_notified"]:
                             img_b64 = generate_stoch_chart(dfs["1h"], f"Stoch RSI - 1H Timeframe ({name})", mini=False)
-                            msg = f"📢 *[{name} Stage 2]*: กราฟ 1H เข้าสู่ {zone_name} แล้ว! (K = {st['k_1h']:.2f})"
+                            msg = f"📢 *{name} Stage 2*: กราฟ 1 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {st['k_1h']:.2f})"
                             if img_b64:
                                 send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                             st["stage2_notified"] = True
@@ -516,7 +541,7 @@ def run_asset_radar(asset_key):
                     if cond_s3:
                         if not st["stage3_notified"]:
                             img_b64 = generate_stoch_chart(dfs["15m"], f"Stoch RSI - 15M Timeframe ({name})", mini=False)
-                            msg = f"📢 *[{name} Stage 3]*: กราฟ 15M เข้าสู่ {zone_name} แล้ว! (K = {st['k_15m']:.2f})"
+                            msg = f"📢 *{name} Stage 3*: กราฟ 15 นาทีเข้าสู่ {zone_name} ลึกพิเศษแล้ว! (K = {st['k_15m']:.2f})"
                             if img_b64:
                                 send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                             st["stage3_notified"] = True
@@ -541,7 +566,7 @@ def run_asset_radar(asset_key):
                     if triggered:
                         img_b64 = generate_stoch_chart(dfs["5m"], f"Stoch RSI - 5M Timeframe ({name})", mini=False)
                         msg = (
-                            f"🔥 *[{name} Stage 4 Trigger]*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
+                            f"🔥 *{name} Stage 4 Trigger*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
                             f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) สำเร็จ!\n"
                             f"✅ ส่งสัญญาณเข้าเทรด **{action_text}**\n"
                             f"🛑 พักระบบและสลับไปรอสัญญาณฝั่งตรงข้ามรอบถัดไป"
