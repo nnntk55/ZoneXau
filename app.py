@@ -448,7 +448,7 @@ def run_asset_radar(asset_key):
                     if cond_s1:
                         if not st["stage1_notified"]:
                             img_bytes = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})")
-                            desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะช้อนซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
+                            desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
                             msg = f"📢 *{name} Stage 1*: {desc} (K = {st['k_4h']:.2f})"
                             send_telegram_photo_with_caption(img_bytes, msg, asset_key=asset_key)
                             st["stage1_notified"] = True
