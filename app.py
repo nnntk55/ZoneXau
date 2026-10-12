@@ -343,17 +343,11 @@ def send_summary_report(asset_key, chat_id):
         st = asset["state"]
         dfs = fetch_all_data(asset["symbol"])
 
+        # เอาบรรทัดตัวเลข Stoch ทั้งหมด และเวลาอัปเดตล่าสุดออก เหลือแค่หัวข้อ สถานะเรดาร์ และโน้ตแผนเทรด
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
             f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
-            f"📝 โน้ตแผนเทรด: {st['note']}\n"
-            f"• 1W  ➔ K: {st['k_1w']:.2f} | D: {st['d_1w']:.2f}\n"
-            f"• 1D  ➔ K: {st['k_1d']:.2f} | D: {st['d_1d']:.2f}\n"
-            f"• 4H  ➔ K: {st['k_4h']:.2f} | D: {st['d_4h']:.2f}\n"
-            f"• 1H  ➔ K: {st['k_1h']:.2f} | D: {st['d_1h']:.2f}\n"
-            f"• 15M ➔ K: {st['k_15m']:.2f} | D: {st['d_15m']:.2f}\n"
-            f"• 5M  ➔ K: {st['k_5m']:.2f} | D: {st['d_5m']:.2f}\n"
-            f"🕒 อัปเดตล่าสุด: {st['last_check']}"
+            f"📝 โน้ตแผนเทรด: {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id)
 
@@ -379,7 +373,6 @@ def daily_scheduler():
         now_utc = datetime.now(timezone.utc)
         now_th = now_utc.astimezone(timezone(timedelta(hours=7)))
         
-        # ถ้าเวลา 08:00 น. (นาทีที่ 0) ให้ส่งรายงาน
         if now_th.hour == 8 and now_th.minute == 0:
             print(f"[{now_th}] ⏰ ส่งรายงานสรุปอัตโนมัติประจำวัน...")
             try:
@@ -388,7 +381,7 @@ def daily_scheduler():
                     time.sleep(2)
             except Exception as e:
                 print(f"Daily Scheduler Error: {e}")
-            time.sleep(60) # หน่วงเวลาไม่ให้ส่งซ้ำในนาทีเดียวกัน
+            time.sleep(60)
         else:
             time.sleep(30)
 
@@ -444,7 +437,7 @@ def run_asset_radar(asset_key):
                 is_low_mode = (st["active_direction"] == "LOW")
 
                 # ==========================================
-                # 4 STAGES LOGIC (พร้อมคำบรรยายอัปเดตใหม่)
+                # 4 STAGES LOGIC
                 # ==========================================
                 
                 # STAGE 1: 4H Condition
@@ -532,12 +525,10 @@ def run_asset_radar(asset_key):
 
 
 if __name__ == "__main__":
-    # เริ่มต้นเธรดเรดาร์ของแต่ละสินทรัพย์
     for key in ASSETS.keys():
         t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
         t.start()
 
-    # เริ่มต้นเธรดสำหรับส่งรายงานอัตโนมัติทุก 8 โมงเช้า
     scheduler_thread = threading.Thread(target=daily_scheduler, daemon=True)
     scheduler_thread.start()
 
