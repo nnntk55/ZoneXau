@@ -1,9 +1,10 @@
-from datetime import datetime, timezone, timedelta
+From datetime import datetime, timezone, timedelta
 import io
 import os
 import threading
 import time
 import base64
+import json
 from flask import Flask, redirect, render_template_string, request, url_for
 import matplotlib
 import matplotlib.pyplot as plt
@@ -19,6 +20,27 @@ matplotlib.use("Agg")
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+NOTE_FILE = "trade_notes.json"
+
+def load_notes_from_file():
+    if os.path.exists(NOTE_FILE):
+        try:
+            with open(NOTE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Load Notes Error: {e}")
+    return {}
+
+def save_note_to_file(asset_key, note_text):
+    notes = load_notes_from_file()
+    notes[asset_key] = note_text
+    try:
+        with open(NOTE_FILE, "w", encoding="utf-8") as f:
+            json.dump(notes, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Save Notes Error: {e}")
+
+saved_notes = load_notes_from_file()
 
 ASSETS = {
     "xau": {
@@ -30,7 +52,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": "ยังไม่มีบันทึกแผน",
+            "note": saved_notes.get("xau", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -53,7 +75,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": "ยังไม่มีบันทึกแผน",
+            "note": saved_notes.get("us30", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -76,7 +98,7 @@ ASSETS = {
             "target_mode": "AUTO",
             "active_direction": "LOW",
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": "ยังไม่มีบันทึกแผน",
+            "note": saved_notes.get("oil", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -245,7 +267,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            คำสั่ง Telegram: <b>xau</b>, <b>us30</b>, <b>oil</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>, <b>noteus30 [ข้อความ]</b>, <b>noteoil [ข้อความ]</b>
+            คำสั่ง Telegram: <b>sum</b> (สรุปทุกตัว), <b>xau</b>, <b>us30</b>, <b>oil</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>, <b>noteus30 [ข้อความ]</b>, <b>noteoil [ข้อความ]</b>
         </div>
     </div>
 </body>
@@ -266,7 +288,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบ Multi-Asset สำเร็จ!* (ลบก้ามปูออกเรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (คำสั่ง sum จะส่งเฉพาะข้อความสรุปโดยไม่ส่งรูปกราฟแล้ว)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -292,18 +314,21 @@ def telegram_webhook():
             if text_lower == "sum":
                 threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
             elif text_lower in ASSETS:
-                threading.Thread(target=send_summary_report, args=(text_lower, chat_id)).start()
+                threading.Thread(target=send_single_summary_text_only, args=(text_lower, chat_id)).start()
             elif text_lower.startswith("notexau "):
                 note_content = text[8:].strip()
                 ASSETS["xau"]["state"]["note"] = note_content
+                save_note_to_file("xau", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
             elif text_lower.startswith("noteus30 "):
                 note_content = text[9:].strip()
                 ASSETS["us30"]["state"]["note"] = note_content
+                save_note_to_file("us30", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us30", chat_id=chat_id)
             elif text_lower.startswith("noteoil "):
                 note_content = text[8:].strip()
                 ASSETS["oil"]["state"]["note"] = note_content
+                save_note_to_file("oil", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
             else:
                 parts = text_lower.split()
@@ -319,7 +344,6 @@ def telegram_webhook():
                     st["stage2_notified"] = False
                     st["stage3_notified"] = False
                     
-                    # เอา [] ออกจากชื่อสินทรัพย์ตอนส่งแจ้งเตือนล็อคฝั่ง
                     msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
                 
@@ -421,33 +445,30 @@ def fetch_all_data(symbol):
     }
 
 
-def send_summary_report(asset_key, chat_id):
+def send_single_summary_text_only(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
         st = asset["state"]
-        dfs = fetch_all_data(asset["symbol"])
-
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
             f"📌 สถานะเรดาร์: Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
-        send_telegram_notification(caption, chat_id=chat_id)
-
-        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
-            if dfs[tf_key] is not None:
-                img_b64 = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})", mini=False)
-                if img_b64:
-                    send_telegram_photo_with_caption(base64.b64decode(img_b64), f"📈 กราฟ [{tf_name}]", chat_id=chat_id)
-
+        send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
     except Exception as e:
-        print(f"Summary Report Error ({asset_key}): {e}")
+        print(f"Single Summary Error ({asset_key}): {e}")
+
+
+def send_summary_report(asset_key, chat_id):
+    # ฟังก์ชันเดิมสำหรับกรณีอยากดูแบบมีรูป (ถ้าใช้เรียกตัวอื่น)
+    send_single_summary_text_only(asset_key, chat_id)
 
 
 def send_all_summary_report(chat_id):
+    # ส่งเฉพาะข้อความสรุปสถานะของทุกคู่เงินแบบไม่มีรูปภาพ
     for key in ASSETS.keys():
-        send_summary_report(key, chat_id)
-        time.sleep(1)
+        send_single_summary_text_only(key, chat_id)
+        time.sleep(0.5)
 
 
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
