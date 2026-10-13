@@ -1,4 +1,4 @@
-From datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta
 import io
 import os
 import threading
@@ -288,7 +288,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (คำสั่ง sum จะส่งเฉพาะข้อความสรุปโดยไม่ส่งรูปกราฟแล้ว)"
+        "✅ *ทดสอบระบบสำเร็จ!* (Syntax แก้ไขเรียบร้อย พร้อมใช้งาน)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -460,12 +460,10 @@ def send_single_summary_text_only(asset_key, chat_id):
 
 
 def send_summary_report(asset_key, chat_id):
-    # ฟังก์ชันเดิมสำหรับกรณีอยากดูแบบมีรูป (ถ้าใช้เรียกตัวอื่น)
     send_single_summary_text_only(asset_key, chat_id)
 
 
 def send_all_summary_report(chat_id):
-    # ส่งเฉพาะข้อความสรุปสถานะของทุกคู่เงินแบบไม่มีรูปภาพ
     for key in ASSETS.keys():
         send_single_summary_text_only(key, chat_id)
         time.sleep(0.5)
