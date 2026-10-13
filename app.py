@@ -302,7 +302,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (เพิ่มฟังก์ชันติดตามเฉพาะ Timeframe เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไข Syntax Error เรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -346,7 +346,6 @@ def telegram_webhook():
                 ASSETS["oil"]["state"]["note"] = note_content
                 save_note_to_file("oil", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
-            # ตรวจจับคำสั่งติดตามเฉพาะ Timeframe เช่น "xau 5m high", "oil 1h low"
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
                 asset_key = parts[0]
                 tf = parts[1]
@@ -360,7 +359,6 @@ def telegram_webhook():
                 
                 msg = f"🎯 *{ASSETS[asset_key]['name']}*: ตั้งค่าติดตามพิเศษ Timeframe *{tf.upper()}* ฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
-            # ตรวจจับคำสั่งล็อคฝั่งปกติ เช่น "xau high", "us30 low"
             elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
                 asset_key = parts[0]
                 direction = parts[1].upper()
@@ -470,4 +468,214 @@ def fetch_all_data(symbol):
     return {
         "1w": fetch_data(symbol, period="2y", interval="1wk"),
         "1d": fetch_data(symbol, period="1y", interval="1d"),
-        "4h": fetch_data(symbol, period="60
+        "4h": fetch_data(symbol, period="60d", interval="4h"),
+        "1h": fetch_data(symbol, period="14d", interval="1h"),
+        "15m": fetch_data(symbol, period="5d", interval="15m"),
+        "5m": fetch_data(symbol, period="2d", interval="5m"),
+    }
+
+
+def send_single_summary_text_only(asset_key, chat_id):
+    try:
+        asset = ASSETS[asset_key]
+        st = asset["state"]
+        
+        if st["custom_mode"]:
+            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
+        else:
+            mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
+
+        caption = (
+            f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
+            f"📌 สถานะเรดาร์: {mode_desc}\n"
+            f"📝 *โน้ตแผนการเทรด:* {st['note']}"
+        )
+        send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
+    except Exception as e:
+        print(f"Single Summary Error ({asset_key}): {e}")
+
+
+def send_summary_report(asset_key, chat_id):
+    send_single_summary_text_only(asset_key, chat_id)
+
+
+def send_all_summary_report(chat_id):
+    for key in ASSETS.keys():
+        send_single_summary_text_only(key, chat_id)
+        time.sleep(0.5)
+
+
+def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
+    if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
+        return None, None
+    delta = df["Close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(window=rsi_period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    lowest_rsi = rsi.rolling(window=stoch_period).min()
+    highest_rsi = rsi.rolling(window=stoch_period).max()
+    stoch_rsi_raw = (rsi - lowest_rsi) / (highest_rsi - lowest_rsi) * 100
+    k = stoch_rsi_raw.rolling(window=k_period).mean()
+    d = k.rolling(window=d_period).mean()
+    return k, d
+
+
+def fetch_data(symbol, period, interval):
+    try:
+        data = yf.download(symbol, period=period, interval=interval, progress=False)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.droplevel(1)
+        return data if data is not None and not data.empty else None
+    except Exception as e:
+        print(f"Fetch Data Error ({symbol} - {interval}): {e}")
+        return None
+
+
+def run_asset_radar(asset_key):
+    asset = ASSETS[asset_key]
+    st = asset["state"]
+    symbol = asset["symbol"]
+    name = asset["name"]
+
+    print(f"[{datetime.now()}] 🚀 Radar Started for {name} ({symbol})...")
+
+    while True:
+        try:
+            dfs = fetch_all_data(symbol)
+            if all(dfs[tf] is not None for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]):
+                ks, ds = {}, {}
+                for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
+                    k_val, d_val = calculate_stochastic_rsi(dfs[tf])
+                    ks[tf] = k_val
+                    ds[tf] = d_val
+                    st[f"k_{tf}"] = float(k_val.iloc[-1]) if k_val is not None else 0.0
+                    st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
+                    st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
+
+                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+
+                if st["custom_mode"]:
+                    target_tf = st["custom_tf"]
+                    target_dir = st["custom_dir"]
+                    k_target = st[f"k_{target_tf}"]
+                    
+                    is_hit = False
+                    if target_dir == "LOW" and k_target < 20:
+                        is_hit = True
+                    elif target_dir == "HIGH" and k_target > 80:
+                        is_hit = True
+
+                    if is_hit:
+                        img_b64 = generate_stoch_chart(dfs[target_tf], f"Stoch RSI - {target_tf.upper()} ({name})", mini=False)
+                        msg = (
+                            f"🎯 *{name} Custom Alert*:\n"
+                            f"Timeframe *{target_tf.upper()}* ถึงจุดหมายฝั่ง *{target_dir}* แล้ว!\n"
+                            f"K = {k_target:.2f}\n"
+                            f"✅ ส่งสัญญาณแจ้งเตือนสำเร็จ และรีเซ็ตกลับสู่ระบบออโต้ปกติ"
+                        )
+                        if img_b64:
+                            send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                        
+                        st["custom_mode"] = False
+                        st["custom_tf"] = None
+                        st["custom_dir"] = None
+                        st["target_mode"] = "AUTO"
+                        st["current_stage"] = 1
+                        st["stage1_notified"] = False
+                        st["stage2_notified"] = False
+                        st["stage3_notified"] = False
+
+                else:
+                    is_low_mode = (st["active_direction"] == "LOW")
+                    
+                    if st["current_stage"] == 1:
+                        cond_s1 = (st["k_4h"] < 45) if is_low_mode else (st["k_4h"] > 55)
+
+                        if cond_s1:
+                            if not st["stage1_notified"]:
+                                img_b64 = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})", mini=False)
+                                desc = "กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะช้อนซื้อ" if is_low_mode else "กราฟ 4 ชั่วโมงถึงจุด High แล้ว รอจังหวะขาย"
+                                msg = f"📢 *{name} Stage 1*: {desc} (K = {st['k_4h']:.2f})"
+                                if img_b64:
+                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                st["stage1_notified"] = True
+                            st["current_stage"] = 2
+
+                    elif st["current_stage"] == 2:
+                        cond_s2 = (st["k_1h"] < 20) if is_low_mode else (st["k_1h"] > 80)
+                        zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
+
+                        if cond_s2:
+                            if not st["stage2_notified"]:
+                                img_b64 = generate_stoch_chart(dfs["1h"], f"Stoch RSI - 1H Timeframe ({name})", mini=False)
+                                msg = f"📢 *{name} Stage 2*: กราฟ 1 ชั่วโมงเข้าสู่ {zone_name} แล้ว! (K = {st['k_1h']:.2f})"
+                                if img_b64:
+                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                st["stage2_notified"] = True
+                            st["current_stage"] = 3
+
+                    elif st["current_stage"] == 3:
+                        cond_s3 = (st["k_15m"] < 5) if is_low_mode else (st["k_15m"] > 95)
+                        zone_name = "LOW ZONE (< 5)" if is_low_mode else "HIGH ZONE (> 95)"
+
+                        if cond_s3:
+                            if not st["stage3_notified"]:
+                                img_b64 = generate_stoch_chart(dfs["15m"], f"Stoch RSI - 15M Timeframe ({name})", mini=False)
+                                msg = f"📢 *{name} Stage 3*: กราฟ 15 นาทีเข้าสู่ {zone_name} ลึกพิเศษแล้ว! (K = {st['k_15m']:.2f})"
+                                if img_b64:
+                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                st["stage3_notified"] = True
+                            st["current_stage"] = 4
+
+                    elif st["current_stage"] == 4:
+                        latest_k = float(ks["5m"].iloc[-1])
+                        latest_d = float(ds["5m"].iloc[-1])
+                        prev_k = float(ks["5m"].iloc[-2])
+                        prev_d = float(ds["5m"].iloc[-2])
+
+                        if is_low_mode:
+                            is_cross = (prev_k < prev_d) and (latest_k > latest_d)
+                            triggered = (latest_k < 20 and is_cross)
+                            action_text = "BUY (🟢 LOW)"
+                        else:
+                            is_cross = (prev_k > prev_d) and (latest_k < latest_d)
+                            triggered = (latest_k > 80 and is_cross)
+                            action_text = "SELL (🔴 HIGH)"
+
+                        if triggered:
+                            img_b64 = generate_stoch_chart(dfs["5m"], f"Stoch RSI - 5M Timeframe ({name})", mini=False)
+                            msg = (
+                                f"🔥 *{name} Stage 4 Trigger*: 5M ครบเงื่อนไขและเกิดการตัดกันแล้ว!\n"
+                                f"K = {latest_k:.2f} ตัด D ({latest_d:.2f}) สำเร็จ!\n"
+                                f"✅ ส่งสัญญาณเข้าเทรด **{action_text}**\n"
+                                f"🛑 พักระบบและสลับไปรอสัญญาณฝั่งตรงข้ามรอบถัดไป"
+                            )
+                            if img_b64:
+                                send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                            
+                            if st["target_mode"] == "AUTO":
+                                st["active_direction"] = "HIGH" if is_low_mode else "LOW"
+                            elif st["target_mode"] == "LOW_ONLY":
+                                st["active_direction"] = "LOW"
+                            elif st["target_mode"] == "HIGH_ONLY":
+                                st["active_direction"] = "HIGH"
+
+                            st["current_stage"] = 1
+                            st["stage1_notified"] = False
+                            st["stage2_notified"] = False
+                            st["stage3_notified"] = False
+
+        except Exception as e:
+            print(f"Radar Loop Error ({asset_key}): {e}")
+
+        time.sleep(60)
+
+
+if __name__ == "__main__":
+    for key in ASSETS.keys():
+        t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
+        t.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
