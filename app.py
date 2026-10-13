@@ -281,7 +281,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>xau 5m high</b>, <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>
+            คำสั่ง Telegram: <b>sum</b> (สรุปทุกตัว), <b>xau</b>, <b>us30</b>, <b>oil</b> | ติดตามเฉพาะ: <b>xau 5m high</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>
         </div>
     </div>
 </body>
@@ -302,7 +302,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไข Syntax Error เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (เพิ่มคำสั่งติดตามเฉพาะ Timeframe และแสดงสถานะใน sum เรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -346,6 +346,7 @@ def telegram_webhook():
                 ASSETS["oil"]["state"]["note"] = note_content
                 save_note_to_file("oil", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
+            # เพิ่มส่วนรองรับคำสั่งติดตามเฉพาะ Timeframe เช่น "xau 5m high", "oil 1h low"
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
                 asset_key = parts[0]
                 tf = parts[1]
@@ -359,23 +360,24 @@ def telegram_webhook():
                 
                 msg = f"🎯 *{ASSETS[asset_key]['name']}*: ตั้งค่าติดตามพิเศษ Timeframe *{tf.upper()}* ฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
-            elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
-                asset_key = parts[0]
-                direction = parts[1].upper()
-                st = ASSETS[asset_key]["state"]
-                
-                st["custom_mode"] = False
-                st["custom_tf"] = None
-                st["custom_dir"] = None
-                st["target_mode"] = f"{direction}_ONLY"
-                st["active_direction"] = direction
-                st["current_stage"] = 1
-                st["stage1_notified"] = False
-                st["stage2_notified"] = False
-                st["stage3_notified"] = False
-                
-                msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
-                send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
+            else:
+                if len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
+                    asset_key = parts[0]
+                    direction = parts[1].upper()
+                    st = ASSETS[asset_key]["state"]
+                    
+                    st["custom_mode"] = False
+                    st["custom_tf"] = None
+                    st["custom_dir"] = None
+                    st["target_mode"] = f"{direction}_ONLY"
+                    st["active_direction"] = direction
+                    st["current_stage"] = 1
+                    st["stage1_notified"] = False
+                    st["stage2_notified"] = False
+                    st["stage3_notified"] = False
+                    
+                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
+                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
                 
         return "OK", 200
     except Exception as e:
@@ -480,7 +482,8 @@ def send_single_summary_text_only(asset_key, chat_id):
         asset = ASSETS[asset_key]
         st = asset["state"]
         
-        if st["custom_mode"]:
+        # เพิ่มการแสดงสถานะ Custom ในรายงานสรุป
+        if st.get("custom_mode"):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
@@ -555,7 +558,10 @@ def run_asset_radar(asset_key):
 
                 st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
-                if st["custom_mode"]:
+                # ==========================================
+                # CUSTOM TRACKING MODE (ติดตามเฉพาะ Timeframe)
+                # ==========================================
+                if st.get("custom_mode"):
                     target_tf = st["custom_tf"]
                     target_dir = st["custom_dir"]
                     k_target = st[f"k_{target_tf}"]
@@ -570,13 +576,13 @@ def run_asset_radar(asset_key):
                         img_b64 = generate_stoch_chart(dfs[target_tf], f"Stoch RSI - {target_tf.upper()} ({name})", mini=False)
                         msg = (
                             f"🎯 *{name} Custom Alert*:\n"
-                            f"Timeframe *{target_tf.upper()}* ถึงจุดหมายฝั่ง *{target_dir}* แล้ว!\n"
-                            f"K = {k_target:.2f}\n"
-                            f"✅ ส่งสัญญาณแจ้งเตือนสำเร็จ และรีเซ็ตกลับสู่ระบบออโต้ปกติ"
+                            f"Timeframe *{target_tf.upper()}* ถึงจุดหมายฝั่ง *{target_dir}* แล้ว! (K = {k_target:.2f})\n"
+                            f"✅ แจ้งเตือนสำเร็จ และระบบได้รีเซ็ตกลับสู่โหมดออโต้ปกติแล้ว"
                         )
                         if img_b64:
                             send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                         
+                        # รีเซ็ตกลับเข้าโหมดออโต้
                         st["custom_mode"] = False
                         st["custom_tf"] = None
                         st["custom_dir"] = None
@@ -587,10 +593,15 @@ def run_asset_radar(asset_key):
                         st["stage3_notified"] = False
 
                 else:
+                    # ==========================================
+                    # 4 STAGES LOGIC (เดิมของคุณเอ็ม 100%)
+                    # ==========================================
                     is_low_mode = (st["active_direction"] == "LOW")
                     
+                    # STAGE 1: 4H Condition
                     if st["current_stage"] == 1:
                         cond_s1 = (st["k_4h"] < 45) if is_low_mode else (st["k_4h"] > 55)
+                        zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
 
                         if cond_s1:
                             if not st["stage1_notified"]:
@@ -602,6 +613,7 @@ def run_asset_radar(asset_key):
                                 st["stage1_notified"] = True
                             st["current_stage"] = 2
 
+                    # STAGE 2: 1H Condition
                     elif st["current_stage"] == 2:
                         cond_s2 = (st["k_1h"] < 20) if is_low_mode else (st["k_1h"] > 80)
                         zone_name = "LOW ZONE" if is_low_mode else "HIGH ZONE"
@@ -615,6 +627,7 @@ def run_asset_radar(asset_key):
                                 st["stage2_notified"] = True
                             st["current_stage"] = 3
 
+                    # STAGE 3: 15M Condition
                     elif st["current_stage"] == 3:
                         cond_s3 = (st["k_15m"] < 5) if is_low_mode else (st["k_15m"] > 95)
                         zone_name = "LOW ZONE (< 5)" if is_low_mode else "HIGH ZONE (> 95)"
@@ -628,6 +641,7 @@ def run_asset_radar(asset_key):
                                 st["stage3_notified"] = True
                             st["current_stage"] = 4
 
+                    # STAGE 4: 5M Trigger & Cross
                     elif st["current_stage"] == 4:
                         latest_k = float(ks["5m"].iloc[-1])
                         latest_d = float(ds["5m"].iloc[-1])
