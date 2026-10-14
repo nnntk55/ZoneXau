@@ -5,6 +5,7 @@ import threading
 import time
 import base64
 import json
+import gc
 from flask import Flask, redirect, render_template_string, request, url_for
 import matplotlib
 import matplotlib.pyplot as plt
@@ -69,7 +70,7 @@ ASSETS = {
             "stage3_notified": False,
         }
     },
-    "us30": {
+    "us": {
         "symbol": "YM=F",
         "name": "US30",
         "emoji": "📈",
@@ -81,7 +82,7 @@ ASSETS = {
             "custom_tf": None,
             "custom_dir": None,
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": saved_notes.get("us30", "ยังไม่มีบันทึกแผน"),
+            "note": saved_notes.get("us", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -281,7 +282,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b> (สรุปทุกตัว), <b>xau</b>, <b>us30</b>, <b>oil</b> | ติดตามเฉพาะ: <b>xau 5m high</b> | ล็อคฝั่ง: <b>xau high/low</b> | โน้ต: <b>notexau [ข้อความ]</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau / xauusd</b>, <b>oil</b>, <b>us</b> | โน้ต: <b>xaunote</b>, <b>oilnote</b>, <b>usnote</b>
         </div>
     </div>
 </body>
@@ -302,7 +303,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (เพิ่มคำสั่งติดตามเฉพาะ Timeframe และแสดงสถานะใน sum เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง xau/xauusd, oil, us และรูปแบบโน้ตใหม่เรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -329,24 +330,27 @@ def telegram_webhook():
             
             if text_lower == "sum":
                 threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
-            elif text_lower in ASSETS:
-                threading.Thread(target=send_single_summary_text_only, args=(text_lower, chat_id)).start()
-            elif text_lower.startswith("notexau "):
+            elif text_lower in ["xau", "xauusd"]:
+                threading.Thread(target=send_summary_report, args=("xau", chat_id)).start()
+            elif text_lower == "oil":
+                threading.Thread(target=send_summary_report, args=("oil", chat_id)).start()
+            elif text_lower == "us":
+                threading.Thread(target=send_summary_report, args=("us", chat_id)).start()
+            elif text_lower.startswith("xaunote "):
                 note_content = text[8:].strip()
                 ASSETS["xau"]["state"]["note"] = note_content
                 save_note_to_file("xau", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
-            elif text_lower.startswith("noteus30 "):
-                note_content = text[9:].strip()
-                ASSETS["us30"]["state"]["note"] = note_content
-                save_note_to_file("us30", note_content)
-                send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us30", chat_id=chat_id)
-            elif text_lower.startswith("noteoil "):
+            elif text_lower.startswith("usnote "):
+                note_content = text[7:].strip()
+                ASSETS["us"]["state"]["note"] = note_content
+                save_note_to_file("us", note_content)
+                send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us", chat_id=chat_id)
+            elif text_lower.startswith("oilnote "):
                 note_content = text[8:].strip()
                 ASSETS["oil"]["state"]["note"] = note_content
                 save_note_to_file("oil", note_content)
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
-            # เพิ่มส่วนรองรับคำสั่งติดตามเฉพาะ Timeframe เช่น "xau 5m high", "oil 1h low"
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
                 asset_key = parts[0]
                 tf = parts[1]
@@ -423,7 +427,11 @@ def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_k
         print(f"Telegram Photo Error: {e}")
 
 
+# ==========================================
+# GENERATE CHART (OPTIMIZED MEMORY)
+# ==========================================
 def generate_stoch_chart(df, title, mini=False):
+    fig = None
     try:
         if df is None or len(df) < 30:
             return None
@@ -435,8 +443,7 @@ def generate_stoch_chart(df, title, mini=False):
         sub_d = d.iloc[-30:]
 
         figsize = (3.5, 1.8) if mini else (6, 3)
-        plt.figure(figsize=figsize, facecolor="#1e293b")
-        ax = plt.axes()
+        fig, ax = plt.subplots(figsize=figsize, facecolor="#1e293b")
         ax.set_facecolor("#0f172a")
 
         ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#38bdf8", linewidth=1.5 if mini else 2)
@@ -459,11 +466,18 @@ def generate_stoch_chart(df, title, mini=False):
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#1e293b")
         buf.seek(0)
-        plt.close()
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
+        img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+        
+        buf.close()
+        return img_str
     except Exception as e:
         print(f"Chart Gen Error: {e}")
         return None
+    finally:
+        if fig is not None:
+            plt.close(fig)
+        plt.close('all')
+        gc.collect()
 
 
 def fetch_all_data(symbol):
@@ -482,7 +496,6 @@ def send_single_summary_text_only(asset_key, chat_id):
         asset = ASSETS[asset_key]
         st = asset["state"]
         
-        # เพิ่มการแสดงสถานะ Custom ในรายงานสรุป
         if st.get("custom_mode"):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
@@ -498,8 +511,32 @@ def send_single_summary_text_only(asset_key, chat_id):
         print(f"Single Summary Error ({asset_key}): {e}")
 
 
+# ส่งรายงานสถานะเดี่ยว พร้อมส่งภาพกราฟทั้ง 6 Timeframes ต่อท้ายตามคำขอ
 def send_summary_report(asset_key, chat_id):
-    send_single_summary_text_only(asset_key, chat_id)
+    try:
+        asset = ASSETS[asset_key]
+        st = asset["state"]
+        dfs = fetch_all_data(asset["symbol"])
+        
+        if st.get("custom_mode"):
+            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
+        else:
+            mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
+
+        caption = (
+            f"📊 *รายงานสรุปสถานะ - {asset['name']}*\n"
+            f"📌 สถานะเรดาร์: {mode_desc}\n"
+            f"📝 *โน้ตแผนการเทรด:* {st['note']}"
+        )
+        send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
+
+        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
+            if dfs[tf_key] is not None:
+                img_b64 = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})", mini=False)
+                if img_b64:
+                    send_telegram_photo_with_caption(base64.b64decode(img_b64), f"📈 กราฟ [{tf_name}] - {asset['name']}", chat_id=chat_id)
+    except Exception as e:
+        print(f"Summary Report Error ({asset_key}): {e}")
 
 
 def send_all_summary_report(chat_id):
@@ -582,7 +619,6 @@ def run_asset_radar(asset_key):
                         if img_b64:
                             send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                         
-                        # รีเซ็ตกลับเข้าโหมดออโต้
                         st["custom_mode"] = False
                         st["custom_tf"] = None
                         st["custom_dir"] = None
@@ -683,6 +719,7 @@ def run_asset_radar(asset_key):
         except Exception as e:
             print(f"Radar Loop Error ({asset_key}): {e}")
 
+        gc.collect()
         time.sleep(60)
 
 
