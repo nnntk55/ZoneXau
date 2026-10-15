@@ -323,7 +323,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง xau, oil, us และซิงค์ Google Sheets เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไขการแสดงผล xau และ sum เรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -549,7 +549,9 @@ def send_summary_report(asset_key, chat_id):
             f"📌 สถานะเรดาร์: {mode_desc}\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
+        # ส่งข้อความสรุปตัวอักษรก่อนส่งรูปภาพเสมอ
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
+        time.sleep(0.3)
 
         for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
             if dfs[tf_key] is not None:
@@ -562,7 +564,7 @@ def send_summary_report(asset_key, chat_id):
 
 def send_all_summary_report(chat_id):
     for key in ASSETS.keys():
-        send_single_summary_text_only(key, chat_id)
+        send_summary_report(key, chat_id)
         time.sleep(0.5)
 
 
