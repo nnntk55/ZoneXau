@@ -302,7 +302,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau / xauusd</b>, <b>oil</b>, <b>us</b> | โน้ต: <b>xaunote</b>, <b>oilnote</b>, <b>usnote</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b> | โน้ต: <b>xaunote</b>, <b>oilnote</b>, <b>usnote</b>
         </div>
     </div>
 </body>
@@ -323,7 +323,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (ซิงค์สถานะและโน้ตกับ Google Sheets ถาวรเรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง xau, oil, us และซิงค์ Google Sheets เรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -350,7 +350,7 @@ def telegram_webhook():
             
             if text_lower == "sum":
                 threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
-            elif text_lower in ["xau", "xauusd"]:
+            elif text_lower == "xau":
                 threading.Thread(target=send_summary_report, args=("xau", chat_id)).start()
             elif text_lower == "oil":
                 threading.Thread(target=send_summary_report, args=("oil", chat_id)).start()
