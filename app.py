@@ -21,27 +21,47 @@ matplotlib.use("Agg")
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-NOTE_FILE = "trade_notes.json"
+GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
 
-def load_notes_from_file():
-    if os.path.exists(NOTE_FILE):
-        try:
-            with open(NOTE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Load Notes Error: {e}")
-    return {}
-
-def save_note_to_file(asset_key, note_text):
-    notes = load_notes_from_file()
-    notes[asset_key] = note_text
+def load_states_from_sheets():
+    default_data = {
+        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None},
+        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None},
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None}
+    }
+    if not GOOGLE_SCRIPT_URL:
+        return default_data
     try:
-        with open(NOTE_FILE, "w", encoding="utf-8") as f:
-            json.dump(notes, f, ensure_ascii=False, indent=4)
+        res = requests.get(GOOGLE_SCRIPT_URL, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            for k in default_data.keys():
+                if k not in data:
+                    data[k] = default_data[k]
+            return data
     except Exception as e:
-        print(f"Save Notes Error: {e}")
+        print(f"Load States from Sheets Error: {e}")
+    return default_data
 
-saved_notes = load_notes_from_file()
+def save_state_to_sheets(asset_key, state_dict):
+    if not GOOGLE_SCRIPT_URL:
+        return
+    try:
+        payload = {
+            "asset": asset_key,
+            "note": state_dict.get("note"),
+            "current_stage": state_dict.get("current_stage"),
+            "target_mode": state_dict.get("target_mode"),
+            "active_direction": state_dict.get("active_direction"),
+            "custom_mode": state_dict.get("custom_mode"),
+            "custom_tf": state_dict.get("custom_tf"),
+            "custom_dir": state_dict.get("custom_dir")
+        }
+        requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Save State to Sheets Error: {e}")
+
+saved_states = load_states_from_sheets()
 
 ASSETS = {
     "xau": {
@@ -49,14 +69,14 @@ ASSETS = {
         "name": "XAUUSD",
         "emoji": "🪙",
         "state": {
-            "current_stage": 1,
-            "target_mode": "AUTO",
-            "active_direction": "LOW",
-            "custom_mode": False,
-            "custom_tf": None,
-            "custom_dir": None,
+            "current_stage": saved_states.get("xau", {}).get("current_stage", 1),
+            "target_mode": saved_states.get("xau", {}).get("target_mode", "AUTO"),
+            "active_direction": saved_states.get("xau", {}).get("active_direction", "LOW"),
+            "custom_mode": saved_states.get("xau", {}).get("custom_mode", False),
+            "custom_tf": saved_states.get("xau", {}).get("custom_tf", None),
+            "custom_dir": saved_states.get("xau", {}).get("custom_dir", None),
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": saved_notes.get("xau", "ยังไม่มีบันทึกแผน"),
+            "note": saved_states.get("xau", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -75,14 +95,14 @@ ASSETS = {
         "name": "US30",
         "emoji": "📈",
         "state": {
-            "current_stage": 1,
-            "target_mode": "AUTO",
-            "active_direction": "LOW",
-            "custom_mode": False,
-            "custom_tf": None,
-            "custom_dir": None,
+            "current_stage": saved_states.get("us", {}).get("current_stage", 1),
+            "target_mode": saved_states.get("us", {}).get("target_mode", "AUTO"),
+            "active_direction": saved_states.get("us", {}).get("active_direction", "LOW"),
+            "custom_mode": saved_states.get("us", {}).get("custom_mode", False),
+            "custom_tf": saved_states.get("us", {}).get("custom_tf", None),
+            "custom_dir": saved_states.get("us", {}).get("custom_dir", None),
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": saved_notes.get("us", "ยังไม่มีบันทึกแผน"),
+            "note": saved_states.get("us", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -101,14 +121,14 @@ ASSETS = {
         "name": "USOIL",
         "emoji": "🛢️",
         "state": {
-            "current_stage": 1,
-            "target_mode": "AUTO",
-            "active_direction": "LOW",
-            "custom_mode": False,
-            "custom_tf": None,
-            "custom_dir": None,
+            "current_stage": saved_states.get("oil", {}).get("current_stage", 1),
+            "target_mode": saved_states.get("oil", {}).get("target_mode", "AUTO"),
+            "active_direction": saved_states.get("oil", {}).get("active_direction", "LOW"),
+            "custom_mode": saved_states.get("oil", {}).get("custom_mode", False),
+            "custom_tf": saved_states.get("oil", {}).get("custom_tf", None),
+            "custom_dir": saved_states.get("oil", {}).get("custom_dir", None),
             "last_check": "กำลังเริ่มทำงาน...",
-            "note": saved_notes.get("oil", "ยังไม่มีบันทึกแผน"),
+            "note": saved_states.get("oil", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -303,7 +323,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง xau/xauusd, oil, us และรูปแบบโน้ตใหม่เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (ซิงค์สถานะและโน้ตกับ Google Sheets ถาวรเรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -339,17 +359,17 @@ def telegram_webhook():
             elif text_lower.startswith("xaunote "):
                 note_content = text[8:].strip()
                 ASSETS["xau"]["state"]["note"] = note_content
-                save_note_to_file("xau", note_content)
+                save_state_to_sheets("xau", ASSETS["xau"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
             elif text_lower.startswith("usnote "):
                 note_content = text[7:].strip()
                 ASSETS["us"]["state"]["note"] = note_content
-                save_note_to_file("us", note_content)
+                save_state_to_sheets("us", ASSETS["us"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us", chat_id=chat_id)
             elif text_lower.startswith("oilnote "):
                 note_content = text[8:].strip()
                 ASSETS["oil"]["state"]["note"] = note_content
-                save_note_to_file("oil", note_content)
+                save_state_to_sheets("oil", ASSETS["oil"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
                 asset_key = parts[0]
@@ -361,6 +381,7 @@ def telegram_webhook():
                 st["custom_tf"] = tf
                 st["custom_dir"] = direction
                 st["target_mode"] = f"CUSTOM_{tf.upper()}_{direction}"
+                save_state_to_sheets(asset_key, st)
                 
                 msg = f"🎯 *{ASSETS[asset_key]['name']}*: ตั้งค่าติดตามพิเศษ Timeframe *{tf.upper()}* ฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
@@ -379,6 +400,7 @@ def telegram_webhook():
                     st["stage1_notified"] = False
                     st["stage2_notified"] = False
                     st["stage3_notified"] = False
+                    save_state_to_sheets(asset_key, st)
                     
                     msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
@@ -511,7 +533,6 @@ def send_single_summary_text_only(asset_key, chat_id):
         print(f"Single Summary Error ({asset_key}): {e}")
 
 
-# ส่งรายงานสถานะเดี่ยว พร้อมส่งภาพกราฟทั้ง 6 Timeframes ต่อท้ายตามคำขอ
 def send_summary_report(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -627,6 +648,7 @@ def run_asset_radar(asset_key):
                         st["stage1_notified"] = False
                         st["stage2_notified"] = False
                         st["stage3_notified"] = False
+                        save_state_to_sheets(asset_key, st)
 
                 else:
                     # ==========================================
@@ -648,6 +670,7 @@ def run_asset_radar(asset_key):
                                     send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                                 st["stage1_notified"] = True
                             st["current_stage"] = 2
+                            save_state_to_sheets(asset_key, st)
 
                     # STAGE 2: 1H Condition
                     elif st["current_stage"] == 2:
@@ -662,6 +685,7 @@ def run_asset_radar(asset_key):
                                     send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                                 st["stage2_notified"] = True
                             st["current_stage"] = 3
+                            save_state_to_sheets(asset_key, st)
 
                     # STAGE 3: 15M Condition
                     elif st["current_stage"] == 3:
@@ -676,6 +700,7 @@ def run_asset_radar(asset_key):
                                     send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                                 st["stage3_notified"] = True
                             st["current_stage"] = 4
+                            save_state_to_sheets(asset_key, st)
 
                     # STAGE 4: 5M Trigger & Cross
                     elif st["current_stage"] == 4:
@@ -715,6 +740,7 @@ def run_asset_radar(asset_key):
                             st["stage1_notified"] = False
                             st["stage2_notified"] = False
                             st["stage3_notified"] = False
+                            save_state_to_sheets(asset_key, st)
 
         except Exception as e:
             print(f"Radar Loop Error ({asset_key}): {e}")
