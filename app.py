@@ -20,26 +20,6 @@ matplotlib.use("Agg")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
-def empty_sr():
-    return {
-        "support": [],
-        "resistance": [],
-        "demand": [],
-        "supply": [],
-        "support_txt": "-",
-        "resistance_txt": "-",
-        "demand_txt": "-",
-        "supply_txt": "-"
-    }
-def default_sr_map():
-    return {
-        "1w": empty_sr(),
-        "1d": empty_sr(),
-        "4h": empty_sr(),
-        "1h": empty_sr(),
-        "15m": empty_sr(),
-        "5m": empty_sr()
-    }
 def load_states_from_sheets():
     default_data = {
         "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
@@ -102,7 +82,6 @@ ASSETS = {
             "k_15m": 0.0, "d_15m": 0.0,
             "k_5m": 0.0, "d_5m": 0.0,
             "charts": {"1w": None, "1d": None, "4h": None, "1h": None, "15m": None, "5m": None},
-            "sr": default_sr_map(),
             "signal_logs": [],
             "stage1_notified": False,
             "stage2_notified": False,
@@ -130,7 +109,6 @@ ASSETS = {
             "k_15m": 0.0, "d_15m": 0.0,
             "k_5m": 0.0, "d_5m": 0.0,
             "charts": {"1w": None, "1d": None, "4h": None, "1h": None, "15m": None, "5m": None},
-            "sr": default_sr_map(),
             "signal_logs": [],
             "stage1_notified": False,
             "stage2_notified": False,
@@ -158,7 +136,6 @@ ASSETS = {
             "k_15m": 0.0, "d_15m": 0.0,
             "k_5m": 0.0, "d_5m": 0.0,
             "charts": {"1w": None, "1d": None, "4h": None, "1h": None, "15m": None, "5m": None},
-            "sr": default_sr_map(),
             "signal_logs": [],
             "stage1_notified": False,
             "stage2_notified": False,
@@ -221,7 +198,6 @@ HTML_TEMPLATE = """
         .tf-box { background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 6px; text-align: center; }
         .tf-title { font-size: 0.75rem; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
         .tf-val { font-size: 0.7rem; color: #cbd5e1; margin-bottom: 4px; }
-        .tf-sr { font-size: 0.62rem; line-height: 1.4; text-align: left; margin: 4px 0 6px; color: #cbd5e1; word-break: break-word; }
         .tf-img { width: 100%; height: auto; border-radius: 4px; }
         .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
         .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
@@ -270,12 +246,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">1W</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1w) }}|D:{{ "%.1f"|format(asset.state.d_1w) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['1w'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['1w'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['1w'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['1w'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("1w") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1w'] }}" class="tf-img" alt="1W">
                     {% endif %}
@@ -283,12 +253,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">1D</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1d) }}|D:{{ "%.1f"|format(asset.state.d_1d) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['1d'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['1d'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['1d'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['1d'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("1d") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1d'] }}" class="tf-img" alt="1D">
                     {% endif %}
@@ -296,12 +260,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">4H</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_4h) }}|D:{{ "%.1f"|format(asset.state.d_4h) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['4h'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['4h'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['4h'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['4h'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("4h") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['4h'] }}" class="tf-img" alt="4H">
                     {% endif %}
@@ -309,12 +267,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">1H</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1h) }}|D:{{ "%.1f"|format(asset.state.d_1h) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['1h'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['1h'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['1h'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['1h'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("1h") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1h'] }}" class="tf-img" alt="1H">
                     {% endif %}
@@ -322,12 +274,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">15M</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_15m) }}|D:{{ "%.1f"|format(asset.state.d_15m) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['15m'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['15m'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['15m'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['15m'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("15m") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['15m'] }}" class="tf-img" alt="15M">
                     {% endif %}
@@ -335,12 +281,6 @@ HTML_TEMPLATE = """
                 <div class="tf-box">
                     <div class="tf-title">5M</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_5m) }}|D:{{ "%.1f"|format(asset.state.d_5m) }}</div>
-                    <div class="tf-sr">
-                        <div>Support: <b style="color:#22c55e;">{{ asset.state.sr['5m'].support_txt }}</b></div>
-                        <div>Resist: <b style="color:#ef4444;">{{ asset.state.sr['5m'].resistance_txt }}</b></div>
-                        <div>Demand: <b style="color:#38bdf8;">{{ asset.state.sr['5m'].demand_txt }}</b></div>
-                        <div>Supply: <b style="color:#f97316;">{{ asset.state.sr['5m'].supply_txt }}</b></div>
-                    </div>
                     {% if asset.state.charts.get("5m") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['5m'] }}" class="tf-img" alt="5M">
                     {% endif %}
@@ -584,31 +524,6 @@ def fetch_all_data(symbol):
         "15m": fetch_data(symbol, period="5d", interval="15m"),
         "5m": fetch_data(symbol, period="2d", interval="5m"),
     }
-def format_levels(vals):
-    if not vals:
-        return "-"
-    return ", ".join(f"{float(v):.2f}" for v in vals)
-def format_zones(zones):
-    if not zones:
-        return "-"
-    parts = []
-    for z in zones:
-        low, high = z[0], z[1]
-        parts.append(f"{float(low):.2f}-{float(high):.2f}")
-    return " | ".join(parts)
-def format_sr_block(st):
-    sr_map = st.get("sr") or default_sr_map()
-    lines = ["📐 *แนวรับ-แนวต้าน (Fractal + Supply/Demand):*"]
-    for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
-        d = sr_map.get(tf_key) or empty_sr()
-        lines.append(
-            f"*{tf_name}*\n"
-            f" • Support: `{d.get('support_txt', '-')}`\n"
-            f" • Resist: `{d.get('resistance_txt', '-')}`\n"
-            f" • Demand: `{d.get('demand_txt', '-')}`\n"
-            f" • Supply: `{d.get('supply_txt', '-')}`"
-        )
-    return "\n".join(lines)
 def send_single_summary_text_only(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -622,7 +537,6 @@ def send_single_summary_text_only(asset_key, chat_id):
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"📌 สถานะเรดาร์: {mode_desc}\n"
-            f"{format_sr_block(st)}\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
@@ -642,7 +556,6 @@ def send_summary_report(asset_key, chat_id):
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"📌 สถานะเรดาร์: {mode_desc}\n"
-            f"{format_sr_block(st)}\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
@@ -679,102 +592,6 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     k = stoch_rsi_raw.rolling(window=k_period).mean()
     d = k.rolling(window=d_period).mean()
     return k, d
-def _series(df, col):
-    s = df[col]
-    if isinstance(s, pd.DataFrame):
-        s = s.iloc[:, 0]
-    return s
-def find_advanced_turning_points(df, left_bars=3, right_bars=3):
-    """
-    1. Fractals & Swing Structure (จุดกลับตัวของโครงสร้างราคาจริง)
-    หาจุดยอด (Swing High) และจุดต่ำสุด (Swing Low) ที่แวดล้อมด้วยแท่งเทียนต่ำ/สูงกว่า
-    เพื่อใช้เป็นแนวรับแนวต้านธรรมชาติที่แม่นยำ
-    """
-    if df is None or len(df) < (left_bars + right_bars + 1):
-        return [], []
-    
-    highs = np.asarray(_series(df, "High").values, dtype=float).ravel()
-    lows = np.asarray(_series(df, "Low").values, dtype=float).ravel()
-    
-    support_zones = []
-    resistance_zones = []
-    
-    # วนลูปตรวจจับ Fractal / Swing Points
-    for i in range(left_bars, len(df) - right_bars):
-        # เช็ค Swing High (แนวต้าน)
-        is_high = True
-        for j in range(1, left_bars + 1):
-            if highs[i] <= highs[i - j] or highs[i] <= highs[i + j]:
-                is_high = False
-                break
-        if is_high:
-            resistance_zones.append(float(highs[i]))
-            
-        # เช็ค Swing Low (แนวรับ)
-        is_low = True
-        for j in range(1, left_bars + 1):
-            if lows[i] >= lows[i - j] or lows[i] >= lows[i + j]:
-                is_low = False
-                break
-        if is_low:
-            support_zones.append(float(lows[i]))
-            
-    # คัดเอาเฉพาะระดับราคาสำคัญล่าสุด (เช่น 5 ระดับล่าสุดที่ใกล้ราคาปัจจุบันที่สุด)
-    resistance_zones = sorted(list(set(resistance_zones)))[-5:]
-    support_zones = sorted(list(set(support_zones)), reverse=True)[:5]
-    
-    return support_zones, resistance_zones
-def find_supply_demand_zones(df, window=20):
-    """
-    2. Order Blocks / Supply & Demand Zones
-    ตรวจจับโซนที่สถาบันการเงินทิ้งออเดอร์ไว้ (Impulse Move)
-    ซึ่งเป็นจุดที่ราคามักจะกลับตัวอย่างรุนแรงเมื่อย้อนกลับมาทดสอบ
-    """
-    if df is None or len(df) < window:
-        return [], []
-    
-    demand_zones = []
-    supply_zones = []
-    
-    try:
-        close_s = _series(df, "Close")
-        open_s = _series(df, "Open")
-        high_s = _series(df, "High")
-        low_s = _series(df, "Low")
-        body_sizes = (close_s - open_s).abs()
-        avg_body = body_sizes.rolling(window=window).mean()
-        
-        for i in range(1, len(df) - 1):
-            # Bullish Impulse (แรงซื้อระเบิดขึ้น) -> มองหา Demand Zone จากแท่งก่อนหน้าหรือจุดต่ำสุดของรอบ
-            if body_sizes.iloc[i] > avg_body.iloc[i] * 1.6 and close_s.iloc[i] > open_s.iloc[i]:
-                zone_low = float(low_s.iloc[i-1:i+1].min())
-                zone_high = float(open_s.iloc[i])
-                demand_zones.append((zone_low, zone_high))
-                
-            # Bearish Impulse (แรงขายระเบิดลง) -> มองหา Supply Zone จากแท่งก่อนหน้าหรือจุดสูงสุดของรอบ
-            elif body_sizes.iloc[i] > avg_body.iloc[i] * 1.6 and close_s.iloc[i] < open_s.iloc[i]:
-                zone_low = float(close_s.iloc[i])
-                zone_high = float(high_s.iloc[i-1:i+1].max())
-                supply_zones.append((zone_low, zone_high))
-    except Exception as e:
-        print(f"Supply/Demand Error: {e}")
-        
-    return demand_zones[-3:], supply_zones[-3:]
-def build_tf_sr(df):
-    support_zones, resistance_zones = find_advanced_turning_points(df)
-    demand_zones, supply_zones = find_supply_demand_zones(df)
-    demand_list = [[float(a), float(b)] for a, b in demand_zones]
-    supply_list = [[float(a), float(b)] for a, b in supply_zones]
-    return {
-        "support": support_zones,
-        "resistance": resistance_zones,
-        "demand": demand_list,
-        "supply": supply_list,
-        "support_txt": format_levels(support_zones),
-        "resistance_txt": format_levels(resistance_zones),
-        "demand_txt": format_zones(demand_list),
-        "supply_txt": format_zones(supply_list)
-    }
 def fetch_data(symbol, period, interval):
     try:
         data = yf.download(symbol, period=period, interval=interval, progress=False)
@@ -805,7 +622,6 @@ def run_asset_radar(asset_key):
                     st[f"k_{tf}"] = float(k_val.iloc[-1]) if k_val is not None else 0.0
                     st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
                     st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
-                    st["sr"][tf] = build_tf_sr(dfs[tf])
                 st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
                 if st.get("custom_mode"):
                     target_tf = st["custom_tf"]
