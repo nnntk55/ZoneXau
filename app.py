@@ -336,7 +336,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง sum และครบถ้วนทุกคู่เงินเรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไขคำสั่ง sum ให้แสดงครบ xau, us, oil เรียบร้อยแล้ว)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -611,6 +611,7 @@ def send_summary_report(asset_key, chat_id):
 
 
 def send_all_summary_report(chat_id):
+    # แก้ไขให้วนลูปครบทั้ง xau, us และ oil ตามคีย์ที่ถูกต้อง
     for key in ["xau", "us", "oil"]:
         if key in ASSETS:
             send_single_summary_text_only(key, chat_id)
