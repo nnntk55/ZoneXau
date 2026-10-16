@@ -1,6 +1,3 @@
-นี่คือโค้ดหลักฉบับสมบูรณ์ รวม S&R ใน state, เรดาร์, แดชบอร์ด และ caption ของทั้ง `sum` กับรายงานรายคู่
-
-```python
 from datetime import datetime, timezone, timedelta
 import io
 import os
