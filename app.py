@@ -1,6 +1,3 @@
-จะแทนที่ Pivot/R1/S1/Swing ด้วย Fractal + Supply/Demand ทุก TF โดยคงโครงสร้างต้นฉบับไว้ — copy เฉพาะบล็อก Python ด้านล่างทับ `app.py` (บรรทัดแรกต้องเป็น `from datetime`)
-
-```python
 from datetime import datetime, timezone, timedelta
 import io
 import os
@@ -972,12 +969,3 @@ if __name__ == "__main__":
         t.start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-```
-
-สิ่งที่เปลี่ยนจากระบบเดิม:
-- เอา Pivot / R1 / S1 / Swing High / Swing Low ออกแล้ว
-- ทุก TF ใช้ Fractal Support/Resistance (สูงสุด 5 ระดับ) + Supply/Demand zone (3 โซนล่าสุด)
-- แดชบอร์ดและคำสั่ง `sum` / `xau` / `us` / `oil` โชว์ Support, Resist, Demand, Supply ของทุก TF
-- logic stage, webhook, โน้ต, กราฟ Stoch ยังเหมือนต้นฉบับ
-
-Copy เฉพาะบล็อกนี้ทับ `app.py` แล้ว deploy ใหม่
