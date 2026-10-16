@@ -1,3 +1,6 @@
+นี่คือโค้ดหลักฉบับสมบูรณ์ รวม S&R ใน state, เรดาร์, แดชบอร์ด และ caption ของทั้ง `sum` กับรายงานรายคู่
+
+```python
 from datetime import datetime, timezone, timedelta
 import io
 import os
@@ -13,16 +16,13 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
-
 matplotlib.use("Agg")
-
 # ==========================================
 # CONFIGURATION & ASSETS DEFINITION
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
-
 def load_states_from_sheets():
     default_data = {
         "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
@@ -44,7 +44,6 @@ def load_states_from_sheets():
     except Exception as e:
         print(f"Load States from Sheets Error: {e}")
     return default_data
-
 def save_state_to_sheets(asset_key, state_dict):
     if not GOOGLE_SCRIPT_URL:
         return
@@ -63,9 +62,7 @@ def save_state_to_sheets(asset_key, state_dict):
         requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
     except Exception as e:
         print(f"Save State to Sheets Error: {e}")
-
 saved_states = load_states_from_sheets()
-
 ASSETS = {
     "xau": {
         "symbol": "GC=F",
@@ -92,6 +89,8 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "sr_pivot": 0.0, "sr_r1": 0.0, "sr_s1": 0.0,
+            "sr_swing_high": 0.0, "sr_swing_low": 0.0,
         }
     },
     "us": {
@@ -119,6 +118,8 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "sr_pivot": 0.0, "sr_r1": 0.0, "sr_s1": 0.0,
+            "sr_swing_high": 0.0, "sr_swing_low": 0.0,
         }
     },
     "oil": {
@@ -146,13 +147,13 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "sr_pivot": 0.0, "sr_r1": 0.0, "sr_s1": 0.0,
+            "sr_swing_high": 0.0, "sr_swing_low": 0.0,
         }
     }
 }
-
 global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
-
 # ==========================================
 # HTML TEMPLATE (Responsive Dashboard)
 # ==========================================
@@ -196,7 +197,6 @@ HTML_TEMPLATE = """
             box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
         }
         .note-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; font-weight: normal; }
-
         .tf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 10px; }
         @media (max-width: 900px) {
             .tf-grid { grid-template-columns: repeat(3, 1fr); }
@@ -208,11 +208,9 @@ HTML_TEMPLATE = """
         .tf-title { font-size: 0.75rem; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
         .tf-val { font-size: 0.7rem; color: #cbd5e1; margin-bottom: 4px; }
         .tf-img { width: 100%; height: auto; border-radius: 4px; }
-
         .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
         .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
         .btn:hover { background-color: #0284c7; }
-
         .alert-box { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 0.8rem; text-align: center; }
         .alert-success { background-color: #065f46; color: #d1fae5; }
         .alert-error { background-color: #991b1b; color: #fee2e2; }
@@ -223,13 +221,11 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>📊 Multi-Asset Zone Trigger Radar</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes พร้อมมินิกราฟเรียลไทม์</div>
-
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
                 {{ flash_msg }}
             </div>
         {% endif %}
-
         {% for key, asset in assets.items() %}
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -250,13 +246,19 @@ HTML_TEMPLATE = """
                     </span>
                 </div>
             </div>
-
             <!-- โน้ตแผนการเทรด -->
             <div class="note-box">
                 <div class="note-title">📝 โน้ตแผนการเทรด</div>
                 <div>{{ asset.state.note }}</div>
             </div>
-
+            <!-- กล่องแสดง S&R -->
+            <div style="margin-top: 8px; background: #1e293b; border: 1px solid #475569; padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px;">
+                <div><span style="color: #94a3b8;">Pivot:</span> <b style="color: #38bdf8;">{{ "%.2f"|format(asset.state.get('sr_pivot', 0)) }}</b></div>
+                <div><span style="color: #94a3b8;">R1:</span> <b style="color: #ef4444;">{{ "%.2f"|format(asset.state.get('sr_r1', 0)) }}</b></div>
+                <div><span style="color: #94a3b8;">S1:</span> <b style="color: #22c55e;">{{ "%.2f"|format(asset.state.get('sr_s1', 0)) }}</b></div>
+                <div><span style="color: #94a3b8;">Swing H:</span> <b style="color: #f97316;">{{ "%.2f"|format(asset.state.get('sr_swing_high', 0)) }}</b></div>
+                <div><span style="color: #94a3b8;">Swing L:</span> <b style="color: #3b82f6;">{{ "%.2f"|format(asset.state.get('sr_swing_low', 0)) }}</b></div>
+            </div>
             <div class="tf-grid">
                 <div class="tf-box">
                     <div class="tf-title">1W</div>
@@ -301,19 +303,16 @@ HTML_TEMPLATE = """
                     {% endif %}
                 </div>
             </div>
-
             <div style="margin-top: 6px; font-size: 0.7rem; color: #94a3b8; text-align: right;">
                 อัปเดต: {{ asset.state.last_check }}
             </div>
         </div>
         {% endfor %}
-
         <div class="card">
             <div class="btn-container">
                 <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบส่งข้อความ</a>
             </div>
         </div>
-
         <div class="status-footer">
             คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b> | เปิด/ปิด: <b>[asset] on/off</b> หรือ <b>on/off</b> | รีเซ็ต: <b>reset</b>
         </div>
@@ -321,8 +320,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-
-
 @app.route("/")
 def home():
     global global_flash
@@ -330,8 +327,6 @@ def home():
     ftype = global_flash["type"]
     global_flash["msg"] = None
     return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
-
-
 @app.route("/send-test")
 def send_test():
     global global_flash
@@ -345,8 +340,6 @@ def send_test():
         global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
         global_flash["type"] = "error"
     return redirect(url_for("home"))
-
-
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
@@ -456,15 +449,11 @@ def telegram_webhook():
     except Exception as e:
         print(f"Webhook Error: {e}")
         return "OK", 200
-
-
 def log_signal(asset_key, text):
     timestamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
     ASSETS[asset_key]["state"]["signal_logs"].insert(0, {"time": timestamp, "text": text})
     if len(ASSETS[asset_key]["state"]["signal_logs"]) > 50:
         ASSETS[asset_key]["state"]["signal_logs"].pop()
-
-
 def send_telegram_notification(message, asset_key=None, chat_id=None):
     target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target_chat:
@@ -479,15 +468,12 @@ def send_telegram_notification(message, asset_key=None, chat_id=None):
             print(f"Telegram Markdown Error ({asset_key}): {res.text}")
             payload_plain = {"chat_id": target_chat, "text": message}
             res = requests.post(url, json=payload_plain, timeout=10)
-
         if res.status_code == 200 and asset_key:
             log_signal(asset_key, message)
         return res.status_code == 200
     except Exception as e:
         print(f"Telegram Error: {e} | Message: {message}")
         return False
-
-
 def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_key=None):
     target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target_chat or not photo_bytes:
@@ -501,8 +487,6 @@ def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_k
             log_signal(asset_key, caption)
     except Exception as e:
         print(f"Telegram Photo Error: {e}")
-
-
 # ==========================================
 # GENERATE CHART (OPTIMIZED MEMORY)
 # ==========================================
@@ -514,20 +498,15 @@ def generate_stoch_chart(df, title, mini=False):
         k, d = calculate_stochastic_rsi(df)
         if k is None or d is None:
             return None
-
         sub_k = k.iloc[-30:]
         sub_d = d.iloc[-30:]
-
         figsize = (3.5, 1.8) if mini else (6, 3)
         fig, ax = plt.subplots(figsize=figsize, facecolor="#1e293b")
         ax.set_facecolor("#0f172a")
-
         ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#38bdf8", linewidth=1.5 if mini else 2)
         ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#f97316", linewidth=1 if mini else 1.5)
-
         ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=0.8)
         ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=0.8)
-
         if not mini:
             plt.title(title, color="#f8fafc", fontsize=10, fontweight="bold")
             plt.legend(loc="upper left", facecolor="#1e293b", labelcolor="#f8fafc")
@@ -538,7 +517,6 @@ def generate_stoch_chart(df, title, mini=False):
         ax.spines["left"].set_color("#475569")
         ax.spines["right"].set_color("#475569")
         plt.tight_layout()
-
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#1e293b")
         buf.seek(0)
@@ -554,8 +532,6 @@ def generate_stoch_chart(df, title, mini=False):
             plt.close(fig)
         plt.close('all')
         gc.collect()
-
-
 def fetch_all_data(symbol):
     return {
         "1w": fetch_data(symbol, period="2y", interval="1wk"),
@@ -565,8 +541,17 @@ def fetch_all_data(symbol):
         "15m": fetch_data(symbol, period="5d", interval="15m"),
         "5m": fetch_data(symbol, period="2d", interval="5m"),
     }
-
-
+def build_summary_caption(asset, st, status_str, mode_desc):
+    return (
+        f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
+        f"📌 สถานะเรดาร์: {mode_desc}\n"
+        f"📐 *แนวรับ-แนวต้าน (S&R):*\n"
+        f" • Pivot: `{st.get('sr_pivot', 0):.2f}`\n"
+        f" • R1 (ต้าน): `{st.get('sr_r1', 0):.2f}` | S1 (รับ): `{st.get('sr_s1', 0):.2f}`\n"
+        f" • Swing High: `{st.get('sr_swing_high', 0):.2f}`\n"
+        f" • Swing Low: `{st.get('sr_swing_low', 0):.2f}`\n"
+        f"📝 *โน้ตแผนการเทรด:* {st['note']}"
+    )
 def send_single_summary_text_only(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -577,17 +562,10 @@ def send_single_summary_text_only(asset_key, chat_id):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
-
-        caption = (
-            f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
-            f"📌 สถานะเรดาร์: {mode_desc}\n"
-            f"📝 *โน้ตแผนการเทรด:* {st['note']}"
-        )
+        caption = build_summary_caption(asset, st, status_str, mode_desc)
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
     except Exception as e:
         print(f"Single Summary Error ({asset_key}): {e}")
-
-
 def send_summary_report(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -599,15 +577,9 @@ def send_summary_report(asset_key, chat_id):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
-
-        caption = (
-            f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
-            f"📌 สถานะเรดาร์: {mode_desc}\n"
-            f"📝 *โน้ตแผนการเทรด:* {st['note']}"
-        )
+        caption = build_summary_caption(asset, st, status_str, mode_desc)
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
         time.sleep(0.3)
-
         for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
             if dfs[tf_key] is not None:
                 img_b64 = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})", mini=False)
@@ -615,15 +587,11 @@ def send_summary_report(asset_key, chat_id):
                     send_telegram_photo_with_caption(base64.b64decode(img_b64), f"📈 กราฟ [{tf_name}] - {asset['name']}", chat_id=chat_id)
     except Exception as e:
         print(f"Summary Report Error ({asset_key}): {e}")
-
-
 def send_all_summary_report(chat_id):
     for key in ["xau", "us", "oil"]:
         if key in ASSETS:
             send_single_summary_text_only(key, chat_id)
             time.sleep(0.8)
-
-
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
     if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
         return None, None
@@ -644,8 +612,27 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     k = stoch_rsi_raw.rolling(window=k_period).mean()
     d = k.rolling(window=d_period).mean()
     return k, d
-
-
+def calculate_support_resistance(df_daily, df_1h):
+    try:
+        if df_daily is None or len(df_daily) < 2 or df_1h is None or len(df_1h) < 20:
+            return None
+        last_day = df_daily.iloc[-2]
+        high, low, close = last_day["High"], last_day["Low"], last_day["Close"]
+        pivot = (high + low + close) / 3
+        r1 = (2 * pivot) - low
+        s1 = (2 * pivot) - high
+        
+        recent_1h = df_1h.iloc[-20:]
+        swing_high = recent_1h["High"].max()
+        swing_low = recent_1h["Low"].min()
+        
+        return {
+            "pivot": float(pivot), "R1": float(r1), "S1": float(s1),
+            "swing_high": float(swing_high), "swing_low": float(swing_low)
+        }
+    except Exception as e:
+        print(f"Calculate S&R Error: {e}")
+        return None
 def fetch_data(symbol, period, interval):
     try:
         data = yf.download(symbol, period=period, interval=interval, progress=False)
@@ -655,22 +642,17 @@ def fetch_data(symbol, period, interval):
     except Exception as e:
         print(f"Fetch Data Error ({symbol} - {interval}): {e}")
         return None
-
-
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
     st = asset["state"]
     symbol = asset["symbol"]
     name = asset["name"]
-
     print(f"[{datetime.now()}] 🚀 Radar Started for {name} ({symbol})...")
-
     while True:
         try:
             if not st.get("is_active", True):
                 time.sleep(10)
                 continue
-
             dfs = fetch_all_data(symbol)
             if all(dfs[tf] is not None for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]):
                 ks, ds = {}, {}
@@ -682,8 +664,16 @@ def run_asset_radar(asset_key):
                     st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
                     st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
 
-                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+                # คำนวณค่า Support & Resistance
+                sr_data = calculate_support_resistance(dfs["1d"], dfs["1h"])
+                if sr_data:
+                    st["sr_pivot"] = sr_data["pivot"]
+                    st["sr_r1"] = sr_data["R1"]
+                    st["sr_s1"] = sr_data["S1"]
+                    st["sr_swing_high"] = sr_data["swing_high"]
+                    st["sr_swing_low"] = sr_data["swing_low"]
 
+                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
                 if st.get("custom_mode"):
                     target_tf = st["custom_tf"]
                     target_dir = st["custom_dir"]
@@ -694,7 +684,6 @@ def run_asset_radar(asset_key):
                         is_hit = True
                     elif target_dir == "HIGH" and k_target > 80:
                         is_hit = True
-
                     if is_hit:
                         img_b64 = generate_stoch_chart(dfs[target_tf], f"Stoch RSI - {target_tf.upper()} ({name})", mini=False)
                         msg = (
@@ -714,7 +703,6 @@ def run_asset_radar(asset_key):
                         st["stage2_notified"] = False
                         st["stage3_notified"] = False
                         save_state_to_sheets(asset_key, st)
-
                 else:
                     is_low_mode = (st["active_direction"] == "LOW")
                     
@@ -729,7 +717,6 @@ def run_asset_radar(asset_key):
                                     st["stage1_notified"] = True
                                 st["current_stage"] = 2
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 2:
                             if st["k_1h"] < 20:
                                 if not st["stage2_notified"]:
@@ -740,7 +727,6 @@ def run_asset_radar(asset_key):
                                     st["stage2_notified"] = True
                                 st["current_stage"] = 3
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 3:
                             if st["k_15m"] < 20:
                                 if not st["stage3_notified"]:
@@ -751,16 +737,13 @@ def run_asset_radar(asset_key):
                                     st["stage3_notified"] = True
                                 st["current_stage"] = 4
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 4:
                             latest_k = float(ks["5m"].iloc[-1])
                             latest_d = float(ds["5m"].iloc[-1])
                             prev_k = float(ks["5m"].iloc[-2])
                             prev_d = float(ds["5m"].iloc[-2])
-
                             is_cross = (prev_k < prev_d) and (latest_k > latest_d)
                             triggered = (latest_k < 20 and is_cross)
-
                             if triggered:
                                 img_b64 = generate_stoch_chart(dfs["5m"], f"Stoch RSI - 5M Timeframe ({name})", mini=False)
                                 msg = (
@@ -778,13 +761,11 @@ def run_asset_radar(asset_key):
                                     st["active_direction"] = "LOW"
                                 elif st["target_mode"] == "HIGH_ONLY":
                                     st["active_direction"] = "HIGH"
-
                                 st["current_stage"] = 1
                                 st["stage1_notified"] = False
                                 st["stage2_notified"] = False
                                 st["stage3_notified"] = False
                                 save_state_to_sheets(asset_key, st)
-
                     else:
                         if st["current_stage"] == 1:
                             if st["k_4h"] > 80:
@@ -796,7 +777,6 @@ def run_asset_radar(asset_key):
                                     st["stage1_notified"] = True
                                 st["current_stage"] = 2
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 2:
                             if st["k_1h"] > 80:
                                 if not st["stage2_notified"]:
@@ -807,7 +787,6 @@ def run_asset_radar(asset_key):
                                     st["stage2_notified"] = True
                                 st["current_stage"] = 3
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 3:
                             if st["k_15m"] > 80:
                                 if not st["stage3_notified"]:
@@ -818,16 +797,13 @@ def run_asset_radar(asset_key):
                                     st["stage3_notified"] = True
                                 st["current_stage"] = 4
                                 save_state_to_sheets(asset_key, st)
-
                         elif st["current_stage"] == 4:
                             latest_k = float(ks["5m"].iloc[-1])
                             latest_d = float(ds["5m"].iloc[-1])
                             prev_k = float(ks["5m"].iloc[-2])
                             prev_d = float(ds["5m"].iloc[-2])
-
                             is_cross = (prev_k > prev_d) and (latest_k < latest_d)
                             triggered = (latest_k > 80 and is_cross)
-
                             if triggered:
                                 img_b64 = generate_stoch_chart(dfs["5m"], f"Stoch RSI - 5M Timeframe ({name})", mini=False)
                                 msg = (
@@ -845,24 +821,19 @@ def run_asset_radar(asset_key):
                                     st["active_direction"] = "LOW"
                                 elif st["target_mode"] == "HIGH_ONLY":
                                     st["active_direction"] = "HIGH"
-
                                 st["current_stage"] = 1
                                 st["stage1_notified"] = False
                                 st["stage2_notified"] = False
                                 st["stage3_notified"] = False
                                 save_state_to_sheets(asset_key, st)
-
         except Exception as e:
             print(f"Radar Loop Error ({asset_key}): {e}")
-
         gc.collect()
         time.sleep(60)
-
-
 if __name__ == "__main__":
     for key in ASSETS.keys():
         t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
         t.start()
-
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
