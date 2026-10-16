@@ -471,13 +471,20 @@ def send_telegram_notification(message, asset_key=None, chat_id=None):
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        
         payload = {"chat_id": target_chat, "text": message, "parse_mode": "Markdown"}
         res = requests.post(url, json=payload, timeout=10)
+        
+        if res.status_code != 200:
+            print(f"Telegram Markdown Error ({asset_key}): {res.text}")
+            payload_plain = {"chat_id": target_chat, "text": message}
+            res = requests.post(url, json=payload_plain, timeout=10)
+
         if res.status_code == 200 and asset_key:
             log_signal(asset_key, message)
         return res.status_code == 200
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        print(f"Telegram Error: {e} | Message: {message}")
         return False
 
 
