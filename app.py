@@ -336,7 +336,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (เพิ่มคำสั่ง on/off, reset และอัปเดตเงื่อนไข Stage ฝั่ง HIGH เรียบร้อย)"
+        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง sum และครบถ้วนทุกคู่เงินเรียบร้อย)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -611,9 +611,10 @@ def send_summary_report(asset_key, chat_id):
 
 
 def send_all_summary_report(chat_id):
-    for key in ASSETS.keys():
-        send_single_summary_text_only(key, chat_id)
-        time.sleep(0.3)
+    for key in ["xau", "us", "oil"]:
+        if key in ASSETS:
+            send_single_summary_text_only(key, chat_id)
+            time.sleep(0.8)
 
 
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
@@ -659,7 +660,6 @@ def run_asset_radar(asset_key):
 
     while True:
         try:
-            # ข้ามการตรวจสอบหากถูกตั้งค่าเป็น OFF
             if not st.get("is_active", True):
                 time.sleep(10)
                 continue
@@ -677,9 +677,6 @@ def run_asset_radar(asset_key):
 
                 st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
-                # ==========================================
-                # CUSTOM TRACKING MODE (ติดตามเฉพาะ Timeframe)
-                # ==========================================
                 if st.get("custom_mode"):
                     target_tf = st["custom_tf"]
                     target_dir = st["custom_dir"]
@@ -712,14 +709,9 @@ def run_asset_radar(asset_key):
                         save_state_to_sheets(asset_key, st)
 
                 else:
-                    # ==========================================
-                    # 4 STAGES LOGIC (อัปเดต Stage ตามเงื่อนไขใหม่)
-                    # ==========================================
                     is_low_mode = (st["active_direction"] == "LOW")
                     
                     if is_low_mode:
-                        # เงื่อนไขเดิมฝั่ง LOW
-                        # STAGE 1: 4H < 45
                         if st["current_stage"] == 1:
                             if st["k_4h"] < 45:
                                 if not st["stage1_notified"]:
@@ -731,7 +723,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 2
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 2: 1H < 20
                         elif st["current_stage"] == 2:
                             if st["k_1h"] < 20:
                                 if not st["stage2_notified"]:
@@ -743,7 +734,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 3
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 3: 15M < 5
                         elif st["current_stage"] == 3:
                             if st["k_15m"] < 5:
                                 if not st["stage3_notified"]:
@@ -755,7 +745,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 4
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 4: 5M Trigger & Cross (K < 20 and Cross Up)
                         elif st["current_stage"] == 4:
                             latest_k = float(ks["5m"].iloc[-1])
                             latest_d = float(ds["5m"].iloc[-1])
@@ -790,8 +779,6 @@ def run_asset_radar(asset_key):
                                 save_state_to_sheets(asset_key, st)
 
                     else:
-                        # เงื่อนไขใหม่ฝั่ง HIGH (ตามที่คุณเอ็มระบุ: Stage 1 = 4H>80, Stage 2 = 1H>80, Stage 3 = 15M>80, Stage 4 = 5M>80)
-                        # STAGE 1: 4H > 80
                         if st["current_stage"] == 1:
                             if st["k_4h"] > 80:
                                 if not st["stage1_notified"]:
@@ -803,7 +790,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 2
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 2: 1H > 80
                         elif st["current_stage"] == 2:
                             if st["k_1h"] > 80:
                                 if not st["stage2_notified"]:
@@ -815,7 +801,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 3
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 3: 15M > 80
                         elif st["current_stage"] == 3:
                             if st["k_15m"] > 80:
                                 if not st["stage3_notified"]:
@@ -827,7 +812,6 @@ def run_asset_radar(asset_key):
                                 st["current_stage"] = 4
                                 save_state_to_sheets(asset_key, st)
 
-                        # STAGE 4: 5M > 80 Trigger & Cross (K > 80 and Cross Down)
                         elif st["current_stage"] == 4:
                             latest_k = float(ks["5m"].iloc[-1])
                             latest_d = float(ds["5m"].iloc[-1])
