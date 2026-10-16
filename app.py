@@ -610,7 +610,7 @@ def send_summary_report(asset_key, chat_id):
         print(f"Summary Report Error ({asset_key}): {e}")
 
 
-def send_all_summary_report(chat_id)
+def send_all_summary_report(chat_id):
     for key in ["xau", "us", "oil"]:
         if key in ASSETS:
             send_single_summary_text_only(key, chat_id)
