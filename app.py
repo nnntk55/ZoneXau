@@ -720,7 +720,7 @@ def run_asset_radar(asset_key):
                     
                     if is_low_mode:
                         if st["current_stage"] == 1:
-                            if st["k_4h"] < 45:
+                            if st["k_4h"] < 20:
                                 if not st["stage1_notified"]:
                                     img_b64 = generate_stoch_chart(dfs["4h"], f"Stoch RSI - 4H Timeframe ({name})", mini=False)
                                     msg = f"📢 *{name} Stage 1*: กราฟ 4 ชั่วโมงถึงจุด Oversold แล้ว รอจังหวะช้อนซื้อ (K = {st['k_4h']:.2f})"
@@ -742,7 +742,7 @@ def run_asset_radar(asset_key):
                                 save_state_to_sheets(asset_key, st)
 
                         elif st["current_stage"] == 3:
-                            if st["k_15m"] < 5:
+                            if st["k_15m"] < 20:
                                 if not st["stage3_notified"]:
                                     img_b64 = generate_stoch_chart(dfs["15m"], f"Stoch RSI - 15M Timeframe ({name})", mini=False)
                                     msg = f"📢 *{name} Stage 3*: กราฟ 15 นาทีเข้าสู่ LOW ZONE (< 5) ลึกพิเศษแล้ว! (K = {st['k_15m']:.2f})"
