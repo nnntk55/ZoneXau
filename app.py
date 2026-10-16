@@ -336,7 +336,7 @@ def home():
 def send_test():
     global global_flash
     success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (อัปเดตคำสั่ง sum ให้แสดงครบ xau, us, oil เรียบร้อยแล้ว)"
+        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไขคำสั่ง sum ให้แสดงครบ xau, us, oil เรียบร้อยแล้ว)"
     )
     if success:
         global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
@@ -345,7 +345,9 @@ def send_test():
         global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
         global_flash["type"] = "error"
     return redirect(url_for("home"))
-    @app.route("/telegram-webhook", methods=["GET", "POST"])
+
+
+@app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
         return "Webhook is active!", 200
@@ -608,8 +610,7 @@ def send_summary_report(asset_key, chat_id):
         print(f"Summary Report Error ({asset_key}): {e}")
 
 
-def send_all_summary_report(chat_id):
-    # วนลูปส่งรายงานครบถ้วนทั้ง xau, us (US30) และ oil
+def send_all_summary_report(chat_id)
     for key in ["xau", "us", "oil"]:
         if key in ASSETS:
             send_single_summary_text_only(key, chat_id)
