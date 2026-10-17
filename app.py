@@ -382,6 +382,26 @@ def update_stage_tfs(asset_key):
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"      
     return redirect(url_for("home"))  # หรือจะใช้ jsonify ตามโครงสร้างเดิมก็ได้ครับ
+@app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
+def toggle_status(asset_key, action_type):
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+        
+    st = ASSETS[asset_key]["state"]
+    
+    if action_type == "power":
+        # สลับสถานะ ON / OFF
+        st["is_active"] = not st["is_active"]
+        new_val = st["is_active"]
+    elif action_type == "direction":
+        # สลับทิศทาง LOW / HIGH
+        st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
+        new_val = st["active_direction"]
+    else:
+        return jsonify({"status": "error", "message": "Invalid action"}), 400
+        
+    save_state_to_sheets(asset_key, st)
+    return jsonify({"status": "success", "new_val": new_val})
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
