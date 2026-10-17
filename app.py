@@ -6,7 +6,7 @@ import time
 import base64
 import json
 import gc
-from flask import Flask, redirect, render_template_string, request, url_for
+from flask import Flask, render_template_string, jsonify, request, redirect, url_for
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -75,6 +75,14 @@ ASSETS = {
             "is_active": saved_states.get("xau", {}).get("is_active", True),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("xau", {}).get("note", "ยังไม่มีบันทึกแผน"),
+            
+            # ⚙️ เพิ่มตั้งค่า Timeframe อิสระสำหรับแต่ละ Stage (ค่าเริ่มต้น: 4h -> 1h -> 15m -> 5m)
+            "stage_tfs": saved_states.get("xau", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            
+            # S&R Zones (Advanced Fractals / S&R)
+            "support_zones": [],
+            "resistance_zones": [],
+
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -102,6 +110,11 @@ ASSETS = {
             "is_active": saved_states.get("us", {}).get("is_active", True),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("us", {}).get("note", "ยังไม่มีบันทึกแผน"),
+            
+            "stage_tfs": saved_states.get("us", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "support_zones": [],
+            "resistance_zones": [],
+
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -129,6 +142,11 @@ ASSETS = {
             "is_active": saved_states.get("oil", {}).get("is_active", True),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("oil", {}).get("note", "ยังไม่มีบันทึกแผน"),
+            
+            "stage_tfs": saved_states.get("oil", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "support_zones": [],
+            "resistance_zones": [],
+
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -237,11 +255,32 @@ HTML_TEMPLATE = """
                     </span>
                 </div>
             </div>
+            
             <!-- โน้ตแผนการเทรด -->
             <div class="note-box">
                 <div class="note-title">📝 โน้ตแผนการเทรด</div>
                 <div>{{ asset.state.note }}</div>
             </div>
+
+            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ (เพิ่มเข้ามาใหม่ตรงนี้) -->
+            <form action="/update_stage_tfs/{{ key }}" method="POST" style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #475569;">
+                <div style="font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; font-weight: bold;">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
+                <div style="display: flex; justify-content: space-between; gap: 5px; font-size: 0.75rem;">
+                    {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m'] %}
+                    {% for idx in range(4) %}
+                    <div>
+                        <span>S{{ idx+1 }}:</span>
+                        <select name="stage_{{ idx+1 }}_tf" style="background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px; font-size: 0.75rem;">
+                            {% for tf in available_tfs %}
+                            <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>{{ tf|upper }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="submit" style="width: 100%; margin-top: 8px; background: #38bdf8; color: #000; border: none; padding: 4px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึก Timeframe</button>
+            </form>
+
             <div class="tf-grid">
                 <div class="tf-box">
                     <div class="tf-title">1W</div>
@@ -323,6 +362,26 @@ def send_test():
         global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
         global_flash["type"] = "error"
     return redirect(url_for("home"))
+@app.route("/update_stage_tfs/<asset_key>", methods=["POST"])
+def update_stage_tfs(asset_key):
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+        
+    st = ASSETS[asset_key]["state"]
+    
+    # รับค่า Timeframe ใหม่สำหรับ Stage 1, 2, 3, 4 จากฟอร์มหน้าเว็บ
+    new_tfs = []
+    for i in range(1, 5):
+        tf = request.form.get(f"stage_{i}_tf")
+        if tf:
+            new_tfs.append(tf)
+            
+    if len(new_tfs) == 4:
+        st["stage_tfs"] = new_tfs
+        save_state_to_sheets(asset_key, st)  # ถ้ามีฟังก์ชันบันทึก
+        global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"      
+    return redirect(url_for("home"))  # หรือจะใช้ jsonify ตามโครงสร้างเดิมก็ได้ครับ
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
