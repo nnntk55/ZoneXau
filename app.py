@@ -191,6 +191,9 @@ HTML_TEMPLATE = """
         .badge-status-on { background: #065f46; color: #d1fae5; }
         .badge-status-off { background: #7f1d1d; color: #fecaca; }
         
+        .toggle-btn { cursor: pointer; border: none; transition: transform 0.1s ease, background-color 0.2s; }
+        .toggle-btn:active { transform: scale(0.95); }
+
         .note-box { 
             margin-top: 10px; 
             background: linear-gradient(135deg, #1e293b, #0f172a); 
@@ -239,20 +242,25 @@ HTML_TEMPLATE = """
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 1rem; font-weight: bold; color: #38bdf8;">{{ asset.emoji }} {{ asset.name }} (คำสั่ง: {{ key }})</span>
-                <div>
-                    {% if asset.state.is_active %}
-                        <span class="badge badge-status-on">🟢 ON</span>
-                    {% else %}
-                        <span class="badge badge-status-off">🔴 OFF</span>
-                    {% endif %}
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    
+                    <!-- 🟢/🔴 ปุ่มสวิชต์เปิด-ปิดเรดาร์ (คลิกเปลี่ยนสถานะทันที) -->
+                    <button onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
+                            class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
+                        {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+                    </button>
+
+                    <!-- 🔄 ปุ่มสลับทิศทาง LOW / HIGH (คลิกเปลี่ยนสถานะทันที) -->
+                    <button onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
+                            class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                    </button>
+
                     {% if asset.state.custom_mode %}
                         <span class="badge badge-custom">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
                     {% else %}
                         <span class="badge badge-stage{{ asset.state.current_stage }}">Stage {{ asset.state.current_stage }}</span>
                     {% endif %}
-                    <span class="badge {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
-                    </span>
                 </div>
             </div>
             
@@ -262,7 +270,7 @@ HTML_TEMPLATE = """
                 <div>{{ asset.state.note }}</div>
             </div>
 
-            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ (เพิ่มเข้ามาใหม่ตรงนี้) -->
+            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ -->
             <form action="/update_stage_tfs/{{ key }}" method="POST" style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #475569;">
                 <div style="font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; font-weight: bold;">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
                 <div style="display: flex; justify-content: space-between; gap: 5px; font-size: 0.75rem;">
@@ -339,6 +347,40 @@ HTML_TEMPLATE = """
             คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b> | เปิด/ปิด: <b>[asset] on/off</b> หรือ <b>on/off</b> | รีเซ็ต: <b>reset</b>
         </div>
     </div>
+
+    <!-- Script ควบคุมการคลิกสลับปุ่ม ON/OFF และ LOW/HIGH แบบเรียลไทม์ -->
+    <script>
+    function toggleAssetStatus(assetKey, actionType) {
+        fetch(`/toggle_status/${assetKey}/${actionType}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const btn = document.getElementById(`${actionType === 'power' ? 'power-btn' : 'dir-btn'}-${assetKey}`);
+                if (actionType === 'power') {
+                    if (data.new_val) {
+                        btn.className = "badge toggle-btn badge-status-on";
+                        btn.innerText = "🟢 ON";
+                    } else {
+                        btn.className = "badge toggle-btn badge-status-off";
+                        btn.innerText = "🔴 OFF";
+                    }
+                } else {
+                    if (data.new_val === 'LOW') {
+                        btn.className = "badge toggle-btn badge-dir-low";
+                        btn.innerText = "🟢 LOW";
+                    } else {
+                        btn.className = "badge toggle-btn badge-dir-high";
+                        btn.innerText = "🔴 HIGH";
+                    }
+                }
+            }
+        })
+        .catch(error => console.error('Error:', error));
+    }
+    </script>
 </body>
 </html>
 """
