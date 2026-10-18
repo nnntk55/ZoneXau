@@ -496,7 +496,66 @@ def update_order_config(asset_key):
         
     return redirect(url_for("home"))
 
+@app.route("/")
+def home():
+    global global_flash
+    msg = global_flash["msg"]
+    ftype = global_flash["type"]
+    global_flash["msg"] = None
+    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
 
+@app.route("/send-test")
+def send_test():
+    global global_flash
+    success = send_telegram_notification(
+        "✅ *ทดสอบระบบสำเร็จ!* (ระบบเรดาร์ Multi-Asset ทำงานปกติ)"
+    )
+    if success:
+        global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
+        global_flash["type"] = "success"
+    else:
+        global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
+        global_flash["type"] = "error"
+    return redirect(url_for("home"))
+
+@app.route("/update_stage_tfs/<asset_key>", methods=["POST"])
+def update_stage_tfs(asset_key):
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+        
+    st = ASSETS[asset_key]["state"]
+    
+    new_tfs = []
+    for i in range(1, 5):
+        tf = request.form.get(f"stage_{i}_tf")
+        if tf:
+            new_tfs.append(tf)
+            
+    if len(new_tfs) == 4:
+        st["stage_tfs"] = new_tfs
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"      
+    return redirect(url_for("home"))
+
+@app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
+def toggle_status(asset_key, action_type):
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+        
+    st = ASSETS[asset_key]["state"]
+    
+    if action_type == "power":
+        st["is_active"] = not st["is_active"]
+        new_val = st["is_active"]
+    elif action_type == "direction":
+        st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
+        new_val = st["active_direction"]
+    else:
+        return jsonify({"status": "error", "message": "Invalid action"}), 400
+        
+    save_state_to_sheets(asset_key, st)
+    return jsonify({"status": "success", "new_val": new_val})
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
