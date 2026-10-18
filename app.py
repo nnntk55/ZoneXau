@@ -13,18 +13,22 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
+
 matplotlib.use("Agg")
+
 # ==========================================
 # CONFIGURATION & ASSETS DEFINITION
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
+
 def load_states_from_sheets():
     default_data = {
         "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
         "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
-        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True}
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
+        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True}
     }
     if not GOOGLE_SCRIPT_URL:
         return default_data
@@ -41,6 +45,7 @@ def load_states_from_sheets():
     except Exception as e:
         print(f"Load States from Sheets Error: {e}")
     return default_data
+
 def save_state_to_sheets(asset_key, state_dict):
     if not GOOGLE_SCRIPT_URL:
         return
@@ -54,11 +59,16 @@ def save_state_to_sheets(asset_key, state_dict):
             "custom_mode": state_dict.get("custom_mode"),
             "custom_tf": state_dict.get("custom_tf"),
             "custom_dir": state_dict.get("custom_dir"),
-            "is_active": state_dict.get("is_active", True)
+            "is_active": state_dict.get("is_active", True),
+            "stage_tfs": state_dict.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "lot": state_dict.get("lot", 0.01),
+            "tp_pips": state_dict.get("tp_pips", 300),
+            "sl_pips": state_dict.get("sl_pips", 200)
         }
         requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
     except Exception as e:
         print(f"Save State to Sheets Error: {e}")
+
 saved_states = load_states_from_sheets()
 ASSETS = {
     "xau": {
@@ -79,6 +89,11 @@ ASSETS = {
             # ⚙️ เพิ่มตั้งค่า Timeframe อิสระสำหรับแต่ละ Stage (ค่าเริ่มต้น: 4h -> 1h -> 15m -> 5m)
             "stage_tfs": saved_states.get("xau", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             
+            # 🎯 เพิ่มตั้งค่า Lot, TP, SL
+            "lot": saved_states.get("xau", {}).get("lot", 0.01),
+            "tp_pips": saved_states.get("xau", {}).get("tp_pips", 300),
+            "sl_pips": saved_states.get("xau", {}).get("sl_pips", 200),
+            
             # S&R Zones (Advanced Fractals / S&R)
             "support_zones": [],
             "resistance_zones": [],
@@ -94,6 +109,7 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "execute_notified": False,
         }
     },
     "us": {
@@ -112,6 +128,10 @@ ASSETS = {
             "note": saved_states.get("us", {}).get("note", "ยังไม่มีบันทึกแผน"),
             
             "stage_tfs": saved_states.get("us", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "lot": saved_states.get("us", {}).get("lot", 0.01),
+            "tp_pips": saved_states.get("us", {}).get("tp_pips", 300),
+            "sl_pips": saved_states.get("us", {}).get("sl_pips", 200),
+            
             "support_zones": [],
             "resistance_zones": [],
 
@@ -126,6 +146,7 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "execute_notified": False,
         }
     },
     "oil": {
@@ -144,6 +165,10 @@ ASSETS = {
             "note": saved_states.get("oil", {}).get("note", "ยังไม่มีบันทึกแผน"),
             
             "stage_tfs": saved_states.get("oil", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "lot": saved_states.get("oil", {}).get("lot", 0.01),
+            "tp_pips": saved_states.get("oil", {}).get("tp_pips", 300),
+            "sl_pips": saved_states.get("oil", {}).get("sl_pips", 200),
+            
             "support_zones": [],
             "resistance_zones": [],
 
@@ -158,6 +183,44 @@ ASSETS = {
             "stage1_notified": False,
             "stage2_notified": False,
             "stage3_notified": False,
+            "execute_notified": False,
+        }
+    },
+    "btc": {
+        "symbol": "BTC-USD",
+        "name": "BTCUSD",
+        "emoji": "₿",
+        "state": {
+            "current_stage": saved_states.get("btc", {}).get("current_stage", 1),
+            "target_mode": saved_states.get("btc", {}).get("target_mode", "AUTO"),
+            "active_direction": saved_states.get("btc", {}).get("active_direction", "LOW"),
+            "custom_mode": saved_states.get("btc", {}).get("custom_mode", False),
+            "custom_tf": saved_states.get("btc", {}).get("custom_tf", None),
+            "custom_dir": saved_states.get("btc", {}).get("custom_dir", None),
+            "is_active": saved_states.get("btc", {}).get("is_active", True),
+            "last_check": "กำลังเริ่มทำงาน...",
+            "note": saved_states.get("btc", {}).get("note", "ยังไม่มีบันทึกแผน"),
+            
+            "stage_tfs": saved_states.get("btc", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "lot": saved_states.get("btc", {}).get("lot", 0.01),
+            "tp_pips": saved_states.get("btc", {}).get("tp_pips", 300),
+            "sl_pips": saved_states.get("btc", {}).get("sl_pips", 200),
+            
+            "support_zones": [],
+            "resistance_zones": [],
+
+            "k_1w": 0.0, "d_1w": 0.0,
+            "k_1d": 0.0, "d_1d": 0.0,
+            "k_4h": 0.0, "d_4h": 0.0,
+            "k_1h": 0.0, "d_1h": 0.0,
+            "k_15m": 0.0, "d_15m": 0.0,
+            "k_5m": 0.0, "d_5m": 0.0,
+            "charts": {"1w": None, "1d": None, "4h": None, "1h": None, "15m": None, "5m": None},
+            "signal_logs": [],
+            "stage1_notified": False,
+            "stage2_notified": False,
+            "stage3_notified": False,
+            "execute_notified": False,
         }
     }
 }
@@ -245,16 +308,16 @@ HTML_TEMPLATE = """
                 <div style="display: flex; gap: 5px; align-items: center;">
                     
                     <!-- 🟢/🔴 ปุ่มสวิชต์เปิด-ปิดเรดาร์ -->
-        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
-        class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
-            {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
-        </button>
+                    <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
+                    class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
+                        {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+                    </button>
 
                     <!-- 🔄 ปุ่มสลับทิศทาง LOW / HIGH -->
-        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
-        class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-            {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
-        </button>
+                    <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
+                    class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                    </button>
 
                     {% if asset.state.custom_mode %}
                         <span class="badge badge-custom">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
@@ -287,6 +350,26 @@ HTML_TEMPLATE = """
                     {% endfor %}
                 </div>
                 <button type="submit" style="width: 100%; margin-top: 8px; background: #38bdf8; color: #000; border: none; padding: 4px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึก Timeframe</button>
+            </form>
+
+            <!-- 🎯 ฟอร์มตั้งค่า Lot / TP / SL (เพิ่มเข้ามาใหม่รองรับ Execution Setup) -->
+            <form action="/update_order_config/{{ key }}" method="POST" style="margin-top: 8px; background: #0f172a; padding: 8px 10px; border-radius: 8px; border: 1px solid #475569;">
+                <div style="font-size: 0.75rem; color: #38bdf8; margin-bottom: 5px; font-weight: bold;">🎯 ตั้งค่าออเดอร์ (Execution Setup)</div>
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem;">
+                    <div style="flex: 1;">
+                        <span>Lot:</span>
+                        <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>TP (pips):</span>
+                        <input type="number" name="tp_pips" value="{{ asset.state.tp_pips }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>SL (pips):</span>
+                        <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                    </div>
+                </div>
+                <button type="submit" style="width: 100%; margin-top: 6px; background: #22c55e; color: #000; border: none; padding: 3px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึกแผนเทรด</button>
             </form>
 
             <div class="tf-grid">
@@ -344,7 +427,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b> | เปิด/ปิด: <b>[asset] on/off</b> หรือ <b>on/off</b> | รีเซ็ต: <b>reset</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>[asset] on/off</b> | รีเซ็ต: <b>reset</b>
         </div>
     </div>
 
@@ -358,7 +441,6 @@ HTML_TEMPLATE = """
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                // เลือก element ตาม actionType ให้ถูกต้อง
                 const targetId = (actionType === 'power') ? `power-btn-${assetKey}` : `dir-btn-${assetKey}`;
                 const btn = document.getElementById(targetId);
                 
@@ -389,66 +471,32 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-@app.route("/")
-def home():
-    global global_flash
-    msg = global_flash["msg"]
-    ftype = global_flash["type"]
-    global_flash["msg"] = None
-    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
-@app.route("/send-test")
-def send_test():
-    global global_flash
-    success = send_telegram_notification(
-        "✅ *ทดสอบระบบสำเร็จ!* (แก้ไขคำสั่ง sum ให้แสดงครบ xau, us, oil เรียบร้อยแล้ว)"
-    )
-    if success:
-        global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
-        global_flash["type"] = "success"
-    else:
-        global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
-        global_flash["type"] = "error"
-    return redirect(url_for("home"))
-@app.route("/update_stage_tfs/<asset_key>", methods=["POST"])
-def update_stage_tfs(asset_key):
+@app.route("/update_order_config/<asset_key>", methods=["POST"])
+def update_order_config(asset_key):
     if asset_key not in ASSETS:
         return "Asset not found", 404
         
     st = ASSETS[asset_key]["state"]
     
-    # รับค่า Timeframe ใหม่สำหรับ Stage 1, 2, 3, 4 จากฟอร์มหน้าเว็บ
-    new_tfs = []
-    for i in range(1, 5):
-        tf = request.form.get(f"stage_{i}_tf")
-        if tf:
-            new_tfs.append(tf)
-            
-    if len(new_tfs) == 4:
-        st["stage_tfs"] = new_tfs
-        save_state_to_sheets(asset_key, st)  # ถ้ามีฟังก์ชันบันทึก
-        global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
-        global_flash["type"] = "success"      
-    return redirect(url_for("home"))  # หรือจะใช้ jsonify ตามโครงสร้างเดิมก็ได้ครับ
-@app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
-def toggle_status(asset_key, action_type):
-    if asset_key not in ASSETS:
-        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    try:
+        lot = float(request.form.get("lot", 0.01))
+        tp_pips = int(request.form.get("tp_pips", 300))
+        sl_pips = int(request.form.get("sl_pips", 200))
         
-    st = ASSETS[asset_key]["state"]
-    
-    if action_type == "power":
-        # สลับสถานะ ON / OFF
-        st["is_active"] = not st["is_active"]
-        new_val = st["is_active"]
-    elif action_type == "direction":
-        # สลับทิศทาง LOW / HIGH
-        st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
-        new_val = st["active_direction"]
-    else:
-        return jsonify({"status": "error", "message": "Invalid action"}), 400
+        st["lot"] = lot
+        st["tp_pips"] = tp_pips
+        st["sl_pips"] = sl_pips
         
-    save_state_to_sheets(asset_key, st)
-    return jsonify({"status": "success", "new_val": new_val})
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = f"บันทึกค่าออเดอร์ (Lot/TP/SL) ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"
+    except Exception as e:
+        global_flash["msg"] = f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}"
+        global_flash["type"] = "error"
+        
+    return redirect(url_for("home"))
+
+
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
@@ -471,6 +519,8 @@ def telegram_webhook():
                 threading.Thread(target=send_summary_report, args=("oil", chat_id)).start()
             elif text_lower == "us":
                 threading.Thread(target=send_summary_report, args=("us", chat_id)).start()
+            elif text_lower == "btc":
+                threading.Thread(target=send_summary_report, args=("btc", chat_id)).start()
             elif text_lower == "on":
                 for k in ASSETS.keys():
                     ASSETS[k]["state"]["is_active"] = True
@@ -520,6 +570,11 @@ def telegram_webhook():
                 ASSETS["oil"]["state"]["note"] = note_content
                 save_state_to_sheets("oil", ASSETS["oil"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
+            elif text_lower.startswith("btcnote "):
+                note_content = text[8:].strip()
+                ASSETS["btc"]["state"]["note"] = note_content
+                save_state_to_sheets("btc", ASSETS["btc"]["state"])
+                send_telegram_notification(f"📝 บันทึกโน้ต BTCUSD สำเร็จ:\n\"{note_content}\"", asset_key="btc", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
                 asset_key = parts[0]
                 tf = parts[1]
@@ -558,11 +613,15 @@ def telegram_webhook():
     except Exception as e:
         print(f"Webhook Error: {e}")
         return "OK", 200
+
+
 def log_signal(asset_key, text):
     timestamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
     ASSETS[asset_key]["state"]["signal_logs"].insert(0, {"time": timestamp, "text": text})
     if len(ASSETS[asset_key]["state"]["signal_logs"]) > 50:
         ASSETS[asset_key]["state"]["signal_logs"].pop()
+
+
 def send_telegram_notification(message, asset_key=None, chat_id=None):
     target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target_chat:
@@ -583,6 +642,8 @@ def send_telegram_notification(message, asset_key=None, chat_id=None):
     except Exception as e:
         print(f"Telegram Error: {e} | Message: {message}")
         return False
+
+
 def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_key=None):
     target_chat = chat_id if chat_id else TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target_chat or not photo_bytes:
@@ -596,6 +657,8 @@ def send_telegram_photo_with_caption(photo_bytes, caption, chat_id=None, asset_k
             log_signal(asset_key, caption)
     except Exception as e:
         print(f"Telegram Photo Error: {e}")
+
+
 # ==========================================
 # GENERATE CHART (OPTIMIZED MEMORY)
 # ==========================================
@@ -641,6 +704,8 @@ def generate_stoch_chart(df, title, mini=False):
             plt.close(fig)
         plt.close('all')
         gc.collect()
+
+
 def fetch_all_data(symbol):
     return {
         "1w": fetch_data(symbol, period="2y", interval="1wk"),
@@ -650,6 +715,8 @@ def fetch_all_data(symbol):
         "15m": fetch_data(symbol, period="5d", interval="15m"),
         "5m": fetch_data(symbol, period="2d", interval="5m"),
     }
+
+
 def send_single_summary_text_only(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -668,6 +735,8 @@ def send_single_summary_text_only(asset_key, chat_id):
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
     except Exception as e:
         print(f"Single Summary Error ({asset_key}): {e}")
+
+
 def send_summary_report(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -693,11 +762,15 @@ def send_summary_report(asset_key, chat_id):
                     send_telegram_photo_with_caption(base64.b64decode(img_b64), f"📈 กราฟ [{tf_name}] - {asset['name']}", chat_id=chat_id)
     except Exception as e:
         print(f"Summary Report Error ({asset_key}): {e}")
+
+
 def send_all_summary_report(chat_id):
-    for key in ["xau", "us", "oil"]:
+    for key in ["xau", "us", "oil", "btc"]:
         if key in ASSETS:
             send_single_summary_text_only(key, chat_id)
             time.sleep(0.8)
+
+
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
     if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
         return None, None
@@ -718,6 +791,8 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     k = stoch_rsi_raw.rolling(window=k_period).mean()
     d = k.rolling(window=d_period).mean()
     return k, d
+
+
 def fetch_data(symbol, period, interval):
     try:
         data = yf.download(symbol, period=period, interval=interval, progress=False)
@@ -727,6 +802,8 @@ def fetch_data(symbol, period, interval):
     except Exception as e:
         print(f"Fetch Data Error ({symbol} - {interval}): {e}")
         return None
+
+
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
     st = asset["state"]
@@ -905,6 +982,8 @@ def run_asset_radar(asset_key):
             print(f"Radar Loop Error ({asset_key}): {e}")
         gc.collect()
         time.sleep(60)
+
+
 if __name__ == "__main__":
     for key in ASSETS.keys():
         t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
