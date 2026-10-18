@@ -244,17 +244,17 @@ HTML_TEMPLATE = """
                 <span style="font-size: 1rem; font-weight: bold; color: #38bdf8;">{{ asset.emoji }} {{ asset.name }} (คำสั่ง: {{ key }})</span>
                 <div style="display: flex; gap: 5px; align-items: center;">
                     
-                    <!-- 🟢/🔴 ปุ่มสวิชต์เปิด-ปิดเรดาร์ (คลิกเปลี่ยนสถานะทันที) -->
-                    <button onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
-                            class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
-                        {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
-                    </button>
+                    <!-- 🟢/🔴 ปุ่มสวิชต์เปิด-ปิดเรดาร์ -->
+        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
+        class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
+            {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+        </button>
 
-                    <!-- 🔄 ปุ่มสลับทิศทาง LOW / HIGH (คลิกเปลี่ยนสถานะทันที) -->
-                    <button onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
-                            class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
-                    </button>
+                    <!-- 🔄 ปุ่มสลับทิศทาง LOW / HIGH -->
+        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
+        class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+            {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+        </button>
 
                     {% if asset.state.custom_mode %}
                         <span class="badge badge-custom">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
@@ -358,22 +358,27 @@ HTML_TEMPLATE = """
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                const btn = document.getElementById(`${actionType === 'power' ? 'power-btn' : 'dir-btn'}-${assetKey}`);
-                if (actionType === 'power') {
-                    if (data.new_val) {
-                        btn.className = "badge toggle-btn badge-status-on";
-                        btn.innerText = "🟢 ON";
-                    } else {
-                        btn.className = "badge toggle-btn badge-status-off";
-                        btn.innerText = "🔴 OFF";
-                    }
-                } else {
-                    if (data.new_val === 'LOW') {
-                        btn.className = "badge toggle-btn badge-dir-low";
-                        btn.innerText = "🟢 LOW";
-                    } else {
-                        btn.className = "badge toggle-btn badge-dir-high";
-                        btn.innerText = "🔴 HIGH";
+                // เลือก element ตาม actionType ให้ถูกต้อง
+                const targetId = (actionType === 'power') ? `power-btn-${assetKey}` : `dir-btn-${assetKey}`;
+                const btn = document.getElementById(targetId);
+                
+                if (btn) {
+                    if (actionType === 'power') {
+                        if (data.new_val) {
+                            btn.className = "badge toggle-btn badge-status-on";
+                            btn.innerText = "🟢 ON";
+                        } else {
+                            btn.className = "badge toggle-btn badge-status-off";
+                            btn.innerText = "🔴 OFF";
+                        }
+                    } else if (actionType === 'direction') {
+                        if (data.new_val === 'LOW') {
+                            btn.className = "badge toggle-btn badge-dir-low";
+                            btn.innerText = "🟢 LOW";
+                        } else {
+                            btn.className = "badge toggle-btn badge-dir-high";
+                            btn.innerText = "🔴 HIGH";
+                        }
                     }
                 }
             }
