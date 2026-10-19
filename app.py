@@ -481,26 +481,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-@app.route("/update_order_config/<asset_key>", methods=["POST"])
-def update_order_config(asset_key):
-    if asset_key not in ASSETS:
-        return "Asset not found", 404
-    st = ASSETS[asset_key]["state"]
-    try:
-        lot = float(request.form.get("lot", 0.01))
-        tp_pips = int(request.form.get("tp_pips", 300))
-        sl_pips = int(request.form.get("sl_pips", 200))
-        st["lot"] = lot
-        st["tp_pips"] = tp_pips
-        st["sl_pips"] = sl_pips
-        save_state_to_sheets(asset_key, st)
-        global_flash["msg"] = f"บันทึกค่าออเดอร์ (Lot/TP/SL) ของ {ASSETS[asset_key]['name']} สำเร็จ!"
-        global_flash["type"] = "success"
-    except Exception as e:
-        global_flash["msg"] = f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}"
-        global_flash["type"] = "error"
-    return redirect(url_for("home"))
-
 @app.route("/")
 def home():
     global global_flash
