@@ -296,9 +296,6 @@ ASSETS = {
 global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
 
-# ==========================================
-# HTML TEMPLATE
-# ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="th">
@@ -505,7 +502,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-
 # ==========================================
 # NOTIFICATION & HELPER FUNCTIONS
 # ==========================================
