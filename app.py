@@ -331,17 +331,19 @@ HTML_TEMPLATE = """
                 <div>{{ asset.state.note }}</div>
             </div>
 
-            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ -->
+            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ (เพิ่มตัวเลือก OFF) -->
             <form action="/update_stage_tfs/{{ key }}" method="POST" style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #475569;">
                 <div style="font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; font-weight: bold;">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
                 <div style="display: flex; justify-content: space-between; gap: 5px; font-size: 0.75rem;">
-                    {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m'] %}
+                    {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
                     <div>
                         <span>S{{ idx+1 }}:</span>
                         <select name="stage_{{ idx+1 }}_tf" style="background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px; font-size: 0.75rem;">
                             {% for tf in available_tfs %}
-                            <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>{{ tf|upper }}</option>
+                            <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>
+                                {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
@@ -350,7 +352,7 @@ HTML_TEMPLATE = """
                 <button type="submit" style="width: 100%; margin-top: 8px; background: #38bdf8; color: #000; border: none; padding: 4px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึก Timeframe</button>
             </form>
 
-            <!-- 🎯 ฟอร์มตั้งค่า Lot / TP / SL (เพิ่มเข้ามาใหม่รองรับ Execution Setup) -->
+            <!-- 🎯 ฟอร์มตั้งค่า Lot / TP / SL -->
             <form action="/update_order_config/{{ key }}" method="POST" style="margin-top: 8px; background: #0f172a; padding: 8px 10px; border-radius: 8px; border: 1px solid #475569;">
                 <div style="font-size: 0.75rem; color: #38bdf8; margin-bottom: 5px; font-weight: bold;">🎯 ตั้งค่าออเดอร์ (Execution Setup)</div>
                 <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem;">
@@ -521,6 +523,11 @@ def update_stage_tfs(asset_key):
             new_tfs.append(tf)
     if len(new_tfs) == 4:
         st["stage_tfs"] = new_tfs
+        # อัปเดต current_stage ไปยัง Stage แรกที่ไม่เป็น "off"
+        for idx, tf in enumerate(new_tfs):
+            if tf != "off":
+                st["current_stage"] = idx + 1
+                break
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"     
@@ -593,8 +600,48 @@ def telegram_webhook():
                     st["stage1_notified"] = False
                     st["stage2_notified"] = False
                     st["stage3_notified"] = False
+                    st["stage_tfs"] = ["4h", "1h", "15m", "5m"]
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
+            
+            # 📌 คำสั่งควบคุมเปิด/ปิด Stage ย่อยผ่าน Telegram (เช่น xau st 1/2/3 off หรือ us st 1/2 on)
+            elif len(parts) >= 4 and parts[0] in ASSETS and parts[1] == "st":
+                asset_key = parts[0]
+                stages_str = parts[2] # เช่น "1/2/3" หรือ "1"
+                action = parts[-1]    # "off" หรือ "on"
+                
+                if action in ["on", "off"]:
+                    st = ASSETS[asset_key]["state"]
+                    current_tfs = list(st.get("stage_tfs", ["4h", "1h", "15m", "5m"]))
+                    default_tfs = ["4h", "1h", "15m", "5m"]
+                    
+                    target_stages = stages_str.split("/")
+                    updated_stages = []
+                    
+                    for s in target_stages:
+                        if s.isdigit() and 1 <= int(s) <= 4:
+                            idx = int(s) - 1
+                            if action == "off":
+                                current_tfs[idx] = "off"
+                            else:
+                                current_tfs[idx] = default_tfs[idx]
+                            updated_stages.append(f"S{s}")
+                    
+                    st["stage_tfs"] = current_tfs
+                    
+                    # ปรับ current_stage ไปยัง Stage แรกที่ไม่ถูกสั่ง OFF
+                    for i, tf in enumerate(current_tfs):
+                        if tf != "off":
+                            st["current_stage"] = i + 1
+                            break
+                            
+                    save_state_to_sheets(asset_key, st)
+                    
+                    stages_txt = ", ".join(updated_stages)
+                    act_txt = "🔴 ปิด (OFF)" if action == "off" else "🟢 เปิด (ON)"
+                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {st['current_stage']}"
+                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
+
             elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["on", "off"]:
                 asset_key = parts[0]
                 action = parts[1]
@@ -866,7 +913,7 @@ def check_daily_reset_and_state(asset_key):
             print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
 
 # ---------------------------------------------------------
-# RADAR ENGINE LOOP (AUTO PAUSE ON STAGE 4 & DAILY RESET)
+# RADAR ENGINE LOOP (AUTO PAUSE ON STAGE 4 & DAILY RESET & SKIP STAGE)
 # ---------------------------------------------------------
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
@@ -894,7 +941,19 @@ def run_asset_radar(asset_key):
                     st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
                 st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
                 
+                # ⚙️ ตรวจสอบและข้าม Stage ที่ถูกตั้งค่าเป็น "off"
                 stage_tfs = st.get("stage_tfs", ["4h", "1h", "15m", "5m"])
+                curr_st_idx = st["current_stage"] - 1
+                
+                while curr_st_idx < 4 and stage_tfs[curr_st_idx] == "off":
+                    st["current_stage"] += 1
+                    curr_st_idx = st["current_stage"] - 1
+                    save_state_to_sheets(asset_key, st)
+                
+                if st["current_stage"] > 4:
+                    time.sleep(10)
+                    continue
+
                 tf_s1, tf_s2, tf_s3, tf_s4 = stage_tfs[0], stage_tfs[1], stage_tfs[2], stage_tfs[3]
 
                 if st.get("custom_mode"):
