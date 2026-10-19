@@ -744,20 +744,62 @@ def update_market_data():
     for asset_key, payload in data.items():
         if asset_key in ASSETS:
             st = ASSETS[asset_key]["state"]
+            
+            # 1. อัปเดตราคาปัจจุบัน
             if "price" in payload:
                 st["price"] = float(payload["price"])
+            
+            # 2. เตรียมโครงสร้างเก็บบันทึกประวัติ K/D ย้อนหลัง (30 ค่า) สำหรับวาดกราฟ
+            if "history" not in st:
+                st["history"] = {tf: {"k": [], "d": []} for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]}
+                
             for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
                 if f"k_{tf}" in payload:
                     st[f"k_{tf}"] = float(payload[f"k_{tf}"])
+                    st["history"][tf]["k"].append(float(payload[f"k_{tf}"]))
+                    if len(st["history"][tf]["k"]) > 30:
+                        st["history"][tf]["k"].pop(0)
+                        
                 if f"d_{tf}" in payload:
                     st[f"d_{tf}"] = float(payload[f"d_{tf}"])
-                if f"chart_{tf}" in payload:
-                    st["charts"][tf] = payload[f"chart_{tf}"]
+                    st["history"][tf]["d"].append(float(payload[f"d_{tf}"]))
+                    if len(st["history"][tf]["d"]) > 30:
+                        st["history"][tf]["d"].pop(0)
+
+                # 3. วาดภาพกราฟมินิเมื่อมีประวัติ K และ D อย่างน้อย 2 ค่าขึ้นไป
+                sub_k = st["history"][tf]["k"]
+                sub_d = st["history"][tf]["d"]
+                if len(sub_k) >= 2 and len(sub_d) >= 2:
+                    fig = None
+                    try:
+                        fig, ax = plt.subplots(figsize=(3.5, 1.8), facecolor="#1e293b")
+                        ax.set_facecolor("#0f172a")
+                        ax.plot(range(len(sub_k)), sub_k, label="K", color="#38bdf8", linewidth=1.5)
+                        ax.plot(range(len(sub_d)), sub_d, label="D", color="#f97316", linewidth=1.0)
+                        ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=0.8)
+                        ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=0.8)
+                        ax.set_ylim(-5, 105)
+                        plt.tick_params(colors="#94a3b8", labelsize=6)
+                        for spine in ax.spines.values():
+                            spine.set_color("#475569")
+                        plt.tight_layout()
+                        buf = io.BytesIO()
+                        plt.savefig(buf, format="png", dpi=120, facecolor="#1e293b")
+                        buf.seek(0)
+                        st["charts"][tf] = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        buf.close()
+                    except Exception as e:
+                        print(f"Chart Render Error ({tf}): {e}")
+                    finally:
+                        if fig is not None:
+                            plt.close(fig)
+                        plt.close('all')
+                        gc.collect()
+
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
             save_state_to_sheets(asset_key, st)
             
-    return jsonify({"status": "success", "message": "MT5 Data and Charts synced successfully"})
-
+    return jsonify({"status": "success", "message": "MT5 Data and Auto-Generated Charts synced successfully"})
 @app.route('/api/get_market_data', methods=['GET'])
 def get_market_data():
     output = {}
