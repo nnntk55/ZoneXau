@@ -533,7 +533,6 @@ def update_stage_tfs(asset_key):
             new_tfs.append(tf)
     if len(new_tfs) == 4:
         st["stage_tfs"] = new_tfs
-        # อัปเดต current_stage ไปยัง Stage แรกที่ไม่เป็น "off"
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
                 st["current_stage"] = idx + 1
@@ -560,6 +559,47 @@ def toggle_status(asset_key, action_type):
         return jsonify({"status": "error", "message": "Invalid action"}), 400
     save_state_to_sheets(asset_key, st)
     return jsonify({"status": "success", "new_val": new_val})
+
+# 🔗 API สำหรับให้บอทฝั่ง Windows/MT5 ดึงค่าคอนฟิกไปใช้
+@app.route("/api/config/<asset_key>", methods=["GET"])
+def get_asset_config(asset_key):
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    st = ASSETS[asset_key]["state"]
+    return jsonify({
+        "lot": st.get("lot", 0.01),
+        "tp_pips": st.get("tp_pips", 300),
+        "sl_pips": st.get("sl_pips", 200),
+        "current_stage": st.get("current_stage", 1),
+        "is_active": st.get("is_active", True),
+        "active_direction": st.get("active_direction", "LOW")
+    })
+
+# 💰 API สำหรับให้บอทฝั่ง Windows ส่งราคาปัจจุบันและค่า Stoch มาอัปเดตบนหน้าเว็บ Render
+@app.route('/api/update_market_data', methods=['POST'])
+def update_market_data():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No data received"}), 400
+        
+        for asset_key, market_info in data.items():
+            if asset_key in ASSETS:
+                st = ASSETS[asset_key]["state"]
+                if "price" in market_info:
+                    st["price"] = float(market_info["price"])
+                
+                for tf_key in ["1w", "1d", "4h", "1h", "15m", "5m"]:
+                    if f"k_{tf_key}" in market_info:
+                        st[f"k_{tf_key}"] = float(market_info[f"k_{tf_key}"])
+                    if f"d_{tf_key}" in market_info:
+                        st[f"d_{tf_key}"] = float(market_info[f"d_{tf_key}"])
+                
+                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+                
+        return jsonify({"status": "success", "message": "Market data updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
@@ -614,11 +654,10 @@ def telegram_webhook():
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
             
-            # 📌 คำสั่งควบคุมเปิด/ปิด Stage ย่อยผ่าน Telegram (เช่น xau st 1/2/3 off หรือ us st 1/2 on)
             elif len(parts) >= 4 and parts[0] in ASSETS and parts[1] == "st":
                 asset_key = parts[0]
-                stages_str = parts[2] # เช่น "1/2/3" หรือ "1"
-                action = parts[-1]    # "off" หรือ "on"
+                stages_str = parts[2]
+                action = parts[-1]
                 
                 if action in ["on", "off"]:
                     st = ASSETS[asset_key]["state"]
@@ -638,15 +677,12 @@ def telegram_webhook():
                             updated_stages.append(f"S{s}")
                     
                     st["stage_tfs"] = current_tfs
-                    
-                    # ปรับ current_stage ไปยัง Stage แรกที่ไม่ถูกสั่ง OFF
                     for i, tf in enumerate(current_tfs):
                         if tf != "off":
                             st["current_stage"] = i + 1
                             break
                             
                     save_state_to_sheets(asset_key, st)
-                    
                     stages_txt = ", ".join(updated_stages)
                     act_txt = "🔴 ปิด (OFF)" if action == "off" else "🟢 เปิด (ON)"
                     msg = f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {st['current_stage']}"
@@ -662,60 +698,14 @@ def telegram_webhook():
                 save_state_to_sheets(asset_key, st)
                 status_txt = "🟢 เปิด (ON)" if st["is_active"] else "🔴 ปิด (OFF)"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
-            elif text_lower.startswith("xaunote "):
-                note_content = text[8:].strip()
-                ASSETS["xau"]["state"]["note"] = note_content
-                save_state_to_sheets("xau", ASSETS["xau"]["state"])
-                send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
-            elif text_lower.startswith("usnote "):
-                note_content = text[7:].strip()
-                ASSETS["us"]["state"]["note"] = note_content
-                save_state_to_sheets("us", ASSETS["us"]["state"])
-                send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us", chat_id=chat_id)
-            elif text_lower.startswith("oilnote "):
-                note_content = text[8:].strip()
-                ASSETS["oil"]["state"]["note"] = note_content
-                save_state_to_sheets("oil", ASSETS["oil"]["state"])
-                send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
-            elif text_lower.startswith("btcnote "):
-                note_content = text[8:].strip()
-                ASSETS["btc"]["state"]["note"] = note_content
-                save_state_to_sheets("btc", ASSETS["btc"]["state"])
-                send_telegram_notification(f"📝 บันทึกโน้ต BTCUSD สำเร็จ:\n\"{note_content}\"", asset_key="btc", chat_id=chat_id)
-            elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
-                asset_key = parts[0]
-                tf = parts[1]
-                direction = parts[2].upper()
-                st = ASSETS[asset_key]["state"]
-                st["custom_mode"] = True
-                st["custom_tf"] = tf
-                st["custom_dir"] = direction
-                st["target_mode"] = f"CUSTOM_{tf.upper()}_{direction}"
-                save_state_to_sheets(asset_key, st)
-                msg = f"🎯 *{ASSETS[asset_key]['name']}*: ตั้งค่าติดตามพิเศษ Timeframe *{tf.upper()}* ฝั่ง *{direction}* เรียบร้อยแล้ว!"
-                send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
-            else:
-                if len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["high", "low"]:
-                    asset_key = parts[0]
-                    direction = parts[1].upper()
-                    st = ASSETS[asset_key]["state"]
-                    st["custom_mode"] = False
-                    st["custom_tf"] = None
-                    st["custom_dir"] = None
-                    st["target_mode"] = f"{direction}_ONLY"
-                    st["active_direction"] = direction
-                    st["current_stage"] = 1
-                    st["stage1_notified"] = False
-                    st["stage2_notified"] = False
-                    st["stage3_notified"] = False
-                    save_state_to_sheets(asset_key, st)
-                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
-                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
         return "OK", 200
     except Exception as e:
         print(f"Webhook Error: {e}")
         return "OK", 200
 
+# ---------------------------------------------------------
+# HELPER & NOTIFICATION FUNCTIONS
+# ---------------------------------------------------------
 # ---------------------------------------------------------
 # HELPER & NOTIFICATION FUNCTIONS
 # ---------------------------------------------------------
@@ -820,16 +810,6 @@ def generate_stoch_chart(df, title, mini=False):
         plt.close('all')
         gc.collect()
 
-def fetch_all_data(symbol):
-    return {
-        "1w": fetch_data(symbol, period="2y", interval="1wk"),
-        "1d": fetch_data(symbol, period="1y", interval="1d"),
-        "4h": fetch_data(symbol, period="60d", interval="4h"),
-        "1h": fetch_data(symbol, period="14d", interval="1h"),
-        "15m": fetch_data(symbol, period="5d", interval="15m"),
-        "5m": fetch_data(symbol, period="2d", interval="5m"),
-    }
-
 def send_single_summary_text_only(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
@@ -840,7 +820,6 @@ def send_single_summary_text_only(asset_key, chat_id):
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
         
-        # 💰 เพิ่มราคาปัจจุบันลงในข้อความสรุป Telegram
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -855,14 +834,12 @@ def send_summary_report(asset_key, chat_id):
     try:
         asset = ASSETS[asset_key]
         st = asset["state"]
-        dfs = fetch_all_data(asset["symbol"])
         status_str = "🟢 ON" if st.get("is_active", True) else "🔴 OFF"
         if st.get("custom_mode"):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
         
-        # 💰 เพิ่มราคาปัจจุบันลงในรายงานเดี่ยว
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -870,12 +847,6 @@ def send_summary_report(asset_key, chat_id):
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
-        time.sleep(0.3)
-        for tf_key, tf_name in [("1w", "1W"), ("1d", "1D"), ("4h", "4H"), ("1h", "1H"), ("15m", "15M"), ("5m", "5M")]:
-            if dfs[tf_key] is not None:
-                img_b64 = generate_stoch_chart(dfs[tf_key], f"Stoch RSI - {tf_name} ({asset['name']})", mini=False)
-                if img_b64:
-                    send_telegram_photo_with_caption(base64.b64decode(img_b64), f"📈 กราฟ [{tf_name}] - {asset['name']}", chat_id=chat_id)
     except Exception as e:
         print(f"Summary Report Error ({asset_key}): {e}")
 
@@ -902,16 +873,6 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     d = k.rolling(window=d_period).mean()
     return k, d
 
-def fetch_data(symbol, period, interval):
-    try:
-        data = yf.download(symbol, period=period, interval=interval, progress=False)
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.droplevel(1)
-        return data if data is not None and not data.empty else None
-    except Exception as e:
-        print(f"Fetch Data Error ({symbol} - {interval}): {e}")
-        return None
-
 def check_daily_reset_and_state(asset_key):
     st = ASSETS[asset_key]["state"]
     current_date = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
@@ -929,41 +890,230 @@ def check_daily_reset_and_state(asset_key):
             print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
 
 # ---------------------------------------------------------
-# API Endpoints สำหรับรับข้อมูล Real-time และราคา จาก MT5 ที่บ้าน
+# API Endpoints
 # ---------------------------------------------------------
+@app.route("/update_order_config/<asset_key>", methods=["POST"])
+def update_order_config(asset_key):
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+    st = ASSETS[asset_key]["state"]
+    try:
+        lot = float(request.form.get("lot", 0.01))
+        tp_pips = int(request.form.get("tp_pips", 300))
+        sl_pips = int(request.form.get("sl_pips", 200))
+        st["lot"] = lot
+        st["tp_pips"] = tp_pips
+        st["sl_pips"] = sl_pips
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = f"บันทึกค่าออเดอร์ (Lot/TP/SL) ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"
+    except Exception as e:
+        global_flash["msg"] = f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}"
+        global_flash["type"] = "error"
+    return redirect(url_for("home"))
+
+@app.route("/")
+def home():
+    global global_flash
+    msg = global_flash["msg"]
+    ftype = global_flash["type"]
+    global_flash["msg"] = None
+    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
+
+@app.route("/send-test")
+def send_test():
+    global global_flash
+    success = send_telegram_notification("✅ *ทดสอบระบบสำเร็จ!* (ระบบเรดาร์ Multi-Asset ทำงานปกติ)")
+    if success:
+        global_flash["msg"] = "✅ ส่งข้อความทดสอบเข้า Telegram สำเร็จ!"
+        global_flash["type"] = "success"
+    else:
+        global_flash["msg"] = "❌ ส่งไม่สำเร็จ! กรุณาตรวจสอบ Token / Chat ID บน Render"
+        global_flash["type"] = "error"
+    return redirect(url_for("home"))
+
+@app.route("/update_stage_tfs/<asset_key>", methods=["POST"])
+def update_stage_tfs(asset_key):
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+    st = ASSETS[asset_key]["state"]
+    new_tfs = []
+    for i in range(1, 5):
+        tf = request.form.get(f"stage_{i}_tf")
+        if tf:
+            new_tfs.append(tf)
+    if len(new_tfs) == 4:
+        st["stage_tfs"] = new_tfs
+        for idx, tf in enumerate(new_tfs):
+            if tf != "off":
+                st["current_stage"] = idx + 1
+                break
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"     
+    return redirect(url_for("home"))
+
+@app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
+def toggle_status(asset_key, action_type):
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    st = ASSETS[asset_key]["state"]
+    if action_type == "power":
+        st["is_active"] = not st["is_active"]
+        if st["is_active"]:
+            st["auto_paused_today"] = False
+        new_val = st["is_active"]
+    elif action_type == "direction":
+        st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
+        new_val = st["active_direction"]
+    else:
+        return jsonify({"status": "error", "message": "Invalid action"}), 400
+    save_state_to_sheets(asset_key, st)
+    return jsonify({"status": "success", "new_val": new_val})
+
+@app.route("/api/config/<asset_key>", methods=["GET"])
+def get_asset_config(asset_key):
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    st = ASSETS[asset_key]["state"]
+    return jsonify({
+        "lot": st.get("lot", 0.01),
+        "tp_pips": st.get("tp_pips", 300),
+        "sl_pips": st.get("sl_pips", 200),
+        "current_stage": st.get("current_stage", 1),
+        "is_active": st.get("is_active", True),
+        "active_direction": st.get("active_direction", "LOW")
+    })
+
 @app.route('/api/update_market_data', methods=['POST'])
 def update_market_data():
-    data = request.json
-    if not data:
-        return jsonify({"status": "error", "message": "No data received"}), 400
-    
-    for asset_key, payload in data.items():
-        if asset_key in ASSETS:
-            st = ASSETS[asset_key]["state"]
-            
-            # 💰 รับและบันทึกราคาปัจจุบันที่ส่งมาจากบอท MT5 ที่บ้าน
-            if "price" in payload:
-                st["price"] = float(payload["price"])
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No data received"}), 400
+        
+        for asset_key, market_info in data.items():
+            if asset_key in ASSETS:
+                st = ASSETS[asset_key]["state"]
+                if "price" in market_info:
+                    st["price"] = float(market_info["price"])
                 
-            for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
-                if f"k_{tf}" in payload:
-                    st[f"k_{tf}"] = payload[f"k_{tf}"]
-                if f"d_{tf}" in payload:
-                    st[f"d_{tf}"] = payload[f"d_{tf}"]
-            st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
-            save_state_to_sheets(asset_key, st)
-            
-    return jsonify({"status": "success", "message": "Market data and price synced successfully"})
+                for tf_key in ["1w", "1d", "4h", "1h", "15m", "5m"]:
+                    if f"k_{tf_key}" in market_info:
+                        st[f"k_{tf_key}"] = float(market_info[f"k_{tf_key}"])
+                    if f"d_{tf_key}" in market_info:
+                        st[f"d_{tf_key}"] = float(market_info[f"d_{tf_key}"])
+                
+                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+                
+        return jsonify({"status": "success", "message": "Market data updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/get_market_data', methods=['GET'])
-def get_market_data():
-    output = {}
-    for k, asset in ASSETS.items():
-        output[k] = asset["state"]
-    return jsonify(output)
+@app.route("/telegram-webhook", methods=["GET", "POST"])
+def telegram_webhook():
+    if request.method == "GET":
+        return "Webhook is active!", 200
+    try:
+        data = request.get_json(silent=True)
+        if data and "message" in data and "text" in data["message"]:
+            text = data["message"]["text"].strip()
+            text_lower = text.lower()
+            chat_id = data["message"]["chat"]["id"]
+            parts = text_lower.split()
+            
+            if text_lower == "sum":
+                threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
+            elif text_lower == "xau":
+                threading.Thread(target=send_summary_report, args=("xau", chat_id)).start()
+            elif text_lower == "oil":
+                threading.Thread(target=send_summary_report, args=("oil", chat_id)).start()
+            elif text_lower == "us":
+                threading.Thread(target=send_summary_report, args=("us", chat_id)).start()
+            elif text_lower == "btc":
+                threading.Thread(target=send_summary_report, args=("btc", chat_id)).start()
+            elif text_lower == "on":
+                for k in ASSETS.keys():
+                    ASSETS[k]["state"]["is_active"] = True
+                    ASSETS[k]["state"]["auto_paused_today"] = False
+                    save_state_to_sheets(k, ASSETS[k]["state"])
+                send_telegram_notification("🟢 เปิดการทำงานเรดาร์ทุกคู่เงิน (ALL ON) เรียบร้อยแล้ว", chat_id=chat_id)
+            elif text_lower == "off":
+                for k in ASSETS.keys():
+                    ASSETS[k]["state"]["is_active"] = False
+                    save_state_to_sheets(k, ASSETS[k]["state"])
+                send_telegram_notification("🔴 ปิดการทำงานเรดาร์ทุกคู่เงิน (ALL OFF) เรียบร้อยแล้ว", chat_id=chat_id)
+            elif text_lower == "reset":
+                for k in ASSETS.keys():
+                    st = ASSETS[k]["state"]
+                    st["current_stage"] = 1
+                    st["target_mode"] = "AUTO"
+                    st["active_direction"] = "LOW"
+                    st["custom_mode"] = False
+                    st["custom_tf"] = None
+                    st["custom_dir"] = None
+                    st["is_active"] = True
+                    st["auto_paused_today"] = False
+                    st["last_trade_date"] = None
+                    st["note"] = "ยังไม่มีบันทึกแผน"
+                    st["stage1_notified"] = False
+                    st["stage2_notified"] = False
+                    st["stage3_notified"] = False
+                    st["stage_tfs"] = ["4h", "1h", "15m", "5m"]
+                    save_state_to_sheets(k, st)
+                send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
+            
+            elif len(parts) >= 4 and parts[0] in ASSETS and parts[1] == "st":
+                asset_key = parts[0]
+                stages_str = parts[2]
+                action = parts[-1]
+                
+                if action in ["on", "off"]:
+                    st = ASSETS[asset_key]["state"]
+                    current_tfs = list(st.get("stage_tfs", ["4h", "1h", "15m", "5m"]))
+                    default_tfs = ["4h", "1h", "15m", "5m"]
+                    
+                    target_stages = stages_str.split("/")
+                    updated_stages = []
+                    
+                    for s in target_stages:
+                        if s.isdigit() and 1 <= int(s) <= 4:
+                            idx = int(s) - 1
+                            if action == "off":
+                                current_tfs[idx] = "off"
+                            else:
+                                current_tfs[idx] = default_tfs[idx]
+                            updated_stages.append(f"S{s}")
+                    
+                    st["stage_tfs"] = current_tfs
+                    for i, tf in enumerate(current_tfs):
+                        if tf != "off":
+                            st["current_stage"] = i + 1
+                            break
+                            
+                    save_state_to_sheets(asset_key, st)
+                    stages_txt = ", ".join(updated_stages)
+                    act_txt = "🔴 ปิด (OFF)" if action == "off" else "🟢 เปิด (ON)"
+                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {st['current_stage']}"
+                    send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
+
+            elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["on", "off"]:
+                asset_key = parts[0]
+                action = parts[1]
+                st = ASSETS[asset_key]["state"]
+                st["is_active"] = (action == "on")
+                if st["is_active"]:
+                    st["auto_paused_today"] = False
+                save_state_to_sheets(asset_key, st)
+                status_txt = "🟢 เปิด (ON)" if st["is_active"] else "🔴 ปิด (OFF)"
+                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
+        return "OK", 200
+    except Exception as e:
+        print(f"Webhook Error: {e}")
+        return "OK", 200
 
 # ---------------------------------------------------------
-# RADAR ENGINE LOOP (AUTO PAUSE ON STAGE 4 & DAILY RESET & SKIP STAGE)
+# RADAR ENGINE LOOP
 # ---------------------------------------------------------
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
@@ -978,23 +1128,6 @@ def run_asset_radar(asset_key):
             if not st.get("is_active", True):
                 time.sleep(10)
                 continue
-
-            # 📊 ดึงข้อมูลกราฟและคำนวณ Stoch RSI อัปเดตสดๆ บน Render
-            dfs = fetch_all_data(symbol)
-            if all(dfs[tf] is not None for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]):
-                ks, ds = {}, {}
-                for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
-                    k_val, d_val = calculate_stochastic_rsi(dfs[tf])
-                    ks[tf] = k_val
-                    ds[tf] = d_val
-                    st[f"k_{tf}"] = float(k_val.iloc[-1]) if k_val is not None else 0.0
-                    st[f"d_{tf}"] = float(d_val.iloc[-1]) if d_val is not None else 0.0
-                    st["charts"][tf] = generate_stoch_chart(dfs[tf], tf.upper(), mini=True)
-                
-                # 💰 ดึงราคาปัจจุบันจากแท่งเทียนล่าสุดมาแสดงผล
-                latest_price = float(dfs["5m"]["Close"].iloc[-1]) if dfs["5m"] is not None and not dfs["5m"].empty else 0.0
-                st["price"] = latest_price
-                st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
             stage_tfs = st.get("stage_tfs", ["4h", "1h", "15m", "5m"])
             curr_st_idx = st["current_stage"] - 1
@@ -1020,14 +1153,12 @@ def run_asset_radar(asset_key):
                 elif target_dir == "HIGH" and k_target > 80:
                     is_hit = True
                 if is_hit:
-                    img_b64 = generate_stoch_chart(dfs[target_tf], f"Stoch RSI - {target_tf.upper()} ({name})", mini=False)
                     msg = (
                         f"🎯 *{name} Custom Alert*:\n"
                         f"Timeframe *{target_tf.upper()}* ถึงจุดหมายฝั่ง *{target_dir}* แล้ว! (K = {k_target:.2f})\n"
                         f"✅ แจ้งเตือนสำเร็จ และระบบได้รีเซ็ตกลับสู่โหมดออโต้ปกติแล้ว"
                     )
-                    if img_b64:
-                        send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                    send_telegram_notification(msg, asset_key=asset_key)
                     st["custom_mode"] = False
                     st["custom_tf"] = None
                     st["custom_dir"] = None
@@ -1044,181 +1175,61 @@ def run_asset_radar(asset_key):
                     if st["current_stage"] == 1:
                         if st.get(f"k_{tf_s1}", 0) < 20:
                             if not st["stage1_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s1], f"Stoch RSI - {tf_s1.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าเขต Oversold แล้ว (K = {st.get(f'k_{tf_s1}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าเขต Oversold แล้ว (K = {st.get(f'k_{tf_s1}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage1_notified"] = True
                             st["current_stage"] = 2
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 2:
                         if st.get(f"k_{tf_s2}", 0) < 20:
                             if not st["stage2_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s2], f"Stoch RSI - {tf_s2.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ LOW ZONE แล้ว! (K = {st.get(f'k_{tf_s2}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ LOW ZONE แล้ว! (K = {st.get(f'k_{tf_s2}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage2_notified"] = True
                             st["current_stage"] = 3
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 3:
                         if st.get(f"k_{tf_s3}", 0) < 20:
                             if not st["stage3_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s3], f"Stoch RSI - {tf_s3.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ LOW ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ LOW ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage3_notified"] = True
                             st["current_stage"] = 4
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 4:
-                        df_s4 = dfs[tf_s4]
-                        if df_s4 is not None and len(df_s4) > 10:
-                            df_s4['EMA8'] = df_s4['Close'].ewm(span=8, adjust=False).mean()
-                            latest_k = float(ks[tf_s4].iloc[-1])
-                            latest_d = float(ds[tf_s4].iloc[-1])
-                            prev_k = float(ks[tf_s4].iloc[-2])
-                            prev_d = float(ds[tf_s4].iloc[-2])
-                            
-                            latest_close = float(df_s4['Close'].iloc[-1])
-                            latest_open = float(df_s4['Open'].iloc[-1])
-                            latest_ema8 = float(df_s4['EMA8'].iloc[-1])
-                            
-                            is_cross = (prev_k < prev_d) and (latest_k > latest_d)
-                            is_bullish_candle = latest_close > latest_open
-                            closes_above_ema8 = latest_close > latest_ema8
-                            
-                            triggered = (latest_k < 20 and is_cross and is_bullish_candle and closes_above_ema8)
-                            
-                            if triggered:
-                                img_b64 = generate_stoch_chart(df_s4, f"Stoch RSI - {tf_s4.upper()} ({name}) [EXECUTE BUY]", mini=False)
-                                msg = (
-                                    f"🟢 *{name} EXECUTE BUY TRIGGER* ({tf_s4.upper()})!\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"📊 *เงื่อนไขจุดเข้าสมบูรณ์:*\n"
-                                    f"• Stoch K ({latest_k:.2f}) ตัด D ขึ้น\n"
-                                    f"• แท่งเทียน Bullish ปิดเหนือ EMA 8 สำเร็จ\n"
-                                    f"• ราคาปิดแท่งคอนเฟิร์ม: `{latest_close:.2f}`\n"
-                                    f"• เส้น EMA 8: `{latest_ema8:.2f}`\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"⚡ **ส่งคำสั่ง BUY เข้า Exness MT5 แล้ว!**\n"
-                                    f"📦 Lot: {st.get('lot', 0.01)} | TP: {st.get('tp_pips', 300)} pips | SL: {st.get('sl_pips', 200)} pips\n"
-                                    f"🛑 *ยิงออเดอร์ Stage 4 สำเร็จแล้ว! พักระบบของวันนี้อัตโนมัติ รอรอบใหม่วันพรุ่งนี้*"
-                                )
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                
-                                send_execution_webhook(asset_key, "BUY")
-                                
-                                today_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
-                                st["is_active"] = False
-                                st["auto_paused_today"] = True
-                                st["last_trade_date"] = today_str
-                                
-                                if st["target_mode"] == "AUTO":
-                                    st["active_direction"] = "HIGH"
-                                elif st["target_mode"] == "LOW_ONLY":
-                                    st["active_direction"] = "LOW"
-                                elif st["target_mode"] == "HIGH_ONLY":
-                                    st["active_direction"] = "HIGH"
-                                    
-                                st["current_stage"] = 1
-                                st["stage1_notified"] = False
-                                st["stage2_notified"] = False
-                                st["stage3_notified"] = False
-                                save_state_to_sheets(asset_key, st)
+                        pass
                 else: # HIGH MODE
                     if st["current_stage"] == 1:
                         if st.get(f"k_{tf_s1}", 0) > 80:
                             if not st["stage1_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s1], f"Stoch RSI - {tf_s1.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าเขต Overbought แล้ว (K = {st.get(f'k_{tf_s1}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าเขต Overbought แล้ว (K = {st.get(f'k_{tf_s1}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage1_notified"] = True
                             st["current_stage"] = 2
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 2:
                         if st.get(f"k_{tf_s2}", 0) > 80:
                             if not st["stage2_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s2], f"Stoch RSI - {tf_s2.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ HIGH ZONE แล้ว! (K = {st.get(f'k_{tf_s2}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ HIGH ZONE แล้ว! (K = {st.get(f'k_{tf_s2}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage2_notified"] = True
                             st["current_stage"] = 3
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 3:
                         if st.get(f"k_{tf_s3}", 0) > 80:
                             if not st["stage3_notified"]:
-                                img_b64 = generate_stoch_chart(dfs[tf_s3], f"Stoch RSI - {tf_s3.upper()} ({name})", mini=False)
-                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ HIGH ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ HIGH ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}', 0.0):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
+                                send_telegram_notification(msg, asset_key=asset_key)
                                 st["stage3_notified"] = True
                             st["current_stage"] = 4
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 4:
-                        df_s4 = dfs[tf_s4]
-                        if df_s4 is not None and len(df_s4) > 10:
-                            df_s4['EMA8'] = df_s4['Close'].ewm(span=8, adjust=False).mean()
-                            latest_k = float(ks[tf_s4].iloc[-1])
-                            latest_d = float(ds[tf_s4].iloc[-1])
-                            prev_k = float(ks[tf_s4].iloc[-2])
-                            prev_d = float(ds[tf_s4].iloc[-2])
-                            
-                            latest_close = float(df_s4['Close'].iloc[-1])
-                            latest_open = float(df_s4['Open'].iloc[-1])
-                            latest_ema8 = float(df_s4['EMA8'].iloc[-1])
-                            
-                            is_cross = (prev_k > prev_d) and (latest_k < latest_d)
-                            is_bearish_candle = latest_close < latest_open
-                            closes_below_ema8 = latest_close < latest_ema8
-                            
-                            triggered = (latest_k > 80 and is_cross and is_bearish_candle and closes_below_ema8)
-                            
-                            if triggered:
-                                img_b64 = generate_stoch_chart(df_s4, f"Stoch RSI - {tf_s4.upper()} ({name}) [EXECUTE SELL]", mini=False)
-                                msg = (
-                                    f"🔴 *{name} EXECUTE SELL TRIGGER* ({tf_s4.upper()})!\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"📊 *เงื่อนไขจุดเข้าสมบูรณ์:*\n"
-                                    f"• Stoch K ({latest_k:.2f}) ตัด D ลง\n"
-                                    f"• แท่งเทียน Bearish ปิดใต้ EMA 8 สำเร็จ\n"
-                                    f"• ราคาปิดแท่งคอนเฟิร์ม: `{latest_close:.2f}`\n"
-                                    f"• เส้น EMA 8: `{latest_ema8:.2f}`\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"⚡ **ส่งคำสั่ง SELL เข้า Exness MT5 แล้ว!**\n"
-                                    f"📦 Lot: {st.get('lot', 0.01)} | TP: {st.get('tp_pips', 300)} pips | SL: {st.get('sl_pips', 200)} pips\n"
-                                    f"🛑 *ยิงออเดอร์ Stage 4 สำเร็จแล้ว! พักระบบของวันนี้อัตโนมัติ รอรอบใหม่วันพรุ่งนี้*"
-                                )
-                                if img_b64:
-                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                
-                                send_execution_webhook(asset_key, "SELL")
-                                
-                                today_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
-                                st["is_active"] = False
-                                st["auto_paused_today"] = True
-                                st["last_trade_date"] = today_str
-                                
-                                if st["target_mode"] == "AUTO":
-                                    st["active_direction"] = "LOW"
-                                elif st["target_mode"] == "LOW_ONLY":
-                                    st["active_direction"] = "LOW"
-                                elif st["target_mode"] == "HIGH_ONLY":
-                                    st["active_direction"] = "HIGH"
-                                    
-                                st["current_stage"] = 1
-                                st["stage1_notified"] = False
-                                st["stage2_notified"] = False
-                                st["stage3_notified"] = False
-                                save_state_to_sheets(asset_key, st)
+                        pass
 
         except Exception as e:
             print(f"Radar Loop Error ({asset_key}): {e}")
         gc.collect()
-        time.sleep(60)
+        time.sleep(30)
 
 if __name__ == "__main__":
     for key in ASSETS.keys():
