@@ -735,32 +735,44 @@ def toggle_status(asset_key, action_type):
 def update_market_data():
     data = request.json
     if not data:
+        print("❌ No data received from MT5")
         return jsonify({"status": "error", "message": "No data received"}), 400
-    
+
+    print(f"📥 Received data from MT5: {list(data.keys())}")
+
     for asset_key, payload in data.items():
         if asset_key in ASSETS:
             st = ASSETS[asset_key]["state"]
-            
+            print(f"📊 Processing {asset_key}: price={payload.get('price')}, k_5m={payload.get('k_5m')}")
+
             # 1. อัปเดตราคาปัจจุบัน
             if "price" in payload:
                 st["price"] = float(payload["price"])
-            
+
             # 2. เตรียมโครงสร้างเก็บบันทึกประวัติ K/D ย้อนหลัง (30 ค่า) สำหรับวาดกราฟ
             if "history" not in st:
                 st["history"] = {tf: {"k": [], "d": []} for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]}
-                
+
             for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
-                if f"k_{tf}" in payload:
+                # ถ้าฝั่ง Windows ส่งประวัติมาเลย ให้ใช้ประวัตินั้น
+                if f"k_{tf}_history" in payload and f"d_{tf}_history" in payload:
+                    st["history"][tf]["k"] = payload[f"k_{tf}_history"]
+                    st["history"][tf]["d"] = payload[f"d_{tf}_history"]
                     st[f"k_{tf}"] = float(payload[f"k_{tf}"])
-                    st["history"][tf]["k"].append(float(payload[f"k_{tf}"]))
-                    if len(st["history"][tf]["k"]) > 30:
-                        st["history"][tf]["k"].pop(0)
-                        
-                if f"d_{tf}" in payload:
                     st[f"d_{tf}"] = float(payload[f"d_{tf}"])
-                    st["history"][tf]["d"].append(float(payload[f"d_{tf}"]))
-                    if len(st["history"][tf]["d"]) > 30:
-                        st["history"][tf]["d"].pop(0)
+                else:
+                    # ถ้าไม่ได้ส่งประวัติมา ให้เก็บเพิ่มทีละค่าแบบเดิม
+                    if f"k_{tf}" in payload:
+                        st[f"k_{tf}"] = float(payload[f"k_{tf}"])
+                        st["history"][tf]["k"].append(float(payload[f"k_{tf}"]))
+                        if len(st["history"][tf]["k"]) > 30:
+                            st["history"][tf]["k"].pop(0)
+
+                    if f"d_{tf}" in payload:
+                        st[f"d_{tf}"] = float(payload[f"d_{tf}"])
+                        st["history"][tf]["d"].append(float(payload[f"d_{tf}"]))
+                        if len(st["history"][tf]["d"]) > 30:
+                            st["history"][tf]["d"].pop(0)
 
                 # 3. วาดภาพกราฟมินิเมื่อมีประวัติ K และ D อย่างน้อย 2 ค่าขึ้นไป
                 sub_k = st["history"][tf]["k"]
@@ -784,8 +796,9 @@ def update_market_data():
                         buf.seek(0)
                         st["charts"][tf] = base64.b64encode(buf.getvalue()).decode("utf-8")
                         buf.close()
+                        print(f"✅ Chart generated for {asset_key} {tf}")
                     except Exception as e:
-                        print(f"Chart Render Error ({tf}): {e}")
+                        print(f"❌ Chart Render Error ({tf}): {e}")
                     finally:
                         if fig is not None:
                             plt.close(fig)
@@ -794,7 +807,7 @@ def update_market_data():
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
             save_state_to_sheets(asset_key, st)
-            
+
     return jsonify({"status": "success", "message": "MT5 Data and Auto-Generated Charts synced successfully"})
 @app.route('/api/get_market_data', methods=['GET'])
 def get_market_data():
@@ -806,6 +819,7 @@ def get_market_data():
 @app.route('/api/config/<asset_key>', methods=['GET'])
 def get_asset_config(asset_key):
     """ส่งค่าคอนฟิกล่าสุดของ asset กลับไปให้ฝั่ง Windows/MT5 ดึงไป sync"""
+    print(f"📥 Config request for {asset_key}")
     if asset_key not in ASSETS:
         return jsonify({"status": "error", "message": "Asset not found"}), 404
     st = ASSETS[asset_key]["state"]
@@ -822,6 +836,7 @@ def get_asset_config(asset_key):
         "custom_dir": st.get("custom_dir"),
         "stage_tfs": st.get("stage_tfs", ["4h", "1h", "15m", "5m"])
     }
+    print(f"📤 Sending config for {asset_key}: is_active={config['is_active']}")
     return jsonify(config)
 
 @app.route('/api/update_config/<asset_key>', methods=['POST'])
