@@ -803,6 +803,53 @@ def get_market_data():
         output[k] = asset["state"]
     return jsonify(output)
 
+@app.route('/api/config/<asset_key>', methods=['GET'])
+def get_asset_config(asset_key):
+    """ส่งค่าคอนฟิกล่าสุดของ asset กลับไปให้ฝั่ง Windows/MT5 ดึงไป sync"""
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    st = ASSETS[asset_key]["state"]
+    config = {
+        "lot": st.get("lot", 0.01),
+        "tp_pips": st.get("tp_pips", 300),
+        "sl_pips": st.get("sl_pips", 200),
+        "current_stage": st.get("current_stage", 1),
+        "is_active": st.get("is_active", True),
+        "active_direction": st.get("active_direction", "LOW"),
+        "target_mode": st.get("target_mode", "AUTO"),
+        "custom_mode": st.get("custom_mode", False),
+        "custom_tf": st.get("custom_tf"),
+        "custom_dir": st.get("custom_dir"),
+        "stage_tfs": st.get("stage_tfs", ["4h", "1h", "15m", "5m"])
+    }
+    return jsonify(config)
+
+@app.route('/api/update_config/<asset_key>', methods=['POST'])
+def update_asset_config(asset_key):
+    """รับค่าคอนฟิกจากฝั่ง Windows/MT5 มาอัปเดท (หลังจากเทรดเสร็จ)"""
+    if asset_key not in ASSETS:
+        return jsonify({"status": "error", "message": "Asset not found"}), 404
+    st = ASSETS[asset_key]["state"]
+    try:
+        data = request.json
+        if "current_stage" in data:
+            st["current_stage"] = int(data["current_stage"])
+        if "active_direction" in data:
+            st["active_direction"] = str(data["active_direction"])
+        if "is_active" in data:
+            st["is_active"] = bool(data["is_active"])
+        if "stage1_notified" in data:
+            st["stage1_notified"] = bool(data["stage1_notified"])
+        if "stage2_notified" in data:
+            st["stage2_notified"] = bool(data["stage2_notified"])
+        if "stage3_notified" in data:
+            st["stage3_notified"] = bool(data["stage3_notified"])
+        save_state_to_sheets(asset_key, st)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"Update Config Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/telegram-webhook", methods=["GET", "POST"])
 def telegram_webhook():
     if request.method == "GET":
