@@ -25,10 +25,10 @@ GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
 
 def load_states_from_sheets():
     default_data = {
-        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
-        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
-        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True},
-        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True}
+        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
+        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
+        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False}
     }
     if not GOOGLE_SCRIPT_URL:
         return default_data
@@ -41,6 +41,10 @@ def load_states_from_sheets():
                     data[k] = default_data[k]
                 if "is_active" not in data[k]:
                     data[k]["is_active"] = True
+                if "last_trade_date" not in data[k]:
+                    data[k]["last_trade_date"] = None
+                if "auto_paused_today" not in data[k]:
+                    data[k]["auto_paused_today"] = False
             return data
     except Exception as e:
         print(f"Load States from Sheets Error: {e}")
@@ -60,6 +64,8 @@ def save_state_to_sheets(asset_key, state_dict):
             "custom_tf": state_dict.get("custom_tf"),
             "custom_dir": state_dict.get("custom_dir"),
             "is_active": state_dict.get("is_active", True),
+            "last_trade_date": state_dict.get("last_trade_date"),
+            "auto_paused_today": state_dict.get("auto_paused_today", False),
             "stage_tfs": state_dict.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "lot": state_dict.get("lot", 0.01),
             "tp_pips": state_dict.get("tp_pips", 300),
@@ -83,21 +89,16 @@ ASSETS = {
             "custom_tf": saved_states.get("xau", {}).get("custom_tf", None),
             "custom_dir": saved_states.get("xau", {}).get("custom_dir", None),
             "is_active": saved_states.get("xau", {}).get("is_active", True),
+            "last_trade_date": saved_states.get("xau", {}).get("last_trade_date", None),
+            "auto_paused_today": saved_states.get("xau", {}).get("auto_paused_today", False),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("xau", {}).get("note", "ยังไม่มีบันทึกแผน"),
-            
-            # ⚙️ เพิ่มตั้งค่า Timeframe อิสระสำหรับแต่ละ Stage (ค่าเริ่มต้น: 4h -> 1h -> 15m -> 5m)
             "stage_tfs": saved_states.get("xau", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
-            
-            # 🎯 เพิ่มตั้งค่า Lot, TP, SL
             "lot": saved_states.get("xau", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("xau", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("xau", {}).get("sl_pips", 200),
-            
-            # S&R Zones (Advanced Fractals / S&R)
             "support_zones": [],
             "resistance_zones": [],
-
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -124,17 +125,16 @@ ASSETS = {
             "custom_tf": saved_states.get("us", {}).get("custom_tf", None),
             "custom_dir": saved_states.get("us", {}).get("custom_dir", None),
             "is_active": saved_states.get("us", {}).get("is_active", True),
+            "last_trade_date": saved_states.get("us", {}).get("last_trade_date", None),
+            "auto_paused_today": saved_states.get("us", {}).get("auto_paused_today", False),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("us", {}).get("note", "ยังไม่มีบันทึกแผน"),
-            
             "stage_tfs": saved_states.get("us", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "lot": saved_states.get("us", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("us", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("us", {}).get("sl_pips", 200),
-            
             "support_zones": [],
             "resistance_zones": [],
-
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -161,17 +161,16 @@ ASSETS = {
             "custom_tf": saved_states.get("oil", {}).get("custom_tf", None),
             "custom_dir": saved_states.get("oil", {}).get("custom_dir", None),
             "is_active": saved_states.get("oil", {}).get("is_active", True),
+            "last_trade_date": saved_states.get("oil", {}).get("last_trade_date", None),
+            "auto_paused_today": saved_states.get("oil", {}).get("auto_paused_today", False),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("oil", {}).get("note", "ยังไม่มีบันทึกแผน"),
-            
             "stage_tfs": saved_states.get("oil", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "lot": saved_states.get("oil", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("oil", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("oil", {}).get("sl_pips", 200),
-            
             "support_zones": [],
             "resistance_zones": [],
-
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -198,17 +197,16 @@ ASSETS = {
             "custom_tf": saved_states.get("btc", {}).get("custom_tf", None),
             "custom_dir": saved_states.get("btc", {}).get("custom_dir", None),
             "is_active": saved_states.get("btc", {}).get("is_active", True),
+            "last_trade_date": saved_states.get("btc", {}).get("last_trade_date", None),
+            "auto_paused_today": saved_states.get("btc", {}).get("auto_paused_today", False),
             "last_check": "กำลังเริ่มทำงาน...",
             "note": saved_states.get("btc", {}).get("note", "ยังไม่มีบันทึกแผน"),
-            
             "stage_tfs": saved_states.get("btc", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "lot": saved_states.get("btc", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("btc", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("btc", {}).get("sl_pips", 200),
-            
             "support_zones": [],
             "resistance_zones": [],
-
             "k_1w": 0.0, "d_1w": 0.0,
             "k_1d": 0.0, "d_1d": 0.0,
             "k_4h": 0.0, "d_4h": 0.0,
@@ -525,7 +523,7 @@ def update_stage_tfs(asset_key):
         st["stage_tfs"] = new_tfs
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
-        global_flash["type"] = "success"      
+        global_flash["type"] = "success"     
     return redirect(url_for("home"))
 
 @app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
@@ -535,6 +533,8 @@ def toggle_status(asset_key, action_type):
     st = ASSETS[asset_key]["state"]
     if action_type == "power":
         st["is_active"] = not st["is_active"]
+        if st["is_active"]:
+            st["auto_paused_today"] = False
         new_val = st["is_active"]
     elif action_type == "direction":
         st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
@@ -569,6 +569,7 @@ def telegram_webhook():
             elif text_lower == "on":
                 for k in ASSETS.keys():
                     ASSETS[k]["state"]["is_active"] = True
+                    ASSETS[k]["state"]["auto_paused_today"] = False
                     save_state_to_sheets(k, ASSETS[k]["state"])
                 send_telegram_notification("🟢 เปิดการทำงานเรดาร์ทุกคู่เงิน (ALL ON) เรียบร้อยแล้ว", chat_id=chat_id)
             elif text_lower == "off":
@@ -586,6 +587,8 @@ def telegram_webhook():
                     st["custom_tf"] = None
                     st["custom_dir"] = None
                     st["is_active"] = True
+                    st["auto_paused_today"] = False
+                    st["last_trade_date"] = None
                     st["note"] = "ยังไม่มีบันทึกแผน"
                     st["stage1_notified"] = False
                     st["stage2_notified"] = False
@@ -597,6 +600,8 @@ def telegram_webhook():
                 action = parts[1]
                 st = ASSETS[asset_key]["state"]
                 st["is_active"] = (action == "on")
+                if st["is_active"]:
+                    st["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
                 status_txt = "🟢 เปิด (ON)" if st["is_active"] else "🔴 ปิด (OFF)"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
@@ -653,7 +658,6 @@ def telegram_webhook():
     except Exception as e:
         print(f"Webhook Error: {e}")
         return "OK", 200
-
 # ---------------------------------------------------------
 # HELPER & NOTIFICATION FUNCTIONS
 # ---------------------------------------------------------
@@ -844,8 +848,25 @@ def fetch_data(symbol, period, interval):
         print(f"Fetch Data Error ({symbol} - {interval}): {e}")
         return None
 
+def check_daily_reset_and_state(asset_key):
+    """ฟังก์ชันเช็กข้ามวัน เพื่อรีเซ็ตสถานะเปิดระบบอัตโนมัติ"""
+    st = ASSETS[asset_key]["state"]
+    current_date = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+    last_trade_date = st.get("last_trade_date")
+    
+    if last_trade_date and last_trade_date != current_date:
+        if not st.get("is_active", True) and st.get("auto_paused_today", False):
+            st["is_active"] = True
+            st["auto_paused_today"] = False
+            st["current_stage"] = 1
+            st["stage1_notified"] = False
+            st["stage2_notified"] = False
+            st["stage3_notified"] = False
+            save_state_to_sheets(asset_key, st)
+            print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
+
 # ---------------------------------------------------------
-# RADAR ENGINE LOOP (UPDATED EXECUTE NOTIFICATION)
+# RADAR ENGINE LOOP (AUTO PAUSE ON STAGE 4 & DAILY RESET)
 # ---------------------------------------------------------
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
@@ -855,6 +876,9 @@ def run_asset_radar(asset_key):
     print(f"[{datetime.now()}] 🚀 Radar Started for {name} ({symbol})...")
     while True:
         try:
+            # 🔄 เช็กข้ามวันเพื่อรีเซ็ตอัตโนมัติ
+            check_daily_reset_and_state(asset_key)
+
             if not st.get("is_active", True):
                 time.sleep(10)
                 continue
@@ -970,12 +994,18 @@ def run_asset_radar(asset_key):
                                         f"━━━━━━━━━━━━━━━━━━━\n"
                                         f"⚡ **ส่งคำสั่ง BUY เข้า Exness MT5 แล้ว!**\n"
                                         f"📦 Lot: {st.get('lot', 0.01)} | TP: {st.get('tp_pips', 300)} pips | SL: {st.get('sl_pips', 200)} pips\n"
-                                        f"🛑 พักระบบและสลับไปรอสัญญาณฝั่ง SELL รอบถัดไป"
+                                        f"🛑 *ยิงออเดอร์ Stage 4 สำเร็จแล้ว! พักระบบของวันนี้อัตโนมัติ รอรอบใหม่วันพรุ่งนี้*"
                                     )
                                     if img_b64:
                                         send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                                     
                                     send_execution_webhook(asset_key, "BUY")
+                                    
+                                    # 🛑 ปิดการทำงานอัตโนมัติหลังจบ Stage 4 เพื่อรอวันถัดไป
+                                    today_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+                                    st["is_active"] = False
+                                    st["auto_paused_today"] = True
+                                    st["last_trade_date"] = today_str
                                     
                                     if st["target_mode"] == "AUTO":
                                         st["active_direction"] = "HIGH"
@@ -1056,12 +1086,18 @@ def run_asset_radar(asset_key):
                                         f"━━━━━━━━━━━━━━━━━━━\n"
                                         f"⚡ **ส่งคำสั่ง SELL เข้า Exness MT5 แล้ว!**\n"
                                         f"📦 Lot: {st.get('lot', 0.01)} | TP: {st.get('tp_pips', 300)} pips | SL: {st.get('sl_pips', 200)} pips\n"
-                                        f"🛑 พักระบบและสลับไปรอสัญญาณฝั่ง BUY รอบถัดไป"
+                                        f"🛑 *ยิงออเดอร์ Stage 4 สำเร็จแล้ว! พักระบบของวันนี้อัตโนมัติ รอรอบใหม่วันพรุ่งนี้*"
                                     )
                                     if img_b64:
                                         send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                                     
                                     send_execution_webhook(asset_key, "SELL")
+                                    
+                                    # 🛑 ปิดการทำงานอัตโนมัติหลังจบ Stage 4 เพื่อรอวันถัดไป
+                                    today_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+                                    st["is_active"] = False
+                                    st["auto_paused_today"] = True
+                                    st["last_trade_date"] = today_str
                                     
                                     if st["target_mode"] == "AUTO":
                                         st["active_direction"] = "LOW"
@@ -1086,4 +1122,3 @@ if __name__ == "__main__":
         t.start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
