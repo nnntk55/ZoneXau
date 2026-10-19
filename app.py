@@ -22,6 +22,64 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
 
+def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
+    if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
+        return None, None
+    delta = df["Close"].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = (-delta.where(delta < 0, 0))
+    avg_gain = gain.ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    lowest_rsi = rsi.rolling(window=stoch_period).min()
+    highest_rsi = rsi.rolling(window=stoch_period).max()
+    stoch_rsi_raw = (rsi - lowest_rsi) / (highest_rsi - lowest_rsi) * 100
+    k = stoch_rsi_raw.rolling(window=k_period).mean()
+    d = k.rolling(window=d_period).mean()
+    return k, d
+
+def generate_stoch_chart(df, title, mini=False):
+    fig = None
+    try:
+        if df is None or len(df) < 30:
+            return None
+        k, d = calculate_stochastic_rsi(df)
+        if k is None or d is None:
+            return None
+        sub_k = k.iloc[-30:]
+        sub_d = d.iloc[-30:]
+        figsize = (3.5, 1.8) if mini else (6, 3)
+        fig, ax = plt.subplots(figsize=figsize, facecolor="#1e293b")
+        ax.set_facecolor("#0f172a")
+        ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#38bdf8", linewidth=1.5 if mini else 2)
+        ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#f97316", linewidth=1 if mini else 1.5)
+        ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=0.8)
+        ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=0.8)
+        if not mini:
+            plt.title(title, color="#f8fafc", fontsize=10, fontweight="bold")
+            plt.legend(loc="upper left", facecolor="#1e293b", labelcolor="#f8fafc")
+        plt.tick_params(colors="#94a3b8", labelsize=6 if mini else 8)
+        ax.spines["bottom"].set_color("#475569")
+        ax.spines["top"].set_color("#475569")
+        ax.spines["left"].set_color("#475569")
+        ax.spines["right"].set_color("#475569")
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#1e293b")
+        buf.seek(0)
+        img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+        buf.close()
+        return img_str
+    except Exception as e:
+        print(f"Chart Gen Error: {e}")
+        return None
+    finally:
+        if fig is not None:
+            plt.close(fig)
+        plt.close('all')
+        gc.collect()
+
 def load_states_from_sheets():
     default_data = {
         "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
@@ -285,7 +343,7 @@ HTML_TEMPLATE = """
         .tf-box { background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 6px; text-align: center; }
         .tf-title { font-size: 0.75rem; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
         .tf-val { font-size: 0.7rem; color: #cbd5e1; margin-bottom: 4px; }
-        .tf-img { width: 100%; height: auto; border-radius: 4px; }
+        .tf-img { width: 100%; height: auto; border-radius: 4px; margin-top: 4px; display: block; }
         .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
         .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
         .btn:hover { background-color: #0284c7; }
@@ -341,7 +399,7 @@ HTML_TEMPLATE = """
                 <div>{{ asset.state.note }}</div>
             </div>
 
-            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ (เพิ่มตัวเลือก OFF) -->
+            <!-- ⚙️ ฟอร์มเลือก Timeframe แต่ละ Stage อิสระ -->
             <form action="/update_stage_tfs/{{ key }}" method="POST" style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #475569;">
                 <div style="font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; font-weight: bold;">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
                 <div style="display: flex; justify-content: space-between; gap: 5px; font-size: 0.75rem;">
@@ -382,46 +440,47 @@ HTML_TEMPLATE = """
                 <button type="submit" style="width: 100%; margin-top: 6px; background: #22c55e; color: #000; border: none; padding: 3px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึกแผนเทรด</button>
             </form>
 
+            <!-- 📊 แสดงค่าตัวเลขและมินิกราฟ Stochastic RSI ทั้ง 6 Timeframes -->
             <div class="tf-grid">
                 <div class="tf-box">
                     <div class="tf-title">1W</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1w) }}|D:{{ "%.1f"|format(asset.state.d_1w) }}</div>
-                    {% if asset.state.charts.get("1w") %}
+                    {% if asset.state.charts and asset.state.charts.get("1w") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1w'] }}" class="tf-img" alt="1W">
                     {% endif %}
                 </div>
                 <div class="tf-box">
                     <div class="tf-title">1D</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1d) }}|D:{{ "%.1f"|format(asset.state.d_1d) }}</div>
-                    {% if asset.state.charts.get("1d") %}
+                    {% if asset.state.charts and asset.state.charts.get("1d") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1d'] }}" class="tf-img" alt="1D">
                     {% endif %}
                 </div>
                 <div class="tf-box">
                     <div class="tf-title">4H</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_4h) }}|D:{{ "%.1f"|format(asset.state.d_4h) }}</div>
-                    {% if asset.state.charts.get("4h") %}
+                    {% if asset.state.charts and asset.state.charts.get("4h") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['4h'] }}" class="tf-img" alt="4H">
                     {% endif %}
                 </div>
                 <div class="tf-box">
                     <div class="tf-title">1H</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_1h) }}|D:{{ "%.1f"|format(asset.state.d_1h) }}</div>
-                    {% if asset.state.charts.get("1h") %}
+                    {% if asset.state.charts and asset.state.charts.get("1h") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['1h'] }}" class="tf-img" alt="1H">
                     {% endif %}
                 </div>
                 <div class="tf-box">
                     <div class="tf-title">15M</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_15m) }}|D:{{ "%.1f"|format(asset.state.d_15m) }}</div>
-                    {% if asset.state.charts.get("15m") %}
+                    {% if asset.state.charts and asset.state.charts.get("15m") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['15m'] }}" class="tf-img" alt="15M">
                     {% endif %}
                 </div>
                 <div class="tf-box">
                     <div class="tf-title">5M</div>
                     <div class="tf-val">K:{{ "%.1f"|format(asset.state.k_5m) }}|D:{{ "%.1f"|format(asset.state.d_5m) }}</div>
-                    {% if asset.state.charts.get("5m") %}
+                    {% if asset.state.charts and asset.state.charts.get("5m") %}
                     <img src="data:image/png;base64,{{ asset.state.charts['5m'] }}" class="tf-img" alt="5M">
                     {% endif %}
                 </div>
