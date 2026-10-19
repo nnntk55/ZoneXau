@@ -471,11 +471,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-คุณเอ็มครับ! นี่คือโค้ดส่วนสุดท้ายของไฟล์ `app.py` ฉบับสมบูรณ์ ที่เรา **อัปเดตฟังก์ชัน `run_asset_radar` ให้วิ่งตาม Timeframe อิสระของแต่ละ Stage (S1, S2, S3, S4) พร้อมเงื่อนไข EMA 8 และแท่งเทียนกลับตัว** รวมเข้ากับ Flask Routes ทั้งหมดเรียบร้อยแล้วครับ!
-
-สามารถคัดลอกโค้ดชุดนี้ไปวางต่อจากส่วนตรงกลาง (ส่วน HTML Template) ในโปรเจกต์ของคุณเอ็มได้เลยครับ:
-
-```python
 @app.route("/update_order_config/<asset_key>", methods=["POST"])
 def update_order_config(asset_key):
     if asset_key not in ASSETS:
@@ -1115,5 +1110,3 @@ if __name__ == "__main__":
         t.start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
-```
