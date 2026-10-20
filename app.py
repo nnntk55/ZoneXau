@@ -51,23 +51,23 @@ def generate_stoch_chart(df, title, mini=False):
         sub_k = k.iloc[-30:]
         sub_d = d.iloc[-30:]
         figsize = (3.5, 1.8) if mini else (6, 3)
-        fig, ax = plt.subplots(figsize=figsize, facecolor="#1e293b")
-        ax.set_facecolor("#0f172a")
-        ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#38bdf8", linewidth=1.5 if mini else 2)
-        ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#f97316", linewidth=1 if mini else 1.5)
-        ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=0.8)
-        ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=0.8)
+        fig, ax = plt.subplots(figsize=figsize, facecolor="#fdf6e3")
+        ax.set_facecolor("#eee8d5")
+        ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#268bd2", linewidth=1.5 if mini else 2)
+        ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#cb4b16", linewidth=1 if mini else 1.5)
+        ax.axhline(80, color="#dc322f", linestyle="--", alpha=0.7, linewidth=0.8)
+        ax.axhline(20, color="#859900", linestyle="--", alpha=0.7, linewidth=0.8)
         if not mini:
-            plt.title(title, color="#f8fafc", fontsize=10, fontweight="bold")
-            plt.legend(loc="upper left", facecolor="#1e293b", labelcolor="#f8fafc")
-        plt.tick_params(colors="#94a3b8", labelsize=6 if mini else 8)
-        ax.spines["bottom"].set_color("#475569")
-        ax.spines["top"].set_color("#475569")
-        ax.spines["left"].set_color("#475569")
-        ax.spines["right"].set_color("#475569")
+            plt.title(title, color="#586e75", fontsize=10, fontweight="normal")
+            plt.legend(loc="upper left", facecolor="#eee8d5", labelcolor="#586e75")
+        plt.tick_params(colors="#586e75", labelsize=6 if mini else 8)
+        ax.spines["bottom"].set_color("#d0c7b6")
+        ax.spines["top"].set_color("#d0c7b6")
+        ax.spines["left"].set_color("#d0c7b6")
+        ax.spines["right"].set_color("#d0c7b6")
         plt.tight_layout()
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#1e293b")
+        plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#fdf6e3")
         buf.seek(0)
         img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
@@ -305,58 +305,173 @@ HTML_TEMPLATE = """
     <title>Multi-Asset Zone Trigger Radar</title>
     <meta http-equiv="refresh" content="30">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 15px; }
-        .container { max-width: 1200px; margin: 0 auto; background: #1e293b; padding: 15px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-        h1 { font-size: 1.25rem; text-align: center; color: #38bdf8; margin-bottom: 5px; font-weight: 700; }
-        .subtitle { text-align: center; font-size: 0.8rem; color: #94a3b8; margin-bottom: 15px; }
-        .card { background: #334155; padding: 14px; border-radius: 12px; margin-bottom: 12px; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
-        .badge-stage1 { background: #eab308; color: #000; }
-        .badge-stage2 { background: #f97316; color: #fff; }
-        .badge-stage3 { background: #3b82f6; color: #fff; }
-        .badge-stage4 { background: #ef4444; color: #fff; }
-        .badge-custom { background: #8b5cf6; color: #fff; }
-        .badge-dir-low { background: #065f46; color: #d1fae5; }
-        .badge-dir-high { background: #991b1b; color: #fee2e2; }
-        .badge-status-on { background: #065f46; color: #d1fae5; }
-        .badge-status-off { background: #7f1d1d; color: #fecaca; }
-        
-        .toggle-btn { cursor: pointer; border: none; transition: transform 0.1s ease, background-color 0.2s; }
-        .toggle-btn:active { transform: scale(0.95); }
-
-        .note-box { 
-            margin-top: 10px; 
-            background: linear-gradient(135deg, #1e293b, #0f172a); 
-            border-left: 4px solid #38bdf8; 
-            border-top: 1px solid #475569;
-            border-right: 1px solid #475569;
-            border-bottom: 1px solid #475569;
-            padding: 10px 12px; 
-            border-radius: 8px; 
-            font-size: 0.9rem; 
-            color: #ffffff; 
-            font-weight: bold;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        body {
+            font-family: "Georgia", "Times New Roman", serif;
+            background-color: #fdf6e3;
+            color: #657b83;
+            margin: 0;
+            padding: 20px;
         }
-        .note-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; font-weight: normal; }
-        .tf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 10px; }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #eee8d5;
+            padding: 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border: 1px solid #d0c7b6;
+        }
+        h1 {
+            font-size: 1.5rem;
+            text-align: center;
+            color: #586e75;
+            margin-bottom: 5px;
+            font-weight: normal;
+            letter-spacing: 0.5px;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 0.85rem;
+            color: #93a1a1;
+            margin-bottom: 20px;
+            font-style: italic;
+        }
+        .card {
+            background: #fdf6e3;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            border: 1px solid #d0c7b6;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 2px;
+            font-size: 0.75rem;
+            font-weight: normal;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-stage1 { background: #b58900; color: #fdf6e3; }
+        .badge-stage2 { background: #cb4b16; color: #fdf6e3; }
+        .badge-stage3 { background: #268bd2; color: #fdf6e3; }
+        .badge-stage4 { background: #dc322f; color: #fdf6e3; }
+        .badge-custom { background: #6c71c4; color: #fdf6e3; }
+        .badge-dir-low { background: #859900; color: #fdf6e3; }
+        .badge-dir-high { background: #dc322f; color: #fdf6e3; }
+        .badge-status-on { background: #859900; color: #fdf6e3; }
+        .badge-status-off { background: #586e75; color: #fdf6e3; }
+
+        .toggle-btn {
+            cursor: pointer;
+            border: 1px solid #d0c7b6;
+            transition: all 0.2s ease;
+        }
+        .toggle-btn:active { transform: scale(0.98); }
+
+        .note-box {
+            margin-top: 12px;
+            background: #fdf6e3;
+            border-left: 3px solid #b58900;
+            border-top: 1px solid #d0c7b6;
+            border-right: 1px solid #d0c7b6;
+            border-bottom: 1px solid #d0c7b6;
+            padding: 12px 14px;
+            border-radius: 2px;
+            font-size: 0.85rem;
+            color: #586e75;
+            font-style: italic;
+        }
+        .note-title {
+            font-size: 0.7rem;
+            color: #93a1a1;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            font-weight: normal;
+            letter-spacing: 1px;
+        }
+        .tf-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 10px;
+            margin-top: 12px;
+        }
         @media (max-width: 900px) {
             .tf-grid { grid-template-columns: repeat(3, 1fr); }
         }
         @media (max-width: 500px) {
             .tf-grid { grid-template-columns: repeat(2, 1fr); }
         }
-        .tf-box { background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 6px; text-align: center; }
-        .tf-title { font-size: 0.75rem; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
-        .tf-val { font-size: 0.7rem; color: #cbd5e1; margin-bottom: 4px; }
-        .tf-img { width: 100%; height: auto; border-radius: 4px; margin-top: 4px; display: block; }
-        .btn-container { text-align: center; margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-        .btn { background-color: #0ea5e9; color: white; padding: 8px 14px; border: none; border-radius: 8px; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
-        .btn:hover { background-color: #0284c7; }
-        .alert-box { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 0.8rem; text-align: center; }
-        .alert-success { background-color: #065f46; color: #d1fae5; }
-        .alert-error { background-color: #991b1b; color: #fee2e2; }
-        .status-footer { text-align: center; font-size: 0.7rem; color: #64748b; margin-top: 10px; }
+        .tf-box {
+            background: #eee8d5;
+            border: 1px solid #d0c7b6;
+            border-radius: 2px;
+            padding: 8px;
+            text-align: center;
+        }
+        .tf-title {
+            font-size: 0.7rem;
+            font-weight: normal;
+            color: #268bd2;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tf-val {
+            font-size: 0.65rem;
+            color: #586e75;
+            margin-bottom: 4px;
+        }
+        .tf-img {
+            width: 100%;
+            height: auto;
+            border-radius: 2px;
+            margin-top: 4px;
+            display: block;
+            border: 1px solid #d0c7b6;
+        }
+        .btn-container {
+            text-align: center;
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            background-color: #268bd2;
+            color: #fdf6e3;
+            padding: 8px 16px;
+            border: 1px solid #2aa198;
+            border-radius: 2px;
+            font-size: 0.75rem;
+            font-weight: normal;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn:hover { background-color: #2aa198; border-color: #859900; }
+        .alert-box {
+            padding: 10px;
+            border-radius: 2px;
+            margin-bottom: 12px;
+            font-size: 0.8rem;
+            text-align: center;
+            border: 1px solid #d0c7b6;
+        }
+        .alert-success { background-color: #859900; color: #fdf6e3; border-color: #b58900; }
+        .alert-error { background-color: #dc322f; color: #fdf6e3; border-color: #cb4b16; }
+        .status-footer {
+            text-align: center;
+            font-size: 0.7rem;
+            color: #93a1a1;
+            margin-top: 15px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
