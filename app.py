@@ -51,23 +51,23 @@ def generate_stoch_chart(df, title, mini=False):
         sub_k = k.iloc[-30:]
         sub_d = d.iloc[-30:]
         figsize = (3.5, 1.8) if mini else (6, 3)
-        fig, ax = plt.subplots(figsize=figsize, facecolor="#fdf6e3")
-        ax.set_facecolor("#eee8d5")
-        ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#268bd2", linewidth=1.5 if mini else 2)
-        ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#cb4b16", linewidth=1 if mini else 1.5)
-        ax.axhline(80, color="#dc322f", linestyle="--", alpha=0.7, linewidth=0.8)
-        ax.axhline(20, color="#859900", linestyle="--", alpha=0.7, linewidth=0.8)
+        fig, ax = plt.subplots(figsize=figsize, facecolor="#f7ead9")
+        ax.set_facecolor("#fdf7ec")
+        ax.plot(range(len(sub_k)), sub_k, label="K" if mini else "Stoch K", color="#5f4a43", linewidth=1.5 if mini else 2)
+        ax.plot(range(len(sub_d)), sub_d, label="D" if mini else "Stoch D", color="#c98a4b", linewidth=1 if mini else 1.5)
+        ax.axhline(80, color="#b0563f", linestyle="--", alpha=0.7, linewidth=0.8)
+        ax.axhline(20, color="#6f8f5f", linestyle="--", alpha=0.7, linewidth=0.8)
         if not mini:
-            plt.title(title, color="#586e75", fontsize=10, fontweight="normal")
-            plt.legend(loc="upper left", facecolor="#eee8d5", labelcolor="#586e75")
-        plt.tick_params(colors="#586e75", labelsize=6 if mini else 8)
-        ax.spines["bottom"].set_color("#d0c7b6")
-        ax.spines["top"].set_color("#d0c7b6")
-        ax.spines["left"].set_color("#d0c7b6")
-        ax.spines["right"].set_color("#d0c7b6")
+            plt.title(title, color="#5f4a43", fontsize=10, fontweight="normal")
+            plt.legend(loc="upper left", facecolor="#fdf7ec", labelcolor="#5f4a43")
+        plt.tick_params(colors="#9b8477", labelsize=6 if mini else 8)
+        ax.spines["bottom"].set_color("#e4d2c1")
+        ax.spines["top"].set_color("#e4d2c1")
+        ax.spines["left"].set_color("#e4d2c1")
+        ax.spines["right"].set_color("#e4d2c1")
         plt.tight_layout()
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#fdf6e3")
+        plt.savefig(buf, format="png", dpi=120 if mini else 150, facecolor="#f7ead9")
         buf.seek(0)
         img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
@@ -304,97 +304,154 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Asset Zone Trigger Radar</title>
     <meta http-equiv="refresh" content="30">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --cream-bg: #f7ead9;
+            --cream-surface: #fdf7ec;
+            --cream-soft: #e4d2c1;
+            --cream-mid: #c5b0a1;
+            --cream-deep: #9b8477;
+            --cream-dark: #5f4a43;
+            --buy: #6f8f5f;
+            --sell: #b0563f;
+            --bronze: #c98a4b;
+        }
+        * { box-sizing: border-box; }
         body {
-            font-family: "Georgia", "Times New Roman", serif;
-            background-color: #fdf6e3;
-            color: #657b83;
+            font-family: "Prompt", "Segoe UI", "Tahoma", sans-serif;
+            background: linear-gradient(160deg, #f7ead9 0%, #e4d2c1 70%, #dcc6b4 100%);
+            background-attachment: fixed;
+            color: #5f4a43;
             margin: 0;
-            padding: 20px;
+            padding: 24px;
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background: #eee8d5;
-            padding: 20px;
-            border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            border: 1px solid #d0c7b6;
+            background: rgba(253, 247, 236, 0.92);
+            padding: 28px;
+            border-radius: 28px;
+            box-shadow: 0 14px 44px rgba(95, 74, 67, 0.16);
+            border: 1px solid #e4d2c1;
         }
         h1 {
-            font-size: 1.5rem;
+            font-size: 1.55rem;
             text-align: center;
-            color: #586e75;
-            margin-bottom: 5px;
-            font-weight: normal;
-            letter-spacing: 0.5px;
+            color: #5f4a43;
+            margin-bottom: 4px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
         }
         .subtitle {
             text-align: center;
             font-size: 0.85rem;
-            color: #93a1a1;
-            margin-bottom: 20px;
-            font-style: italic;
+            color: #9b8477;
+            margin-bottom: 22px;
         }
         .card {
-            background: #fdf6e3;
-            padding: 16px;
-            border-radius: 4px;
-            margin-bottom: 16px;
-            border: 1px solid #d0c7b6;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            background: #f7ead9;
+            padding: 18px;
+            border-radius: 20px;
+            margin-bottom: 18px;
+            border: 1px solid #e4d2c1;
+            box-shadow: 0 4px 16px rgba(95, 74, 67, 0.08);
         }
         .badge {
             display: inline-block;
-            padding: 4px 12px;
-            border-radius: 2px;
-            font-size: 0.75rem;
-            font-weight: normal;
+            padding: 5px 14px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border: none;
         }
-        .badge-stage1 { background: #b58900; color: #fdf6e3; }
-        .badge-stage2 { background: #cb4b16; color: #fdf6e3; }
-        .badge-stage3 { background: #268bd2; color: #fdf6e3; }
-        .badge-stage4 { background: #dc322f; color: #fdf6e3; }
-        .badge-custom { background: #6c71c4; color: #fdf6e3; }
-        .badge-dir-low { background: #859900; color: #fdf6e3; }
-        .badge-dir-high { background: #dc322f; color: #fdf6e3; }
-        .badge-status-on { background: #859900; color: #fdf6e3; }
-        .badge-status-off { background: #586e75; color: #fdf6e3; }
+        .badge-stage1 { background: #e4d2c1; color: #5f4a43; }
+        .badge-stage2 { background: #c5b0a1; color: #5f4a43; }
+        .badge-stage3 { background: #9b8477; color: #f7ead9; }
+        .badge-stage4 { background: #5f4a43; color: #f7ead9; }
+        .badge-custom { background: #c98a4b; color: #f7ead9; }
+        .badge-dir-low { background: #6f8f5f; color: #f7ead9; }
+        .badge-dir-high { background: #b0563f; color: #f7ead9; }
+        .badge-status-on { background: #6f8f5f; color: #f7ead9; }
+        .badge-status-off { background: #9b8477; color: #f7ead9; }
 
         .toggle-btn {
             cursor: pointer;
-            border: 1px solid #d0c7b6;
+            font-family: inherit;
             transition: all 0.2s ease;
         }
-        .toggle-btn:active { transform: scale(0.98); }
+        .toggle-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+        .toggle-btn:active { transform: scale(0.97); }
 
         .note-box {
             margin-top: 12px;
-            background: #fdf6e3;
-            border-left: 3px solid #b58900;
-            border-top: 1px solid #d0c7b6;
-            border-right: 1px solid #d0c7b6;
-            border-bottom: 1px solid #d0c7b6;
+            background: #fdf7ec;
+            border: 1px solid #e4d2c1;
+            border-left: 4px solid #c98a4b;
             padding: 12px 14px;
-            border-radius: 2px;
+            border-radius: 14px;
             font-size: 0.85rem;
-            color: #586e75;
-            font-style: italic;
+            color: #5f4a43;
         }
         .note-title {
-            font-size: 0.7rem;
-            color: #93a1a1;
+            font-size: 0.68rem;
+            color: #9b8477;
             text-transform: uppercase;
             margin-bottom: 4px;
-            font-weight: normal;
             letter-spacing: 1px;
         }
+        .panel {
+            margin-top: 10px;
+            background: #e4d2c1;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid #c5b0a1;
+        }
+        .panel-title {
+            font-size: 0.78rem;
+            color: #5f4a43;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+        .panel select, .panel input {
+            background: #fdf7ec;
+            color: #5f4a43;
+            border: 1px solid #c5b0a1;
+            border-radius: 10px;
+            padding: 4px 6px;
+            font-size: 0.75rem;
+            font-family: inherit;
+            width: 100%;
+        }
+        .panel select:focus, .panel input:focus {
+            outline: none;
+            border-color: #9b8477;
+        }
+        .save-btn {
+            width: 100%;
+            margin-top: 8px;
+            border: none;
+            padding: 7px;
+            border-radius: 999px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: #f7ead9;
+            font-family: inherit;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+        }
+        .save-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .save-tf { background: #9b8477; }
+        .save-order { background: #5f4a43; }
         .tf-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
-            gap: 10px;
+            gap: 12px;
             margin-top: 12px;
         }
         @media (max-width: 900px) {
@@ -404,32 +461,32 @@ HTML_TEMPLATE = """
             .tf-grid { grid-template-columns: repeat(2, 1fr); }
         }
         .tf-box {
-            background: #eee8d5;
-            border: 1px solid #d0c7b6;
-            border-radius: 2px;
-            padding: 8px;
+            background: #fdf7ec;
+            border: 1px solid #e4d2c1;
+            border-radius: 14px;
+            padding: 10px;
             text-align: center;
         }
         .tf-title {
             font-size: 0.7rem;
-            font-weight: normal;
-            color: #268bd2;
+            font-weight: 600;
+            color: #9b8477;
             margin-bottom: 4px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .tf-val {
             font-size: 0.65rem;
-            color: #586e75;
+            color: #5f4a43;
             margin-bottom: 4px;
         }
         .tf-img {
             width: 100%;
             height: auto;
-            border-radius: 2px;
+            border-radius: 10px;
             margin-top: 4px;
             display: block;
-            border: 1px solid #d0c7b6;
+            border: 1px solid #e4d2c1;
         }
         .btn-container {
             text-align: center;
@@ -440,37 +497,37 @@ HTML_TEMPLATE = """
             flex-wrap: wrap;
         }
         .btn {
-            background-color: #268bd2;
-            color: #fdf6e3;
-            padding: 8px 16px;
-            border: 1px solid #2aa198;
-            border-radius: 2px;
+            background-color: #9b8477;
+            color: #f7ead9;
+            padding: 9px 20px;
+            border: none;
+            border-radius: 999px;
             font-size: 0.75rem;
-            font-weight: normal;
+            font-weight: 500;
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
             transition: all 0.2s;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            font-family: inherit;
         }
-        .btn:hover { background-color: #2aa198; border-color: #859900; }
+        .btn:hover { background-color: #5f4a43; transform: translateY(-1px); }
         .alert-box {
-            padding: 10px;
-            border-radius: 2px;
-            margin-bottom: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            margin-bottom: 14px;
             font-size: 0.8rem;
             text-align: center;
-            border: 1px solid #d0c7b6;
+            border: none;
         }
-        .alert-success { background-color: #859900; color: #fdf6e3; border-color: #b58900; }
-        .alert-error { background-color: #dc322f; color: #fdf6e3; border-color: #cb4b16; }
+        .alert-success { background-color: #6f8f5f; color: #f7ead9; }
+        .alert-error { background-color: #b0563f; color: #f7ead9; }
         .status-footer {
             text-align: center;
-            font-size: 0.7rem;
-            color: #93a1a1;
-            margin-top: 15px;
-            font-style: italic;
+            font-size: 0.72rem;
+            color: #9b8477;
+            margin-top: 18px;
         }
     </style>
 </head>
@@ -487,8 +544,8 @@ HTML_TEMPLATE = """
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div>
-                    <span style="font-size: 1rem; font-weight: bold; color: #38bdf8;">{{ asset.emoji }} {{ asset.name }} (คำสั่ง: {{ key }})</span>
-                    <div style="font-size: 0.85rem; color: #22c55e; font-weight: bold; margin-top: 2px;">
+                    <span style="font-size: 1rem; font-weight: 600; color: #5f4a43;">{{ asset.emoji }} {{ asset.name }} (คำสั่ง: {{ key }})</span>
+                    <div style="font-size: 0.85rem; color: #6f8f5f; font-weight: 600; margin-top: 2px;">
                         💰 ราคา: {{ "%.2f"|format(asset.state.price) }}
                     </div>
                 </div>
@@ -514,14 +571,14 @@ HTML_TEMPLATE = """
                 <div>{{ asset.state.note }}</div>
             </div>
 
-            <form action="/update_stage_tfs/{{ key }}" method="POST" style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #475569;">
-                <div style="font-size: 0.8rem; color: #38bdf8; margin-bottom: 6px; font-weight: bold;">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
-                <div style="display: flex; justify-content: space-between; gap: 5px; font-size: 0.75rem;">
+            <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
+                <div class="panel-title">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
+                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
-                    <div>
+                    <div style="flex: 1;">
                         <span>S{{ idx+1 }}:</span>
-                        <select name="stage_{{ idx+1 }}_tf" style="background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px; font-size: 0.75rem;">
+                        <select name="stage_{{ idx+1 }}_tf">
                             {% for tf in available_tfs %}
                             <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>
                                 {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
@@ -531,26 +588,26 @@ HTML_TEMPLATE = """
                     </div>
                     {% endfor %}
                 </div>
-                <button type="submit" style="width: 100%; margin-top: 8px; background: #38bdf8; color: #000; border: none; padding: 4px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึก Timeframe</button>
+                <button type="submit" class="save-btn save-tf">บันทึก Timeframe</button>
             </form>
 
-            <form action="/update_order_config/{{ key }}" method="POST" style="margin-top: 8px; background: #0f172a; padding: 8px 10px; border-radius: 8px; border: 1px solid #475569;">
-                <div style="font-size: 0.75rem; color: #38bdf8; margin-bottom: 5px; font-weight: bold;">🎯 ตั้งค่าออเดอร์ (Execution Setup)</div>
-                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem;">
+            <form action="/update_order_config/{{ key }}" method="POST" class="panel">
+                <div class="panel-title">🎯 ตั้งค่าออเดอร์ (Execution Setup)</div>
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
                     <div style="flex: 1;">
                         <span>Lot:</span>
-                        <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                        <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}">
                     </div>
                     <div style="flex: 1;">
                         <span>TP (pips):</span>
-                        <input type="number" name="tp_pips" value="{{ asset.state.tp_pips }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                        <input type="number" name="tp_pips" value="{{ asset.state.tp_pips }}">
                     </div>
                     <div style="flex: 1;">
                         <span>SL (pips):</span>
-                        <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}" style="width: 100%; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 0.75rem;">
+                        <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}">
                     </div>
                 </div>
-                <button type="submit" style="width: 100%; margin-top: 6px; background: #22c55e; color: #000; border: none; padding: 3px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.75rem;">บันทึกแผนเทรด</button>
+                <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
 
             <div class="tf-grid">
@@ -564,14 +621,14 @@ HTML_TEMPLATE = """
                 </div>
                 {% endfor %}
             </div>
-            <div style="margin-top: 6px; font-size: 0.7rem; color: #94a3b8; text-align: right;">
+            <div style="margin-top: 6px; font-size: 0.7rem; color: #9b8477; text-align: right;">
                 อัปเดต: {{ asset.state.last_check }}
             </div>
         </div>
         {% endfor %}
         <div class="card">
             <div class="btn-container">
-                <a href="{{ url_for('send_test') }}" class="btn" style="background-color: #64748b;">🔔 ทดสอบส่งข้อความ</a>
+                <a href="{{ url_for('send_test') }}" class="btn">🔔 ทดสอบส่งข้อความ</a>
             </div>
         </div>
         <div class="status-footer">
@@ -888,19 +945,19 @@ def update_market_data():
                 if len(sub_k) >= 2 and len(sub_d) >= 2:
                     fig = None
                     try:
-                        fig, ax = plt.subplots(figsize=(3.5, 1.8), facecolor="#1e293b")
-                        ax.set_facecolor("#0f172a")
-                        ax.plot(range(len(sub_k)), sub_k, label="K", color="#38bdf8", linewidth=1.5)
-                        ax.plot(range(len(sub_d)), sub_d, label="D", color="#f97316", linewidth=1.0)
-                        ax.axhline(80, color="#ef4444", linestyle="--", alpha=0.7, linewidth=0.8)
-                        ax.axhline(20, color="#22c55e", linestyle="--", alpha=0.7, linewidth=0.8)
+                        fig, ax = plt.subplots(figsize=(3.5, 1.8), facecolor="#f7ead9")
+                        ax.set_facecolor("#fdf7ec")
+                        ax.plot(range(len(sub_k)), sub_k, label="K", color="#5f4a43", linewidth=1.5)
+                        ax.plot(range(len(sub_d)), sub_d, label="D", color="#c98a4b", linewidth=1.0)
+                        ax.axhline(80, color="#b0563f", linestyle="--", alpha=0.7, linewidth=0.8)
+                        ax.axhline(20, color="#6f8f5f", linestyle="--", alpha=0.7, linewidth=0.8)
                         ax.set_ylim(-5, 105)
-                        plt.tick_params(colors="#94a3b8", labelsize=6)
+                        plt.tick_params(colors="#9b8477", labelsize=6)
                         for spine in ax.spines.values():
-                            spine.set_color("#475569")
+                            spine.set_color("#e4d2c1")
                         plt.tight_layout()
                         buf = io.BytesIO()
-                        plt.savefig(buf, format="png", dpi=120, facecolor="#1e293b")
+                        plt.savefig(buf, format="png", dpi=120, facecolor="#f7ead9")
                         buf.seek(0)
                         st["charts"][tf] = base64.b64encode(buf.getvalue()).decode("utf-8")
                         buf.close()
