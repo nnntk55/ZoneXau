@@ -1386,3 +1386,33 @@ def run_asset_radar(asset_key):
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
+                        latest_d = st.get(f"d_{tf_s4}", 0.0)
+                        if tf_has_data(st, tf_s4) and latest_k > 80 and latest_k < latest_d:
+                            if not st.get("execute_notified"):
+                                img_b64 = get_tf_chart_b64(st, tf_s4)
+                                msg = (
+                                    f"🔴 *{name} — รายงาน Stage 4* ({tf_s4.upper()})\n"
+                                    f"━━━━━━━━━━━━━━━━━━━\n"
+                                    f"• Stoch K ({latest_k:.2f}) ตัด D ({latest_d:.2f}) ลงใน High Zone\n"
+                                    f"• ราคาปัจจุบัน: `{st.get('price', 0.0):.2f}`\n"
+                                    f"━━━━━━━━━━━━━━━━━━━\n"
+                                    f"✅ *Stage 4 เสร็จสมบูรณ์ — รอสัญญาณเข้าออเดอร์เมื่อแท่งเทียนปิดใต้ EMA8*"
+                                )
+                                if img_b64:
+                                    send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                                else:
+                                    send_telegram_notification(msg, asset_key=asset_key)
+                                st["execute_notified"] = True
+                                save_state_to_sheets(asset_key, st)
+
+        except Exception as e:
+            print(f"Radar Loop Error ({asset_key}): {e}")
+        gc.collect()
+        time.sleep(15)
+
+if __name__ == "__main__":
+    for key in ASSETS.keys():
+        t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
+        t.start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
