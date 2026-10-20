@@ -754,25 +754,18 @@ def update_market_data():
                 st["history"] = {tf: {"k": [], "d": []} for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]}
 
             for tf in ["1w", "1d", "4h", "1h", "15m", "5m"]:
-                # ถ้าฝั่ง Windows ส่งประวัติมาเลย ให้ใช้ประวัตินั้น
-                if f"k_{tf}_history" in payload and f"d_{tf}_history" in payload:
-                    st["history"][tf]["k"] = payload[f"k_{tf}_history"]
-                    st["history"][tf]["d"] = payload[f"d_{tf}_history"]
+                # เก็บค่า K/D ทีละค่า (ไม่รับ history จาก Windows เพื่อลด payload)
+                if f"k_{tf}" in payload:
                     st[f"k_{tf}"] = float(payload[f"k_{tf}"])
-                    st[f"d_{tf}"] = float(payload[f"d_{tf}"])
-                else:
-                    # ถ้าไม่ได้ส่งประวัติมา ให้เก็บเพิ่มทีละค่าแบบเดิม
-                    if f"k_{tf}" in payload:
-                        st[f"k_{tf}"] = float(payload[f"k_{tf}"])
-                        st["history"][tf]["k"].append(float(payload[f"k_{tf}"]))
-                        if len(st["history"][tf]["k"]) > 30:
-                            st["history"][tf]["k"].pop(0)
+                    st["history"][tf]["k"].append(float(payload[f"k_{tf}"]))
+                    if len(st["history"][tf]["k"]) > 30:
+                        st["history"][tf]["k"].pop(0)
 
-                    if f"d_{tf}" in payload:
-                        st[f"d_{tf}"] = float(payload[f"d_{tf}"])
-                        st["history"][tf]["d"].append(float(payload[f"d_{tf}"]))
-                        if len(st["history"][tf]["d"]) > 30:
-                            st["history"][tf]["d"].pop(0)
+                if f"d_{tf}" in payload:
+                    st[f"d_{tf}"] = float(payload[f"d_{tf}"])
+                    st["history"][tf]["d"].append(float(payload[f"d_{tf}"]))
+                    if len(st["history"][tf]["d"]) > 30:
+                        st["history"][tf]["d"].pop(0)
 
                 # 3. วาดภาพกราฟมินิเมื่อมีประวัติ K และ D อย่างน้อย 2 ค่าขึ้นไป
                 sub_k = st["history"][tf]["k"]
