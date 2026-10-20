@@ -404,6 +404,25 @@ HTML_TEMPLATE = """
             margin-bottom: 4px;
             letter-spacing: 1px;
         }
+        .note-form { display: flex; gap: 8px; align-items: stretch; }
+        .note-input {
+            flex: 1;
+            background: transparent;
+            color: #5f4a43;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            padding: 6px 8px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 44px;
+        }
+        .note-input:hover { border-color: #e4d2c1; }
+        .note-input:focus {
+            outline: none;
+            border-color: #9b8477;
+            background: #ffffff;
+        }
         .panel {
             margin-top: 10px;
             background: #e4d2c1;
@@ -567,8 +586,11 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="note-box">
-                <div class="note-title">📝 โน้ตแผนการเทรด</div>
-                <div>{{ asset.state.note }}</div>
+                <div class="note-title">📝 โน้ตแผนการเทรด (แก้ไขได้เลย)</div>
+                <form action="/update_note/{{ key }}" method="POST" class="note-form">
+                    <textarea name="note" class="note-input" rows="2" placeholder="เขียนบันทึกแผนการเทรดที่นี่...">{{ asset.state.note }}</textarea>
+                    <button type="submit" class="save-btn save-tf" style="width: auto; margin-top: 0; padding: 0 18px; white-space: nowrap;">บันทึก</button>
+                </form>
             </div>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
@@ -812,9 +834,16 @@ def send_all_summary_report(chat_id):
             send_single_summary_text_only(key, chat_id)
             time.sleep(0.8)
 
+def current_trade_date():
+    """วันเทรดของระบบ — วันใหม่เริ่มตอน 05:00 น. ตามเวลาไทย (ก่อนตี 5 ยังนับเป็นวันเดิม)"""
+    now = datetime.now(timezone(timedelta(hours=7)))
+    if now.hour < 5:
+        now -= timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
+
 def check_daily_reset_and_state(asset_key):
     st = ASSETS[asset_key]["state"]
-    current_date = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+    current_date = current_trade_date()
     last_trade_date = st.get("last_trade_date")
     
     if last_trade_date and last_trade_date != current_date:
@@ -916,6 +945,22 @@ def send_test():
         global_flash["type"] = "error"
     return redirect(url_for("home"))
 
+@app.route("/update_note/<asset_key>", methods=["POST"])
+def update_note(asset_key):
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+    st = ASSETS[asset_key]["state"]
+    try:
+        note = request.form.get("note", "").strip()
+        st["note"] = note if note else "ยังไม่มีบันทึกแผน"
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = f"บันทึกโน้ตของ {ASSETS[asset_key]['name']} สำเร็จ!"
+        global_flash["type"] = "success"
+    except Exception as e:
+        global_flash["msg"] = f"เกิดข้อผิดพลาด: {e}"
+        global_flash["type"] = "error"
+    return redirect(url_for("home"))
+
 @app.route("/update_stage_tfs/<asset_key>", methods=["POST"])
 def update_stage_tfs(asset_key):
     if asset_key not in ASSETS:
@@ -928,6 +973,13 @@ def update_stage_tfs(asset_key):
             if tf != "off":
                 st["current_stage"] = idx + 1
                 break
+        # รีเซ็ต flags และปลด pause เพื่อเริ่มสแกนตามค่าใหม่ทันที
+        st["stage1_notified"] = False
+        st["stage2_notified"] = False
+        st["stage3_notified"] = False
+        st["execute_notified"] = False
+        st["is_active"] = True
+        st["auto_paused_today"] = False
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"     
@@ -946,6 +998,17 @@ def toggle_status(asset_key, action_type):
     elif action_type == "direction":
         st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
         new_val = st["active_direction"]
+        # รีเซ็ตกลับ stage แรกที่ ON แล้วปลด pause เพื่อเริ่มสแกนฝั่งใหม่ทันที
+        for idx, tf in enumerate(st.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+            if tf != "off":
+                st["current_stage"] = idx + 1
+                break
+        st["stage1_notified"] = False
+        st["stage2_notified"] = False
+        st["stage3_notified"] = False
+        st["execute_notified"] = False
+        st["is_active"] = True
+        st["auto_paused_today"] = False
     else:
         return jsonify({"status": "error", "message": "Invalid action"}), 400
     save_state_to_sheets(asset_key, st)
@@ -1135,6 +1198,12 @@ def telegram_webhook():
                         if tf != "off":
                             st["current_stage"] = i + 1
                             break
+                    st["stage1_notified"] = False
+                    st["stage2_notified"] = False
+                    st["stage3_notified"] = False
+                    st["execute_notified"] = False
+                    st["is_active"] = True
+                    st["auto_paused_today"] = False
                     save_state_to_sheets(asset_key, st)
                     stages_txt = ", ".join(updated_stages)
                     act_txt = "🔴 ปิด (OFF)" if action == "off" else "🟢 เปิด (ON)"
@@ -1201,6 +1270,8 @@ def telegram_webhook():
                 st["custom_tf"] = tf
                 st["custom_dir"] = direction
                 st["target_mode"] = f"CUSTOM_{tf.upper()}_{direction}"
+                st["is_active"] = True
+                st["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
                 msg = f"🎯 *{ASSETS[asset_key]['name']}*: ตั้งค่าติดตามพิเศษ Timeframe *{tf.upper()}* ฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
@@ -1217,6 +1288,9 @@ def telegram_webhook():
                 st["stage1_notified"] = False
                 st["stage2_notified"] = False
                 st["stage3_notified"] = False
+                st["execute_notified"] = False
+                st["is_active"] = True
+                st["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
                 msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
@@ -1330,7 +1404,11 @@ def run_asset_radar(asset_key):
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
                         latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        if tf_has_data(st, tf_s4) and latest_k < 20 and latest_k > latest_d:
+                        k_hist = st.get("history", {}).get(tf_s4, {}).get("k", [])
+                        d_hist = st.get("history", {}).get(tf_s4, {}).get("d", [])
+                        is_cross = (len(k_hist) >= 2 and len(d_hist) >= 2
+                                    and k_hist[-2] <= d_hist[-2] and latest_k > latest_d)
+                        if latest_k < 20 and is_cross:
                             if not st.get("execute_notified"):
                                 img_b64 = get_tf_chart_b64(st, tf_s4)
                                 msg = (
@@ -1387,7 +1465,11 @@ def run_asset_radar(asset_key):
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
                         latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        if tf_has_data(st, tf_s4) and latest_k > 80 and latest_k < latest_d:
+                        k_hist = st.get("history", {}).get(tf_s4, {}).get("k", [])
+                        d_hist = st.get("history", {}).get(tf_s4, {}).get("d", [])
+                        is_cross = (len(k_hist) >= 2 and len(d_hist) >= 2
+                                    and k_hist[-2] >= d_hist[-2] and latest_k < latest_d)
+                        if latest_k > 80 and is_cross:
                             if not st.get("execute_notified"):
                                 img_b64 = get_tf_chart_b64(st, tf_s4)
                                 msg = (
