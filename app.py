@@ -533,7 +533,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>📊 Multi-Asset Zone Trigger Radar</h1>
+        <h1>Multi-Asset Zone Trigger Radar</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes (Exness MT5 Sync Ready)</div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -572,7 +572,7 @@ HTML_TEMPLATE = """
             </div>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">⚙️ เลือก Timeframe แต่ละ Stage อิสระ</div>
+                <div class="panel-title">เลือก Timeframe แต่ละ Stage อิสระ</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -592,7 +592,7 @@ HTML_TEMPLATE = """
             </form>
 
             <form action="/update_order_config/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">🎯 ตั้งค่าออเดอร์ (Execution Setup)</div>
+                <div class="panel-title">ตั้งค่าออเดอร์ (Execution Setup)</div>
                 <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
                     <div style="flex: 1;">
                         <span>Lot:</span>
