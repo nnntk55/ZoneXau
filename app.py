@@ -1386,4 +1386,3 @@ def run_asset_radar(asset_key):
                             save_state_to_sheets(asset_key, st)
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
-                        latest_d = st.
