@@ -1020,15 +1020,8 @@ def toggle_status(asset_key, action_type):
     save_state_to_sheets(asset_key, st)
     return jsonify({"status": "success", "new_val": new_val})
 
-@app.route('/api/update_market_data', methods=['POST'])
-def update_market_data():
-    data = request.json
-    if not data:
-        print("❌ No data received from MT5")
-        return jsonify({"status": "error", "message": "No data received"}), 400
-
-    print(f"📥 Received data from MT5: {list(data.keys())}")
-
+def process_market_data(data):
+    """ประมวลผลข้อมูลตลาดจาก MT5 ใน background (แยกออกจาก request เพื่อกัน timeout)"""
     for asset_key, payload in data.items():
         if asset_key in ASSETS:
             st = ASSETS[asset_key]["state"]
@@ -1067,7 +1060,16 @@ def update_market_data():
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
-    return jsonify({"status": "success", "message": "MT5 Data and Auto-Generated Charts synced successfully"})
+@app.route('/api/update_market_data', methods=['POST'])
+def update_market_data():
+    data = request.json
+    if not data:
+        print("❌ No data received from MT5")
+        return jsonify({"status": "error", "message": "No data received"}), 400
+    print(f"📥 Received data from MT5: {list(data.keys())}")
+    threading.Thread(target=process_market_data, args=(data,), daemon=True).start()
+    return jsonify({"status": "success", "message": "MT5 Data accepted"})
+
 @app.route('/api/get_market_data', methods=['GET'])
 def get_market_data():
     output = {}
