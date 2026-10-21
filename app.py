@@ -302,7 +302,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Asset Zone Trigger Radar</title>
+    <title>ZONE TRIGGER</title>
     <meta http-equiv="refresh" content="30">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -373,6 +373,7 @@ HTML_TEMPLATE = """
         .badge-stage2 { background: #c5b0a1; color: #5f4a43; }
         .badge-stage3 { background: #9b8477; color: #f7ead9; }
         .badge-stage4 { background: #5f4a43; color: #f7ead9; }
+        .badge-stage5 { background: #b0563f; color: #f7ead9; }
         .badge-custom { background: #c98a4b; color: #f7ead9; }
         .badge-dir-low { background: #6f8f5f; color: #f7ead9; }
         .badge-dir-high { background: #b0563f; color: #f7ead9; }
@@ -552,7 +553,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>Multi-Asset Zone Trigger Radar</h1>
+        <h1>ZONE TRIGGER</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes (Exness MT5 Sync Ready)</div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -654,7 +655,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>[asset] on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>yes</b> / <b>no</b> หรือ <b>[asset] yes/no</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>[asset] on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>y</b> / <b>n</b> หรือ <b>[asset] y/n</b>
         </div>
     </div>
 
@@ -1219,9 +1220,9 @@ def telegram_webhook():
                 save_state_to_sheets(asset_key, st)
                 status_txt = "🟢 เปิด (ON)" if st["is_active"] else "🔴 ปิด (OFF)"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
-            elif text_lower in ("yes", "no") or (len(parts) == 2 and parts[0] in ASSETS and parts[1] in ("yes", "no")):
+            elif text_lower in ("y", "n") or (len(parts) == 2 and parts[0] in ASSETS and parts[1] in ("y", "n")):
                 # รับคำสั่งยืนยันออเดอร์แล้วส่งต่อให้บอท MT5 ผ่าน /api/config (user_command)
-                if text_lower in ("yes", "no"):
+                if text_lower in ("y", "n"):
                     answer = text_lower
                     target_key = None
                     latest_ts = -1
@@ -1235,10 +1236,10 @@ def telegram_webhook():
                     target_key = parts[0] if ASSETS[parts[0]]["state"].get("mt5_pending") else None
                 if target_key:
                     ASSETS[target_key]["state"]["user_command"] = answer
-                    if answer == "yes":
-                        send_telegram_notification(f"✅ รับคำสั่ง *YES* — ส่งต่อให้บอท MT5 เปิดออเดอร์ ({ASSETS[target_key]['name']})", chat_id=chat_id)
+                    if answer == "y":
+                        send_telegram_notification(f"✅ รับคำสั่ง *Y* — ส่งต่อให้บอท MT5 เปิดออเดอร์ ({ASSETS[target_key]['name']})", chat_id=chat_id)
                     else:
-                        send_telegram_notification(f"❌ รับคำสั่ง *NO* — ปล่อยผ่านสัญญาณ ({ASSETS[target_key]['name']})", chat_id=chat_id)
+                        send_telegram_notification(f"❌ รับคำสั่ง *N* — ปล่อยผ่านสัญญาณ ({ASSETS[target_key]['name']})", chat_id=chat_id)
                 else:
                     send_telegram_notification("ℹ️ ไม่มีสัญญาณที่รอยืนยันอยู่ในขณะนี้", chat_id=chat_id)
             elif text_lower.startswith("xaunote "):
@@ -1324,13 +1325,13 @@ def run_asset_radar(asset_key):
                 curr_st_idx = st["current_stage"] - 1
                 save_state_to_sheets(asset_key, st)
             
-            if st["current_stage"] > 4:
+            if st["current_stage"] > 5:
                 time.sleep(10)
                 continue
 
             tf_s1, tf_s2, tf_s3, tf_s4 = stage_tfs[0], stage_tfs[1], stage_tfs[2], stage_tfs[3]
 
-            if st["current_stage"] != 4:
+            if st["current_stage"] < 4:
                 st["execute_notified"] = False
 
             if st.get("custom_mode"):
@@ -1404,11 +1405,7 @@ def run_asset_radar(asset_key):
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
                         latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        k_hist = st.get("history", {}).get(tf_s4, {}).get("k", [])
-                        d_hist = st.get("history", {}).get(tf_s4, {}).get("d", [])
-                        is_cross = (len(k_hist) >= 2 and len(d_hist) >= 2
-                                    and k_hist[-2] <= d_hist[-2] and latest_k > latest_d)
-                        if latest_k < 20 and is_cross:
+                        if tf_has_data(st, tf_s4) and latest_k < 20 and latest_k > latest_d:
                             if not st.get("execute_notified"):
                                 img_b64 = get_tf_chart_b64(st, tf_s4)
                                 msg = (
@@ -1424,6 +1421,7 @@ def run_asset_radar(asset_key):
                                 else:
                                     send_telegram_notification(msg, asset_key=asset_key)
                                 st["execute_notified"] = True
+                                st["current_stage"] = 5
                                 save_state_to_sheets(asset_key, st)
                 else: # HIGH MODE
                     if st["current_stage"] == 1:
@@ -1465,11 +1463,7 @@ def run_asset_radar(asset_key):
                     elif st["current_stage"] == 4:
                         latest_k = st.get(f"k_{tf_s4}", 0.0)
                         latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        k_hist = st.get("history", {}).get(tf_s4, {}).get("k", [])
-                        d_hist = st.get("history", {}).get(tf_s4, {}).get("d", [])
-                        is_cross = (len(k_hist) >= 2 and len(d_hist) >= 2
-                                    and k_hist[-2] >= d_hist[-2] and latest_k < latest_d)
-                        if latest_k > 80 and is_cross:
+                        if tf_has_data(st, tf_s4) and latest_k > 80 and latest_k < latest_d:
                             if not st.get("execute_notified"):
                                 img_b64 = get_tf_chart_b64(st, tf_s4)
                                 msg = (
@@ -1485,6 +1479,7 @@ def run_asset_radar(asset_key):
                                 else:
                                     send_telegram_notification(msg, asset_key=asset_key)
                                 st["execute_notified"] = True
+                                st["current_stage"] = 5
                                 save_state_to_sheets(asset_key, st)
 
         except Exception as e:
