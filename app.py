@@ -83,10 +83,10 @@ def generate_stoch_chart(df, title, mini=False):
 
 def load_states_from_sheets():
     default_data = {
-        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
-        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
-        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False},
-        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False}
+        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True},
+        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True},
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True},
+        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True}
     }
     if not GOOGLE_SCRIPT_URL:
         return default_data
@@ -125,6 +125,7 @@ def save_state_to_sheets(asset_key, state_dict):
             "last_trade_date": state_dict.get("last_trade_date"),
             "auto_paused_today": state_dict.get("auto_paused_today", False),
             "stage_tfs": state_dict.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "s5_enabled": state_dict.get("s5_enabled", True),
             "lot": state_dict.get("lot", 0.01),
             "tp_pips": state_dict.get("tp_pips", 300),
             "sl_pips": state_dict.get("sl_pips", 200)
@@ -162,6 +163,7 @@ ASSETS = {
             "last_check": "กำลังรอข้อมูลจาก MT5...",
             "note": saved_states.get("xau", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "stage_tfs": saved_states.get("xau", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "s5_enabled": saved_states.get("xau", {}).get("s5_enabled", True),
             "lot": saved_states.get("xau", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("xau", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("xau", {}).get("sl_pips", 200),
@@ -199,6 +201,7 @@ ASSETS = {
             "last_check": "กำลังรอข้อมูลจาก MT5...",
             "note": saved_states.get("us", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "stage_tfs": saved_states.get("us", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "s5_enabled": saved_states.get("us", {}).get("s5_enabled", True),
             "lot": saved_states.get("us", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("us", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("us", {}).get("sl_pips", 200),
@@ -236,6 +239,7 @@ ASSETS = {
             "last_check": "กำลังรอข้อมูลจาก MT5...",
             "note": saved_states.get("oil", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "stage_tfs": saved_states.get("oil", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "s5_enabled": saved_states.get("oil", {}).get("s5_enabled", True),
             "lot": saved_states.get("oil", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("oil", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("oil", {}).get("sl_pips", 200),
@@ -273,6 +277,7 @@ ASSETS = {
             "last_check": "กำลังรอข้อมูลจาก MT5...",
             "note": saved_states.get("btc", {}).get("note", "ยังไม่มีบันทึกแผน"),
             "stage_tfs": saved_states.get("btc", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+            "s5_enabled": saved_states.get("btc", {}).get("s5_enabled", True),
             "lot": saved_states.get("btc", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("btc", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("btc", {}).get("sl_pips", 200),
@@ -655,7 +660,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>[asset] on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>y</b> / <b>n</b> หรือ <b>[asset] y/n</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>on</b> / <b>off</b> หรือ <b>[asset] on/off</b> | Stage: <b>[asset] st [1-5] on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>y</b> / <b>n</b> หรือ <b>[asset] y/n</b>
         </div>
     </div>
 
@@ -1089,6 +1094,7 @@ def get_asset_config(asset_key):
         "custom_tf": st.get("custom_tf"),
         "custom_dir": st.get("custom_dir"),
         "stage_tfs": st.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
+        "s5_enabled": st.get("s5_enabled", True),
         "user_command": st.get("user_command")
     }
     print(f"📤 Sending config for {asset_key}: is_active={config['is_active']}")
@@ -1177,6 +1183,7 @@ def telegram_webhook():
                     st["stage3_notified"] = False
                     st["execute_notified"] = False
                     st["stage_tfs"] = ["4h", "1h", "15m", "5m"]
+                    st["s5_enabled"] = True
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
             elif len(parts) >= 4 and parts[0] in ASSETS and parts[1] == "st":
@@ -1190,15 +1197,23 @@ def telegram_webhook():
                     target_stages = stages_str.split("/")
                     updated_stages = []
                     for s in target_stages:
-                        if s.isdigit() and 1 <= int(s) <= 4:
-                            idx = int(s) - 1
-                            current_tfs[idx] = "off" if action == "off" else default_tfs[idx]
+                        if s.isdigit() and 1 <= int(s) <= 5:
+                            n = int(s)
+                            if n == 5:
+                                st["s5_enabled"] = (action == "on")
+                            else:
+                                idx = n - 1
+                                current_tfs[idx] = "off" if action == "off" else default_tfs[idx]
                             updated_stages.append(f"S{s}")
                     st["stage_tfs"] = current_tfs
                     for i, tf in enumerate(current_tfs):
                         if tf != "off":
                             st["current_stage"] = i + 1
                             break
+                    if not st.get("s5_enabled", True) and st["current_stage"] == 5:
+                        st["current_stage"] = 4
+                    elif st.get("s5_enabled", True) and st["current_stage"] == 4 and st.get("execute_notified"):
+                        st["current_stage"] = 5
                     st["stage1_notified"] = False
                     st["stage2_notified"] = False
                     st["stage3_notified"] = False
@@ -1421,7 +1436,8 @@ def run_asset_radar(asset_key):
                                 else:
                                     send_telegram_notification(msg, asset_key=asset_key)
                                 st["execute_notified"] = True
-                                st["current_stage"] = 5
+                                if st.get("s5_enabled", True):
+                                    st["current_stage"] = 5
                                 save_state_to_sheets(asset_key, st)
                 else: # HIGH MODE
                     if st["current_stage"] == 1:
@@ -1479,7 +1495,8 @@ def run_asset_radar(asset_key):
                                 else:
                                     send_telegram_notification(msg, asset_key=asset_key)
                                 st["execute_notified"] = True
-                                st["current_stage"] = 5
+                                if st.get("s5_enabled", True):
+                                    st["current_stage"] = 5
                                 save_state_to_sheets(asset_key, st)
 
         except Exception as e:
