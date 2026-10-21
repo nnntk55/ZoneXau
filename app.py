@@ -1056,16 +1056,16 @@ def update_market_data():
                     if len(st["history"][tf]["d"]) > 30:
                         st["history"][tf]["d"].pop(0)
 
-                # 3. วาดภาพกราฟมินิเมื่อมีประวัติ K และ D อย่างน้อย 2 ค่าขึ้นไป
-                sub_k = st["history"][tf]["k"]
-                sub_d = st["history"][tf]["d"]
-                img_b64 = build_mini_chart(sub_k, sub_d)
-                if img_b64:
-                    st["charts"][tf] = img_b64
-                    print(f"✅ Chart generated for {asset_key} {tf}")
+                # 3. วาดภาพกราฟมินิเฉพาะ TF ที่มีข้อมูลใหม่เข้ามาจริง (ลดภาระ CPU บน free tier)
+                if f"k_{tf}" in payload or f"d_{tf}" in payload:
+                    sub_k = st["history"][tf]["k"]
+                    sub_d = st["history"][tf]["d"]
+                    img_b64 = build_mini_chart(sub_k, sub_d)
+                    if img_b64:
+                        st["charts"][tf] = img_b64
+                        print(f"✅ Chart generated for {asset_key} {tf}")
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
-            save_state_to_sheets(asset_key, st)
 
     return jsonify({"status": "success", "message": "MT5 Data and Auto-Generated Charts synced successfully"})
 @app.route('/api/get_market_data', methods=['GET'])
