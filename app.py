@@ -615,6 +615,13 @@ HTML_TEMPLATE = """
                         </select>
                     </div>
                     {% endfor %}
+                    <div style="flex: 1;">
+                        <span>S5:</span>
+                        <select name="stage_5_tf">
+                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
+                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
+                        </select>
+                    </div>
                 </div>
                 <button type="submit" class="save-btn save-tf">บันทึก Timeframe</button>
             </form>
@@ -660,7 +667,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
         <div class="status-footer">
-            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>on</b> / <b>off</b> หรือ <b>[asset] on/off</b> | Stage: <b>[asset] st [1-5] on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>y</b> / <b>n</b> หรือ <b>[asset] y/n</b>
+            คำสั่ง Telegram: <b>sum</b>, <b>xau</b>, <b>oil</b>, <b>us</b>, <b>btc</b> | เปิด/ปิด: <b>on</b> / <b>off</b> หรือ <b>[asset] on/off</b> | Stage: <b>[asset] s1-s5 on/off</b> | รีเซ็ต: <b>reset</b> | ยืนยันออเดอร์: <b>y</b> / <b>n</b> หรือ <b>[asset] y/n</b>
         </div>
     </div>
 
@@ -975,6 +982,7 @@ def update_stage_tfs(asset_key):
     new_tfs = [request.form.get(f"stage_{i}_tf") for i in range(1, 5)]
     if len(new_tfs) == 4:
         st["stage_tfs"] = new_tfs
+        st["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
                 st["current_stage"] = idx + 1
@@ -1188,9 +1196,9 @@ def telegram_webhook():
                     st["s5_enabled"] = True
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
-            elif len(parts) >= 4 and parts[0] in ASSETS and parts[1] == "st":
+            elif parts[0] in ASSETS and parts[-1] in ("on", "off") and (parts[1] == "st" or (parts[1].startswith("s") and len(parts[1]) > 1)):
                 asset_key = parts[0]
-                stages_str = parts[2]
+                stages_str = parts[2] if parts[1] == "st" and len(parts) >= 4 else parts[1][1:]
                 action = parts[-1]
                 if action in ["on", "off"]:
                     st = ASSETS[asset_key]["state"]
