@@ -1070,9 +1070,13 @@ def toggle_status(asset_key, action_type):
     save_state_to_sheets(asset_key, st)
     return jsonify({"status": "success", "new_val": new_val})
 
+_market_data_lock = threading.Lock()
+
 def process_market_data(data):
-    """ประมวลผลข้อมูลตลาดจาก MT5 ใน background (แยกออกจาก request เพื่อกัน timeout)"""
-    for asset_key, payload in data.items():
+    """ประมวลผลข้อมูลตลาดจาก MT5 ใน background (แยกออกจาก request เพื่อกัน timeout)
+    lock ไว้ให้ทำทีละคู่ — กัน matplotlib วาดกราฟพร้อมกันหลายตัวจน memory ล้นบน free tier"""
+    with _market_data_lock:
+      for asset_key, payload in data.items():
         if asset_key in ASSETS:
             st = ASSETS[asset_key]["state"]
             print(f"📊 Processing {asset_key}: price={payload.get('price')}, k_5m={payload.get('k_5m')}")
