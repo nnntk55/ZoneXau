@@ -1356,7 +1356,11 @@ def telegram_webhook():
                 st["custom_dir"] = None
                 st["target_mode"] = f"{direction}_ONLY"
                 st["active_direction"] = direction
-                st["current_stage"] = 1
+                # รีเซ็ตกลับ stage แรกที่ยัง ON ตามค่าที่ผู้ใช้ตั้งไว้ (ไม่แตะ stage_tfs)
+                for idx, tf in enumerate(st.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+                    if tf != "off":
+                        st["current_stage"] = idx + 1
+                        break
                 st["stage1_notified"] = False
                 st["stage2_notified"] = False
                 st["stage3_notified"] = False
