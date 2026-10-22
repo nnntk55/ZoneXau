@@ -1242,11 +1242,11 @@ def telegram_webhook():
                     st["s5_enabled"] = True
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
-            elif parts[0] in ASSETS and parts[-1] in ("on", "off") and (parts[1] == "st" or (parts[1].startswith("s") and len(parts[1]) > 1)):
+            elif parts[0] in ASSETS and parts[-1] in ("on", "off", "1w", "1d", "4h", "1h", "15m", "5m") and (parts[1] == "st" or (parts[1].startswith("s") and len(parts[1]) > 1)):
                 asset_key = parts[0]
                 stages_str = parts[2] if parts[1] == "st" and len(parts) >= 4 else parts[1][1:]
                 action = parts[-1]
-                if action in ["on", "off"]:
+                if action in ["on", "off", "1w", "1d", "4h", "1h", "15m", "5m"]:
                     st = ASSETS[asset_key]["state"]
                     current_tfs = list(st.get("stage_tfs", ["4h", "1h", "15m", "5m"]))
                     default_tfs = ["4h", "1h", "15m", "5m"]
@@ -1256,10 +1256,16 @@ def telegram_webhook():
                         if s.isdigit() and 1 <= int(s) <= 5:
                             n = int(s)
                             if n == 5:
-                                st["s5_enabled"] = (action == "on")
+                                if action in ("on", "off"):
+                                    st["s5_enabled"] = (action == "on")
                             else:
                                 idx = n - 1
-                                current_tfs[idx] = "off" if action == "off" else default_tfs[idx]
+                                if action == "off":
+                                    current_tfs[idx] = "off"
+                                elif action == "on":
+                                    current_tfs[idx] = default_tfs[idx]
+                                else:
+                                    current_tfs[idx] = action
                             updated_stages.append(f"S{s}")
                     st["stage_tfs"] = current_tfs
                     for i, tf in enumerate(current_tfs):
@@ -1278,7 +1284,7 @@ def telegram_webhook():
                     st["auto_paused_today"] = False
                     save_state_to_sheets(asset_key, st)
                     stages_txt = ", ".join(updated_stages)
-                    act_txt = "🔴 ปิด (OFF)" if action == "off" else "🟢 เปิด (ON)"
+                    act_txt = "🔴 ปิด (OFF)" if action == "off" else ("🟢 เปิด (ON)" if action == "on" else f"📈 {action.upper()}")
                     msg = f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {st['current_stage']}"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
             elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["on", "off"]:
