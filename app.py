@@ -1433,18 +1433,19 @@ def run_asset_radar(asset_key):
                         f"✅ แจ้งเตือนสำเร็จ และระบบได้รีเซ็ตกลับสู่โหมดออโต้ปกติแล้ว"
                     )
                     if img_b64:
-                        send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
+                        sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
                     else:
-                        send_telegram_notification(msg, asset_key=asset_key)
-                    st["custom_mode"] = False
-                    st["custom_tf"] = None
-                    st["custom_dir"] = None
-                    st["target_mode"] = "AUTO"
-                    st["current_stage"] = 1
-                    st["stage1_notified"] = False
-                    st["stage2_notified"] = False
-                    st["stage3_notified"] = False
-                    save_state_to_sheets(asset_key, st)
+                        sent = send_telegram_notification(msg, asset_key=asset_key)
+                    if sent:
+                        st["custom_mode"] = False
+                        st["custom_tf"] = None
+                        st["custom_dir"] = None
+                        st["target_mode"] = "AUTO"
+                        st["current_stage"] = 1
+                        st["stage1_notified"] = False
+                        st["stage2_notified"] = False
+                        st["stage3_notified"] = False
+                        save_state_to_sheets(asset_key, st)
             else:
                 is_low_mode = (st["active_direction"] == "LOW")
                 
