@@ -81,6 +81,32 @@ def generate_stoch_chart(df, title, mini=False):
         plt.close('all')
         gc.collect()
 
+def normalize_stage_tfs(val):
+    """แปลง stage_tfs จาก Sheets ให้เป็น list 4 ตัวเสมอ (กันค่ากลับมาเป็น string/None)"""
+    if isinstance(val, str):
+        try:
+            import json as _json
+            parsed = _json.loads(val)
+            if isinstance(parsed, list):
+                val = parsed
+            else:
+                val = [v.strip().lower() for v in val.split(",") if v.strip()]
+        except Exception:
+            val = [v.strip().lower() for v in val.split(",") if v.strip()]
+    if isinstance(val, list) and len(val) == 4:
+        return [str(v).strip().lower() for v in val]
+    return ["4h", "1h", "15m", "5m"]
+
+def to_bool(val, default=True):
+    """แปลงค่า boolean จาก Sheets (กันค่ากลับมาเป็น 'FALSE'/'true' string)"""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() not in ("false", "0", "off", "no", "")
+    if val is None:
+        return default
+    return bool(val)
+
 def load_states_from_sheets():
     default_data = {
         "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True},
@@ -103,6 +129,20 @@ def load_states_from_sheets():
                     data[k]["last_trade_date"] = None
                 if "auto_paused_today" not in data[k]:
                     data[k]["auto_paused_today"] = False
+            # Normalize ค่าที่อาจกลับมาเป็น string จาก Sheets
+            for k in data:
+                if isinstance(data[k], dict):
+                    if "stage_tfs" in data[k]:
+                        data[k]["stage_tfs"] = normalize_stage_tfs(data[k]["stage_tfs"])
+                    for bkey, bdef in (("s5_enabled", True), ("is_active", True),
+                                       ("custom_mode", False), ("auto_paused_today", False)):
+                        if bkey in data[k]:
+                            data[k][bkey] = to_bool(data[k][bkey], bdef)
+                    if "current_stage" in data[k]:
+                        try:
+                            data[k]["current_stage"] = int(data[k]["current_stage"])
+                        except (TypeError, ValueError):
+                            data[k]["current_stage"] = 1
             return data
     except Exception as e:
         print(f"Load States from Sheets Error: {e}")
@@ -857,10 +897,12 @@ def current_trade_date():
 def check_daily_reset_and_state(asset_key):
     st = ASSETS[asset_key]["state"]
     current_date = current_trade_date()
-    last_trade_date = st.get("last_trade_date")
-    
-    if last_trade_date and last_trade_date != current_date:
-        if not st.get("is_active", True) and st.get("auto_paused_today", False):
+
+    # ขึ้นวันเทรดใหม่ → รีเซ็ตทุกคู่กลับ Stage 1 ไม่ว่าจะค้าง stage ไหน
+    last_seen = st.get("last_seen_date")
+    if last_seen != current_date:
+        st["last_seen_date"] = current_date
+        if last_seen is not None:
             st["is_active"] = True
             st["auto_paused_today"] = False
             st["current_stage"] = 1
@@ -869,7 +911,7 @@ def check_daily_reset_and_state(asset_key):
             st["stage3_notified"] = False
             st["execute_notified"] = False
             save_state_to_sheets(asset_key, st)
-            print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
+            print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันเทรดใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
 
 def build_mini_chart(sub_k, sub_d):
     """วาดกราฟ Stoch RSI มินิจากประวัติ K/D แล้วคืนค่าเป็น base64 (None ถ้าข้อมูลไม่พอ)"""
