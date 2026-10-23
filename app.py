@@ -897,23 +897,8 @@ def current_trade_date():
     return now.strftime("%Y-%m-%d")
 
 def check_daily_reset_and_state(asset_key):
-    st = ASSETS[asset_key]["state"]
-    current_date = current_trade_date()
-
-    # ขึ้นวันเทรดใหม่ → รีเซ็ตทุกคู่กลับ Stage 1 ไม่ว่าจะค้าง stage ไหน
-    last_seen = st.get("last_seen_date")
-    if last_seen != current_date:
-        st["last_seen_date"] = current_date
-        if last_seen is not None:
-            st["is_active"] = True
-            st["auto_paused_today"] = False
-            st["current_stage"] = 1
-            st["stage1_notified"] = False
-            st["stage2_notified"] = False
-            st["stage3_notified"] = False
-            st["execute_notified"] = False
-            save_state_to_sheets(asset_key, st)
-            print(f"[{ASSETS[asset_key]['name']}] ขึ้นวันเทรดใหม่ ({current_date}) แล้ว! รีเซ็ตเรดาร์กลับมาเริ่มต้น Stage 1 ใหม่อัตโนมัติ")
+    """ไม่มีการรีเซ็ตอัตโนมัติแล้ว — ระบบรันตามค่าที่ผู้ใช้ตั้งไว้ต่อเนื่อง"""
+    return
 
 def build_mini_chart(sub_k, sub_d):
     """วาดกราฟ Stoch RSI มินิจากประวัติ K/D แล้วคืนค่าเป็น base64 (None ถ้าข้อมูลไม่พอ)"""
