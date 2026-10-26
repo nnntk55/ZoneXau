@@ -646,7 +646,7 @@ HTML_TEMPLATE = """
                     {% for idx in range(4) %}
                     <div style="flex: 1;">
                         <span>S{{ idx+1 }}:</span>
-                        <select name="stage_{{ idx+1 }}_tf">
+                        <select name="stage_{{ idx+1 }}_tf" onchange="this.form.submit()">
                             {% for tf in available_tfs %}
                             <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>
                                 {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
@@ -657,7 +657,7 @@ HTML_TEMPLATE = """
                     {% endfor %}
                     <div style="flex: 1;">
                         <span>S5:</span>
-                        <select name="stage_5_tf">
+                        <select name="stage_5_tf" onchange="this.form.submit()">
                             <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
                             <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
                         </select>
