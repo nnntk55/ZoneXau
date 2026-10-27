@@ -1120,9 +1120,62 @@ def update_market_data():
     if not data:
         print("❌ No data received from MT5")
         return jsonify({"status": "error", "message": "No data received"}), 400
+    LAST_BOT_PUSH["t"] = time.time()
     print(f"📥 Received data from MT5: {list(data.keys())}")
     threading.Thread(target=process_market_data, args=(data,), daemon=True).start()
     return jsonify({"status": "success", "message": "MT5 Data accepted"})
+
+# ---- Heartbeat Watchdog: เตือนผ่าน Telegram เมื่อบอทหยุด push ข้อมูล ----
+LAST_BOT_PUSH = {"t": None}
+BOT_DOWN_ALERTED = {"v": False}
+BOT_DOWN_TIMEOUT = 180  # วินาที — เกินนี้ถือว่าบอทตาย
+
+def bot_watchdog_loop():
+    """ตรวจ heartbeat ของบอท MT5 ทุก 30 วิ — เตือนเมื่อขาดการเชื่อมต่อและเมื่อกลับมา"""
+    while True:
+        try:
+            last = LAST_BOT_PUSH["t"]
+            if last is not None:
+                gap = time.time() - last
+                if gap > BOT_DOWN_TIMEOUT and not BOT_DOWN_ALERTED["v"]:
+                    BOT_DOWN_ALERTED["v"] = True
+                    send_telegram_notification(
+                        f"⚠️ *ZONE TRIGGER ALERT*\n"
+                        f"บอท MT5 ไม่ส่งข้อมูลมา {int(gap//60)} นาทีแล้ว!\n"
+                        f"เช็ค: บอทยังรันอยู่ / MT5 เปิดอยู่ / Algo Trading เขียว / เน็ตไม่หลุด"
+                    )
+                    print(f"⚠️ Bot heartbeat lost ({int(gap)}s) — alert sent")
+                elif gap <= BOT_DOWN_TIMEOUT and BOT_DOWN_ALERTED["v"]:
+                    BOT_DOWN_ALERTED["v"] = False
+                    send_telegram_notification("🟢 *ZONE TRIGGER*: บอท MT5 กลับมาออนไลน์แล้ว — ระบบทำงานต่อ")
+                    print("🟢 Bot heartbeat restored")
+        except Exception as e:
+            print(f"Watchdog Error: {e}")
+        time.sleep(30)
+
+@app.route('/api/log_trade', methods=['POST'])
+def log_trade():
+    """รับข้อมูลออเดอร์ที่ยิงสำเร็จจากบอท → บันทึกลง Google Sheets (tab Trades)"""
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "No data"}), 400
+    print(f"📝 Trade log received: {data}")
+    if GOOGLE_SCRIPT_URL:
+        try:
+            payload = {
+                "type": "trade",
+                "asset": data.get("asset"),
+                "action": data.get("action"),
+                "price": data.get("price"),
+                "lot": data.get("lot"),
+                "tp_pips": data.get("tp_pips"),
+                "sl_pips": data.get("sl_pips"),
+                "time": data.get("time")
+            }
+            requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Log Trade to Sheets Error: {e}")
+    return jsonify({"status": "success"})
 
 @app.route('/api/get_market_data', methods=['GET'])
 def get_market_data():
@@ -1399,193 +1452,8 @@ def run_asset_radar(asset_key):
     while True:
         try:
             check_daily_reset_and_state(asset_key)
-
-            if not st.get("is_active", True):
-                time.sleep(10)
-                continue
-
-            stage_tfs = st.get("stage_tfs", ["4h", "1h", "15m", "5m"])
-            curr_st_idx = st["current_stage"] - 1
-            
-            while curr_st_idx < 4 and stage_tfs[curr_st_idx] == "off":
-                st["current_stage"] += 1
-                curr_st_idx = st["current_stage"] - 1
-                save_state_to_sheets(asset_key, st)
-            
-            if st["current_stage"] > 5:
-                time.sleep(10)
-                continue
-
-            tf_s1, tf_s2, tf_s3, tf_s4 = stage_tfs[0], stage_tfs[1], stage_tfs[2], stage_tfs[3]
-
-            if st["current_stage"] < 4:
-                st["execute_notified"] = False
-
-            if st.get("custom_mode"):
-                target_tf = st["custom_tf"]
-                target_dir = st["custom_dir"]
-                k_target = st.get(f"k_{target_tf}", 0.0)
-                is_hit = tf_has_data(st, target_tf) and (
-                    (target_dir == "LOW" and k_target < 20) or
-                    (target_dir == "HIGH" and k_target > 80)
-                )
-                if is_hit:
-                    img_b64 = get_tf_chart_b64(st, target_tf)
-                    msg = (
-                        f"🎯 *{name} Custom Alert*:\n"
-                        f"Timeframe *{target_tf.upper()}* ถึงจุดหมายฝั่ง *{target_dir}* แล้ว! (K = {k_target:.2f})\n"
-                        f"✅ แจ้งเตือนสำเร็จ และระบบได้รีเซ็ตกลับสู่โหมดออโต้ปกติแล้ว"
-                    )
-                    if img_b64:
-                        sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                    else:
-                        sent = send_telegram_notification(msg, asset_key=asset_key)
-                    if sent:
-                        st["custom_mode"] = False
-                        st["custom_tf"] = None
-                        st["custom_dir"] = None
-                        st["target_mode"] = "AUTO"
-                        st["current_stage"] = 1
-                        st["stage1_notified"] = False
-                        st["stage2_notified"] = False
-                        st["stage3_notified"] = False
-                        save_state_to_sheets(asset_key, st)
-            else:
-                is_low_mode = (st["active_direction"] == "LOW")
-                
-                if is_low_mode:
-                    if st["current_stage"] == 1:
-                        if tf_has_data(st, tf_s1) and st.get(f"k_{tf_s1}", 0) < 20:
-                            if not st["stage1_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s1)
-                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าสู่ Low Zone แล้ว (K = {st.get(f'k_{tf_s1}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage1_notified"] = True
-                            if st["stage1_notified"]:
-                                st["current_stage"] = 2
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 2:
-                        if tf_has_data(st, tf_s2) and st.get(f"k_{tf_s2}", 0) < 20:
-                            if not st["stage2_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s2)
-                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ LOW ZONE แล้ว! (K = {st.get(f'k_{tf_s2}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage2_notified"] = True
-                            if st["stage2_notified"]:
-                                st["current_stage"] = 3
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 3:
-                        if tf_has_data(st, tf_s3) and st.get(f"k_{tf_s3}", 0) < 20:
-                            if not st["stage3_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s3)
-                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ LOW ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage3_notified"] = True
-                            if st["stage3_notified"]:
-                                st["current_stage"] = 4
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 4:
-                        latest_k = st.get(f"k_{tf_s4}", 0.0)
-                        latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        if tf_has_data(st, tf_s4) and latest_k < 20 and latest_k > latest_d:
-                            if not st.get("execute_notified"):
-                                img_b64 = get_tf_chart_b64(st, tf_s4)
-                                msg = (
-                                    f"🟢 *{name} — รายงาน Stage 4* ({tf_s4.upper()})\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"• Stoch K ({latest_k:.2f}) ตัด D ({latest_d:.2f}) ขึ้นใน Low Zone\n"
-                                    f"• ราคาปัจจุบัน: `{st.get('price', 0.0):.2f}`\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"✅ *Stage 4 เสร็จสมบูรณ์ — รอสัญญาณเข้าออเดอร์เมื่อแท่งเทียนปิดเหนือ EMA8*"
-                                )
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["execute_notified"] = True
-                                    if st.get("s5_enabled", True):
-                                        st["current_stage"] = 5
-                                    save_state_to_sheets(asset_key, st)
-                else: # HIGH MODE
-                    if st["current_stage"] == 1:
-                        if tf_has_data(st, tf_s1) and st.get(f"k_{tf_s1}", 0) > 80:
-                            if not st["stage1_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s1)
-                                msg = f"📢 *{name} Stage 1* ({tf_s1.upper()}): เข้าสู่ High Zone แล้ว (K = {st.get(f'k_{tf_s1}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage1_notified"] = True
-                            if st["stage1_notified"]:
-                                st["current_stage"] = 2
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 2:
-                        if tf_has_data(st, tf_s2) and st.get(f"k_{tf_s2}", 0) > 80:
-                            if not st["stage2_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s2)
-                                msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ HIGH ZONE แล้ว! (K = {st.get(f'k_{tf_s2}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage2_notified"] = True
-                            if st["stage2_notified"]:
-                                st["current_stage"] = 3
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 3:
-                        if tf_has_data(st, tf_s3) and st.get(f"k_{tf_s3}", 0) > 80:
-                            if not st["stage3_notified"]:
-                                img_b64 = get_tf_chart_b64(st, tf_s3)
-                                msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ HIGH ZONE ลึกพิเศษแล้ว! (K = {st.get(f'k_{tf_s3}'):.2f}) | ราคา: {st.get('price', 0.0):.2f}"
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["stage3_notified"] = True
-                            if st["stage3_notified"]:
-                                st["current_stage"] = 4
-                                save_state_to_sheets(asset_key, st)
-                    elif st["current_stage"] == 4:
-                        latest_k = st.get(f"k_{tf_s4}", 0.0)
-                        latest_d = st.get(f"d_{tf_s4}", 0.0)
-                        if tf_has_data(st, tf_s4) and latest_k > 80 and latest_k < latest_d:
-                            if not st.get("execute_notified"):
-                                img_b64 = get_tf_chart_b64(st, tf_s4)
-                                msg = (
-                                    f"🔴 *{name} — รายงาน Stage 4* ({tf_s4.upper()})\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"• Stoch K ({latest_k:.2f}) ตัด D ({latest_d:.2f}) ลงใน High Zone\n"
-                                    f"• ราคาปัจจุบัน: `{st.get('price', 0.0):.2f}`\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"✅ *Stage 4 เสร็จสมบูรณ์ — รอสัญญาณเข้าออเดอร์เมื่อแท่งเทียนปิดใต้ EMA8*"
-                                )
-                                if img_b64:
-                                    sent = send_telegram_photo_with_caption(base64.b64decode(img_b64), msg, asset_key=asset_key)
-                                else:
-                                    sent = send_telegram_notification(msg, asset_key=asset_key)
-                                if sent:
-                                    st["execute_notified"] = True
-                                    if st.get("s5_enabled", True):
-                                        st["current_stage"] = 5
-                                    save_state_to_sheets(asset_key, st)
-
+            # --- Stage engine ย้ายไปฝั่งบอท MT5 แล้ว (single engine) ---
+            # dashboard เหลือหน้าที่เดียว: ปลด pause ตี 5 เมื่อครบวันเทรดใหม่
         except Exception as e:
             print(f"Radar Loop Error ({asset_key}): {e}")
         gc.collect()
@@ -1595,5 +1463,6 @@ if __name__ == "__main__":
     for key in ASSETS.keys():
         t = threading.Thread(target=run_asset_radar, args=(key,), daemon=True)
         t.start()
+    threading.Thread(target=bot_watchdog_loop, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
