@@ -6,7 +6,7 @@ import time
 import base64
 import json
 import gc
-from flask import Flask, render_template_string, jsonify, request, redirect, url_for
+from flask import Flask, render_template_string, jsonify, request, redirect, url_for, Response
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,6 +22,25 @@ matplotlib.use("Agg")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
+# Auth (ตั้งใน Render env ถ้าต้องการล็อกระบบ — ไม่ตั้ง = เปิดเหมือนเดิม)
+API_KEY = os.environ.get("API_KEY")            # /api/* ต้องส่ง header X-Api-Key ให้ตรง (ตั้งเดียวกันกับ DASH_API_KEY ฝั่งบอท)
+DASH_USER = os.environ.get("DASH_USER")        # basic auth สำหรับหน้าเว็บ
+DASH_PASS = os.environ.get("DASH_PASS")
+
+@app.before_request
+def check_access():
+    path = request.path
+    if path.startswith("/api/"):
+        if API_KEY and request.headers.get("X-Api-Key") != API_KEY:
+            return jsonify({"status": "error", "message": "unauthorized"}), 401
+        return None
+    if path.startswith("/telegram-webhook"):
+        return None  # Telegram server เรียกเอง ใส่ auth ไม่ได้
+    if DASH_USER and DASH_PASS:
+        auth = request.authorization
+        if not auth or auth.username != DASH_USER or auth.password != DASH_PASS:
+            return Response("Auth required", 401, {"WWW-Authenticate": 'Basic realm="ZONE TRIGGER"'})
+    return None
 
 def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
     if df is None or len(df) < (rsi_period + stoch_period + k_period + d_period):
@@ -600,6 +619,12 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>ZONE TRIGGER</h1>
         <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes (Exness MT5 Sync Ready)</div>
+        <div style="margin: 8px 0 14px;">
+            <span class="badge {% if bot_online %}badge-status-on{% else %}badge-status-off{% endif %}">
+                {% if bot_online %}MT5 Bot Online{% else %}MT5 Bot Offline{% endif %}
+            </span>
+            <span style="font-size: 0.75rem; color: #9b8477;">{{ bot_last }}</span>
+        </div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
                 {{ flash_msg }}
@@ -986,7 +1011,10 @@ def home():
     msg = global_flash["msg"]
     ftype = global_flash["type"]
     global_flash["msg"] = None
-    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype)
+    bot_t = LAST_BOT_PUSH["t"]
+    bot_online = bot_t is not None and (time.time() - bot_t) < BOT_DOWN_TIMEOUT
+    bot_last = f"heartbeat ล่าสุด: {datetime.fromtimestamp(bot_t, timezone(timedelta(hours=7))).strftime('%H:%M:%S')}" if bot_t else "ยังไม่เคยรับข้อมูลจากบอท"
+    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype, bot_online=bot_online, bot_last=bot_last)
 
 @app.route("/send-test")
 def send_test():
@@ -1170,6 +1198,8 @@ def log_trade():
                 "lot": data.get("lot"),
                 "tp_pips": data.get("tp_pips"),
                 "sl_pips": data.get("sl_pips"),
+                "result": data.get("result", ""),
+                "profit": data.get("profit"),
                 "time": data.get("time")
             }
             requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
