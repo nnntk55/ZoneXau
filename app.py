@@ -898,11 +898,13 @@ def send_single_summary_text_only(asset_key, chat_id):
 
         sr_line = ""
         if st.get("sr_enabled"):
-            res_s = st.get('sr_resistance', '-')
-            sup_s = st.get('sr_support', '-')
-            res_sc = st.get('sr_resistance_score', '')
-            sup_sc = st.get('sr_support_score', '')
-            sr_line = f"\n📐 *แนวต้าน:* `{res_s}` (แข็ง {res_sc}/10) | *แนวรับ:* `{sup_s}` (แข็ง {sup_sc}/10)\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
+            px = st.get('price', 0.0)
+            emas = [("EMA50", st.get('sr_ema50')), ("EMA100", st.get('sr_ema100')), ("EMA200", st.get('sr_ema200'))]
+            parts = []
+            for i, (label, ev) in enumerate(emas, 1):
+                role = ("แนวต้าน" if ev > px else "แนวรับ") if ev else "—"
+                parts.append(f"{role} {i} {label}: `{ev:.2f}`" if ev else f"{label}: -")
+            sr_line = f"\n📐 {' | '.join(parts)}\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -926,11 +928,13 @@ def send_summary_report(asset_key, chat_id):
 
         sr_line = ""
         if st.get("sr_enabled"):
-            res_s = st.get('sr_resistance', '-')
-            sup_s = st.get('sr_support', '-')
-            res_sc = st.get('sr_resistance_score', '')
-            sup_sc = st.get('sr_support_score', '')
-            sr_line = f"\n📐 *แนวต้าน:* `{res_s}` (แข็ง {res_sc}/10) | *แนวรับ:* `{sup_s}` (แข็ง {sup_sc}/10)\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
+            px = st.get('price', 0.0)
+            emas = [("EMA50", st.get('sr_ema50')), ("EMA100", st.get('sr_ema100')), ("EMA200", st.get('sr_ema200'))]
+            parts = []
+            for i, (label, ev) in enumerate(emas, 1):
+                role = ("แนวต้าน" if ev > px else "แนวรับ") if ev else "—"
+                parts.append(f"{role} {i} {label}: `{ev:.2f}`" if ev else f"{label}: -")
+            sr_line = f"\n📐 {' | '.join(parts)}\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -1183,14 +1187,12 @@ def process_market_data(data):
                         print(f"✅ Chart generated for {asset_key} {tf}")
 
             # 4. แนวรับ-ต้าน + เทรนด์จากบอท (ส่งมาเฉพาะเมื่อเปิด sr)
-            if "sr_support" in payload:
-                st["sr_support"] = float(payload["sr_support"])
-            if "sr_resistance" in payload:
-                st["sr_resistance"] = float(payload["sr_resistance"])
-            if "sr_support_score" in payload:
-                st["sr_support_score"] = payload["sr_support_score"]
-            if "sr_resistance_score" in payload:
-                st["sr_resistance_score"] = payload["sr_resistance_score"]
+            if "sr_ema50" in payload:
+                st["sr_ema50"] = float(payload["sr_ema50"])
+            if "sr_ema100" in payload:
+                st["sr_ema100"] = float(payload["sr_ema100"])
+            if "sr_ema200" in payload:
+                st["sr_ema200"] = float(payload["sr_ema200"])
             if "sr_trend" in payload:
                 st["sr_trend"] = payload["sr_trend"]
 
@@ -1393,6 +1395,9 @@ def telegram_webhook():
                 st["auto_order"] = (parts[2] == "on")
                 st["is_active"] = True
                 st["auto_paused_today"] = False
+                st["current_stage"] = 1
+                st["stage1_notified"] = st["stage2_notified"] = st["stage3_notified"] = False
+                st["execute_notified"] = False
                 save_state_to_sheets(asset_key, st)
                 txt = "🤖 เปิดโหมดออเดอร์อัตโนมัติแล้ว — สัญญาณ Stage 5 จะยิงออเดอร์เองทันที ไม่ถาม" if st["auto_order"] else "👤 กลับเป็นโหมดยืนยันด้วยตัวเอง — Stage 5 จะถาม y/n ก่อนยิง"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: {txt}", chat_id=chat_id)
@@ -1422,6 +1427,9 @@ def telegram_webhook():
                 st["sr_enabled"] = (parts[2] == "on")
                 st["is_active"] = True
                 st["auto_paused_today"] = False
+                st["current_stage"] = 1
+                st["stage1_notified"] = st["stage2_notified"] = st["stage3_notified"] = False
+                st["execute_notified"] = False
                 save_state_to_sheets(asset_key, st)
                 txt = "🟢 เปิดตัวกรองแนวรับ-ต้านแล้ว — Stage 1 จะสัญญาณเฉพาะเมื่อชน/ใกล้แนว" if st["sr_enabled"] else "🔴 ปิดตัวกรองแนวรับ-ต้านแล้ว — สัญญาณตาม Stoch อย่างเดียว"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: {txt}", chat_id=chat_id)
