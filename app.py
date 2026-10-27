@@ -127,10 +127,10 @@ def to_bool(val, default=True):
 
 def load_states_from_sheets():
     default_data = {
-        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False},
-        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False},
-        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False},
-        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False}
+        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
+        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
+        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False}
     }
     if not GOOGLE_SCRIPT_URL:
         return default_data
@@ -154,7 +154,7 @@ def load_states_from_sheets():
                         data[k]["stage_tfs"] = normalize_stage_tfs(data[k]["stage_tfs"])
                     for bkey, bdef in (("s5_enabled", True), ("is_active", True),
                                        ("custom_mode", False), ("auto_paused_today", False),
-                                       ("sr_enabled", False)):
+                                       ("sr_enabled", False), ("auto_order", False)):
                         if bkey in data[k]:
                             data[k][bkey] = to_bool(data[k][bkey], bdef)
                     if "current_stage" in data[k]:
@@ -186,6 +186,7 @@ def save_state_to_sheets(asset_key, state_dict):
             "stage_tfs": state_dict.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "s5_enabled": state_dict.get("s5_enabled", True),
             "sr_enabled": state_dict.get("sr_enabled", False),
+            "auto_order": state_dict.get("auto_order", False),
             "lot": state_dict.get("lot", 0.01),
             "tp_pips": state_dict.get("tp_pips", 300),
             "sl_pips": state_dict.get("sl_pips", 200)
@@ -225,6 +226,7 @@ ASSETS = {
             "stage_tfs": saved_states.get("xau", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "s5_enabled": saved_states.get("xau", {}).get("s5_enabled", True),
             "sr_enabled": saved_states.get("xau", {}).get("sr_enabled", False),
+            "auto_order": saved_states.get("xau", {}).get("auto_order", False),
             "lot": saved_states.get("xau", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("xau", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("xau", {}).get("sl_pips", 200),
@@ -264,6 +266,7 @@ ASSETS = {
             "stage_tfs": saved_states.get("us", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "s5_enabled": saved_states.get("us", {}).get("s5_enabled", True),
             "sr_enabled": saved_states.get("us", {}).get("sr_enabled", False),
+            "auto_order": saved_states.get("us", {}).get("auto_order", False),
             "lot": saved_states.get("us", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("us", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("us", {}).get("sl_pips", 200),
@@ -303,6 +306,7 @@ ASSETS = {
             "stage_tfs": saved_states.get("oil", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "s5_enabled": saved_states.get("oil", {}).get("s5_enabled", True),
             "sr_enabled": saved_states.get("oil", {}).get("sr_enabled", False),
+            "auto_order": saved_states.get("oil", {}).get("auto_order", False),
             "lot": saved_states.get("oil", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("oil", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("oil", {}).get("sl_pips", 200),
@@ -342,6 +346,7 @@ ASSETS = {
             "stage_tfs": saved_states.get("btc", {}).get("stage_tfs", ["4h", "1h", "15m", "5m"]),
             "s5_enabled": saved_states.get("btc", {}).get("s5_enabled", True),
             "sr_enabled": saved_states.get("btc", {}).get("sr_enabled", False),
+            "auto_order": saved_states.get("btc", {}).get("auto_order", False),
             "lot": saved_states.get("btc", {}).get("lot", 0.01),
             "tp_pips": saved_states.get("btc", {}).get("tp_pips", 300),
             "sl_pips": saved_states.get("btc", {}).get("sl_pips", 200),
@@ -696,6 +701,11 @@ HTML_TEMPLATE = """
                         <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
                             <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
                             <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
+                        </select>
+                        <span>AUTO:</span>
+                        <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
+                            <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
+                            <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
                         </select>
                     </div>
                 </div>
@@ -1065,6 +1075,7 @@ def update_stage_tfs(asset_key):
         st["stage_tfs"] = new_tfs
         st["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
         st["sr_enabled"] = (request.form.get("sr_enabled", "off") == "on")
+        st["auto_order"] = (request.form.get("auto_order", "off") == "on")
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
                 st["current_stage"] = idx + 1
@@ -1247,6 +1258,7 @@ def get_asset_config(asset_key):
         "stage_tfs": st.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
         "s5_enabled": st.get("s5_enabled", True),
         "sr_enabled": st.get("sr_enabled", False),
+        "auto_order": st.get("auto_order", False),
         "stage1_notified": st.get("stage1_notified", False),
         "stage2_notified": st.get("stage2_notified", False),
         "stage3_notified": st.get("stage3_notified", False),
@@ -1344,6 +1356,35 @@ def telegram_webhook():
                     st["s5_enabled"] = True
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
+            elif len(parts) == 3 and parts[0] in ASSETS and parts[1] == "auto" and parts[2] in ("on", "off"):
+                asset_key = parts[0]
+                st = ASSETS[asset_key]["state"]
+                st["auto_order"] = (parts[2] == "on")
+                st["is_active"] = True
+                st["auto_paused_today"] = False
+                save_state_to_sheets(asset_key, st)
+                txt = "🤖 เปิดโหมดออเดอร์อัตโนมัติแล้ว — สัญญาณ Stage 5 จะยิงออเดอร์เองทันที ไม่ถาม" if st["auto_order"] else "👤 กลับเป็นโหมดยืนยันด้วยตัวเอง — Stage 5 จะถาม y/n ก่อนยิง"
+                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: {txt}", chat_id=chat_id)
+            elif len(parts) >= 2 and parts[0] in ASSETS and any(p.startswith(("lot", "order", "tp", "sl")) for p in parts[1:]):
+                asset_key = parts[0]
+                st = ASSETS[asset_key]["state"]
+                changed = []
+                try:
+                    for p in parts[1:]:
+                        if p.startswith("lot") or p.startswith("order"):
+                            st["lot"] = float(p.replace("order", "").replace("lot", ""))
+                            changed.append(f"lot={st['lot']}")
+                        elif p.startswith("tp"):
+                            st["tp_pips"] = int(float(p[2:]))
+                            changed.append(f"tp={st['tp_pips']}")
+                        elif p.startswith("sl"):
+                            st["sl_pips"] = int(float(p[2:]))
+                            changed.append(f"sl={st['sl_pips']}")
+                    if changed:
+                        save_state_to_sheets(asset_key, st)
+                        send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {', '.join(changed)} เรียบร้อยแล้ว!", chat_id=chat_id)
+                except ValueError:
+                    send_telegram_notification(f"❌ รูปแบบคำสั่งไม่ถูก — ใช้เช่น `{parts[0]} lot0.1 tp3000 sl2000`", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] == "sr" and parts[2] in ("on", "off"):
                 asset_key = parts[0]
                 st = ASSETS[asset_key]["state"]
