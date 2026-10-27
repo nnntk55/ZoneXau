@@ -629,7 +629,6 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>ZONE TRIGGER</h1>
-        <div class="subtitle">ระบบเรดาร์ Stoch RSI 6 Timeframes (Exness MT5 Sync Ready)</div>
         <div style="margin: 8px 0 14px;">
             <span class="badge {% if bot_online %}badge-status-on{% else %}badge-status-off{% endif %}">
                 {% if bot_online %}MT5 Bot Online{% else %}MT5 Bot Offline{% endif %}
@@ -689,24 +688,30 @@ HTML_TEMPLATE = """
                             </option>
                             {% endfor %}
                         </select>
+                        {% if idx == 0 %}
+                        <div style="margin-top: 4px;">
+                            <span>S/R:</span>
+                            <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
+                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>� OFF</option>
+                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>� ON</option>
+                            </select>
+                        </div>
+                        {% endif %}
                     </div>
                     {% endfor %}
                     <div style="flex: 1;">
                         <span>S5:</span>
                         <select name="stage_5_tf" onchange="this.form.submit()">
-                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
-                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
+                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>� ON</option>
+                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>� OFF</option>
                         </select>
-                        <span>S/R:</span>
-                        <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
-                            <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
-                            <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
-                        </select>
-                        <span>AUTO:</span>
-                        <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
-                            <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
-                            <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
-                        </select>
+                        <div style="margin-top: 4px;">
+                            <span>AUTO:</span>
+                            <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
+                                <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
+                                <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 <button type="submit" class="save-btn save-tf">บันทึก Timeframe</button>
