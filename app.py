@@ -1151,6 +1151,12 @@ def get_asset_config(asset_key):
         "custom_dir": st.get("custom_dir"),
         "stage_tfs": st.get("stage_tfs", ["4h", "1h", "15m", "5m"]),
         "s5_enabled": st.get("s5_enabled", True),
+        "stage1_notified": st.get("stage1_notified", False),
+        "stage2_notified": st.get("stage2_notified", False),
+        "stage3_notified": st.get("stage3_notified", False),
+        "execute_notified": st.get("execute_notified", False),
+        "stage4_signal_sent": st.get("stage4_signal_sent", False),
+        "s4_confirm_candle": st.get("s4_confirm_candle"),
         "user_command": st.get("user_command")
     }
     print(f"📤 Sending config for {asset_key}: is_active={config['is_active']}")
