@@ -895,11 +895,14 @@ def send_single_summary_text_only(asset_key, chat_id):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
-        
+
+        sr_line = ""
+        if st.get("sr_enabled"):
+            sr_line = f"\n📐 *แนวต้าน:* `{st.get('sr_resistance', '-')}` | *แนวรับ:* `{st.get('sr_support', '-')}`\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
-            f"📌 สถานะเรดาร์: {mode_desc}\n"
+            f"📌 สถานะเรดาร์: {mode_desc}{sr_line}\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
@@ -916,11 +919,14 @@ def send_summary_report(asset_key, chat_id):
             mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
         else:
             mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
-        
+
+        sr_line = ""
+        if st.get("sr_enabled"):
+            sr_line = f"\n📐 *แนวต้าน:* `{st.get('sr_resistance', '-')}` | *แนวรับ:* `{st.get('sr_support', '-')}`\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
-            f"📌 สถานะเรดาร์: {mode_desc}\n"
+            f"📌 สถานะเรดาร์: {mode_desc}{sr_line}\n"
             f"📝 *โน้ตแผนการเทรด:* {st['note']}"
         )
         send_telegram_notification(caption, chat_id=chat_id, asset_key=asset_key)
@@ -1167,6 +1173,14 @@ def process_market_data(data):
                     if img_b64:
                         st["charts"][tf] = img_b64
                         print(f"✅ Chart generated for {asset_key} {tf}")
+
+            # 4. แนวรับ-ต้าน + เทรนด์จากบอท (ส่งมาเฉพาะเมื่อเปิด sr)
+            if "sr_support" in payload:
+                st["sr_support"] = float(payload["sr_support"])
+            if "sr_resistance" in payload:
+                st["sr_resistance"] = float(payload["sr_resistance"])
+            if "sr_trend" in payload:
+                st["sr_trend"] = payload["sr_trend"]
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
