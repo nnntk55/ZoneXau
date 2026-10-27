@@ -898,7 +898,11 @@ def send_single_summary_text_only(asset_key, chat_id):
 
         sr_line = ""
         if st.get("sr_enabled"):
-            sr_line = f"\n📐 *แนวต้าน:* `{st.get('sr_resistance', '-')}` | *แนวรับ:* `{st.get('sr_support', '-')}`\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
+            res_s = st.get('sr_resistance', '-')
+            sup_s = st.get('sr_support', '-')
+            res_sc = st.get('sr_resistance_score', '')
+            sup_sc = st.get('sr_support_score', '')
+            sr_line = f"\n📐 *แนวต้าน:* `{res_s}` (แข็ง {res_sc}/10) | *แนวรับ:* `{sup_s}` (แข็ง {sup_sc}/10)\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -922,7 +926,11 @@ def send_summary_report(asset_key, chat_id):
 
         sr_line = ""
         if st.get("sr_enabled"):
-            sr_line = f"\n📐 *แนวต้าน:* `{st.get('sr_resistance', '-')}` | *แนวรับ:* `{st.get('sr_support', '-')}`\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
+            res_s = st.get('sr_resistance', '-')
+            sup_s = st.get('sr_support', '-')
+            res_sc = st.get('sr_resistance_score', '')
+            sup_sc = st.get('sr_support_score', '')
+            sr_line = f"\n📐 *แนวต้าน:* `{res_s}` (แข็ง {res_sc}/10) | *แนวรับ:* `{sup_s}` (แข็ง {sup_sc}/10)\n📈 *เทรนด์:* {st.get('sr_trend', '-')}"
         caption = (
             f"📊 *รายงานสรุปสถานะ - {asset['name']}* [{status_str}]\n"
             f"💰 *ราคาปัจจุบัน:* `{st.get('price', 0.0):.2f}`\n"
@@ -1179,6 +1187,10 @@ def process_market_data(data):
                 st["sr_support"] = float(payload["sr_support"])
             if "sr_resistance" in payload:
                 st["sr_resistance"] = float(payload["sr_resistance"])
+            if "sr_support_score" in payload:
+                st["sr_support_score"] = payload["sr_support_score"]
+            if "sr_resistance_score" in payload:
+                st["sr_resistance_score"] = payload["sr_resistance_score"]
             if "sr_trend" in payload:
                 st["sr_trend"] = payload["sr_trend"]
 
