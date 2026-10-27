@@ -27,7 +27,6 @@ API_KEY = os.environ.get("API_KEY")            # /api/* ต้องส่ง he
 DASH_USER = os.environ.get("DASH_USER")        # basic auth สำหรับหน้าเว็บ
 DASH_PASS = os.environ.get("DASH_PASS")
 
-@app.before_request
 def check_access():
     path = request.path
     if path.startswith("/api/"):
@@ -359,6 +358,7 @@ ASSETS = {
 }
 global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
+app.before_request(check_access)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
