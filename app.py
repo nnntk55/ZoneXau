@@ -125,12 +125,23 @@ def to_bool(val, default=True):
         return default
     return bool(val)
 
+def default_set2():
+    """ชุดเทรดสั้น — field เหมือนชุดหลักเป๊ะ"""
+    return {
+        "active_direction": "LOW", "target_mode": "AUTO", "stage_tfs": ["4h", "1h", "15m", "5m"],
+        "s5_enabled": True, "sr_enabled": False, "sr_alert_sent": False, "auto_order": False,
+        "current_stage": 1, "stage1_notified": False, "stage2_notified": False,
+        "stage3_notified": False, "stage4_signal_sent": False, "s4_confirm_candle": None,
+        "lot": 0.01, "tp_pips": 300, "sl_pips": 200,
+        "is_active": True, "auto_paused_today": False, "last_trade_date": None
+    }
+
 def load_states_from_sheets():
     default_data = {
-        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
-        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
-        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False},
-        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False}
+        "xau": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False, "set2": default_set2(), "alerts": []},
+        "us": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False, "set2": default_set2(), "alerts": []},
+        "oil": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False, "set2": default_set2(), "alerts": []},
+        "btc": {"note": "ยังไม่มีบันทึกแผน", "current_stage": 1, "target_mode": "AUTO", "active_direction": "LOW", "custom_mode": False, "custom_tf": None, "custom_dir": None, "is_active": True, "last_trade_date": None, "auto_paused_today": False, "s5_enabled": True, "sr_enabled": False, "auto_order": False, "set2": default_set2(), "alerts": []}
     }
     if not GOOGLE_SCRIPT_URL:
         return default_data
@@ -162,6 +173,23 @@ def load_states_from_sheets():
                             data[k]["current_stage"] = int(data[k]["current_stage"])
                         except (TypeError, ValueError):
                             data[k]["current_stage"] = 1
+                    # set2 + alerts: Sheets เก็บเป็น JSON string → parse กลับเป็น object
+                    if isinstance(data[k].get("set2"), str):
+                        try: data[k]["set2"] = json.loads(data[k]["set2"])
+                        except Exception: data[k]["set2"] = default_set2()
+                    if not isinstance(data[k].get("set2"), dict):
+                        data[k]["set2"] = default_set2()
+                    s2 = data[k]["set2"]
+                    s2["stage_tfs"] = normalize_stage_tfs(s2.get("stage_tfs"))
+                    for bkey, bdef in (("s5_enabled", True), ("is_active", True),
+                                       ("auto_paused_today", False), ("sr_enabled", False), ("auto_order", False)):
+                        s2[bkey] = to_bool(s2.get(bkey), bdef)
+                    s2["current_stage"] = int(s2.get("current_stage") or 1)
+                    if isinstance(data[k].get("alerts"), str):
+                        try: data[k]["alerts"] = json.loads(data[k]["alerts"])
+                        except Exception: data[k]["alerts"] = []
+                    if not isinstance(data[k].get("alerts"), list):
+                        data[k]["alerts"] = []
             return data
     except Exception as e:
         print(f"Load States from Sheets Error: {e}")
@@ -189,7 +217,9 @@ def save_state_to_sheets(asset_key, state_dict):
             "auto_order": state_dict.get("auto_order", False),
             "lot": state_dict.get("lot", 0.01),
             "tp_pips": state_dict.get("tp_pips", 300),
-            "sl_pips": state_dict.get("sl_pips", 200)
+            "sl_pips": state_dict.get("sl_pips", 200),
+            "set2": json.dumps(state_dict.get("set2") or default_set2()),
+            "alerts": json.dumps(state_dict.get("alerts") or [])
         }
         requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
     except Exception as e:
@@ -675,7 +705,7 @@ HTML_TEMPLATE = """
             </div>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">เลือก Timeframe แต่ละ Stage อิสระ</div>
+                <div class="panel-title">📈 เทรดยาว — เลือก Timeframe แต่ละ Stage</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -692,8 +722,8 @@ HTML_TEMPLATE = """
                         <div style="margin-top: 4px;">
                             <span>S/R:</span>
                             <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
-                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>� OFF</option>
-                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>� ON</option>
+                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
+                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
                             </select>
                         </div>
                         {% endif %}
@@ -702,8 +732,8 @@ HTML_TEMPLATE = """
                     <div style="flex: 1;">
                         <span>S5:</span>
                         <select name="stage_5_tf" onchange="this.form.submit()">
-                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>� ON</option>
-                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>� OFF</option>
+                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
+                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
                         </select>
                         <div style="margin-top: 4px;">
                             <span>AUTO:</span>
@@ -718,7 +748,7 @@ HTML_TEMPLATE = """
             </form>
 
             <form action="/update_order_config/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">ตั้งค่าออเดอร์ (Execution Setup)</div>
+                <div class="panel-title">📈 เทรดยาว — ตั้งค่าออเดอร์</div>
                 <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
                     <div style="flex: 1;">
                         <span>Lot:</span>
@@ -735,6 +765,105 @@ HTML_TEMPLATE = """
                 </div>
                 <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
+
+            {% set s2 = asset.state.get('set2') or {} %}
+            <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
+                <input type="hidden" name="set" value="short">
+                <div class="panel-title">⚡ เทรดสั้น — เลือก Timeframe แต่ละ Stage <span style="font-size:0.7rem; color:#9b8477;">(Stage {{ s2.get('current_stage', 1) }})</span></div>
+                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
+                    {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
+                    {% for idx in range(4) %}
+                    <div style="flex: 1;">
+                        <span>S{{ idx+1 }}:</span>
+                        <select name="stage_{{ idx+1 }}_tf" onchange="this.form.submit()">
+                            {% for tf in available_tfs2 %}
+                            <option value="{{ tf }}" {% if s2.get('stage_tfs', ['4h','1h','15m','5m'])[idx] == tf %}selected{% endif %}>
+                                {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if idx == 0 %}
+                        <div style="margin-top: 4px;">
+                            <span>S/R:</span>
+                            <select name="sr_enabled" onchange="this.form.submit()">
+                                <option value="off" {% if not s2.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
+                                <option value="on" {% if s2.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
+                            </select>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div style="flex: 1;">
+                        <span>S5:</span>
+                        <select name="stage_5_tf" onchange="this.form.submit()">
+                            <option value="on" {% if s2.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
+                            <option value="off" {% if not s2.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
+                        </select>
+                        <div style="margin-top: 4px;">
+                            <span>AUTO:</span>
+                            <select name="auto_order" onchange="this.form.submit()">
+                                <option value="off" {% if not s2.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
+                                <option value="on" {% if s2.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="save-btn save-tf">บันทึก Timeframe (สั้น)</button>
+            </form>
+
+            <form action="/update_order_config/{{ key }}" method="POST" class="panel">
+                <input type="hidden" name="set" value="short">
+                <div class="panel-title">⚡ เทรดสั้น — ตั้งค่าออเดอร์</div>
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
+                    <div style="flex: 1;">
+                        <span>Lot:</span>
+                        <input type="number" step="0.01" name="lot" value="{{ s2.get('lot', 0.01) }}">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>TP (pips):</span>
+                        <input type="number" name="tp_pips" value="{{ s2.get('tp_pips', 300) }}">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>SL (pips):</span>
+                        <input type="number" name="sl_pips" value="{{ s2.get('sl_pips', 200) }}">
+                    </div>
+                </div>
+                <button type="submit" class="save-btn save-order">บันทึกแผนเทรด (สั้น)</button>
+            </form>
+
+            <div class="panel">
+                <div class="panel-title">🔔 Price Alerts</div>
+                {% set alerts = asset.state.get('alerts', []) %}
+                {% if alerts %}
+                <div style="font-size: 0.72rem; color: #5f4a43;">
+                    {% for al in alerts %}
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1;">
+                        <span>
+                            #{{ loop.index }}
+                            {% if al.set == 'short' %}⚡สั้น{% else %}📈ยาว{% endif %}
+                            ย่าน {{ '%.2f'|format(al.low) }}–{{ '%.2f'|format(al.high) }}
+                            {% if al.hit %}<span style="color:#9b8477;">(แจ้งแล้ว)</span>{% endif %}
+                        </span>
+                        <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
+                            <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:0.75rem;">✕ ลบ</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
+                {% endif %}
+                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
+                    <select name="set" style="font-size:0.72rem;">
+                        <option value="long">📈 ยาว</option>
+                        <option value="short">⚡ สั้น</option>
+                    </select>
+                    <input type="number" step="0.0001" name="low" placeholder="Low" style="width:70px; font-size:0.72rem;" required>
+                    <span style="font-size:0.7rem;">–</span>
+                    <input type="number" step="0.0001" name="high" placeholder="High" style="width:70px; font-size:0.72rem;" required>
+                    <button type="submit" class="save-btn" style="font-size:0.72rem; padding:3px 8px;">➕ เพิ่ม</button>
+                </form>
+            </div>
 
             <div class="tf-grid">
                 {% for tf_key in ['1w', '1d', '4h', '1h', '15m', '5m'] %}
@@ -981,6 +1110,16 @@ def check_daily_reset_and_state(asset_key):
             st["stage3_notified"] = False
             st["execute_notified"] = False
             save_state_to_sheets(asset_key, st)
+        s2 = st.get("set2")
+        if last_seen is not None and isinstance(s2, dict) and s2.get("auto_paused_today"):
+            s2["is_active"] = True
+            s2["auto_paused_today"] = False
+            s2["current_stage"] = 1
+            s2["stage1_notified"] = False
+            s2["stage2_notified"] = False
+            s2["stage3_notified"] = False
+            s2["stage4_signal_sent"] = False
+            save_state_to_sheets(asset_key, st)
 
 def build_mini_chart(sub_k, sub_d):
     """วาดกราฟ Stoch RSI มินิจากประวัติ K/D แล้วคืนค่าเป็น base64 (None ถ้าข้อมูลไม่พอ)"""
@@ -1032,15 +1171,24 @@ def get_tf_chart_b64(st, tf):
 # ==========================================
 # API Endpoints
 # ==========================================
+def get_set_target(st, set_key):
+    """คืน dict ของชุดที่ต้องการเขียน — long = st เดิม, short = st['set2']"""
+    if set_key == "short":
+        if not isinstance(st.get("set2"), dict):
+            st["set2"] = default_set2()
+        return st["set2"]
+    return st
+
 @app.route("/update_order_config/<asset_key>", methods=["POST"])
 def update_order_config(asset_key):
     if asset_key not in ASSETS:
         return "Asset not found", 404
     st = ASSETS[asset_key]["state"]
+    s = get_set_target(st, request.form.get("set", "long"))
     try:
-        st["lot"] = float(request.form.get("lot", 0.01))
-        st["tp_pips"] = int(request.form.get("tp_pips", 300))
-        st["sl_pips"] = int(request.form.get("sl_pips", 200))
+        s["lot"] = float(request.form.get("lot", 0.01))
+        s["tp_pips"] = int(request.form.get("tp_pips", 300))
+        s["sl_pips"] = int(request.form.get("sl_pips", 200))
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"บันทึกค่าออเดอร์ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"
@@ -1093,26 +1241,60 @@ def update_stage_tfs(asset_key):
     if asset_key not in ASSETS:
         return "Asset not found", 404
     st = ASSETS[asset_key]["state"]
+    s = get_set_target(st, request.form.get("set", "long"))
     new_tfs = [request.form.get(f"stage_{i}_tf") for i in range(1, 5)]
     if len(new_tfs) == 4:
-        st["stage_tfs"] = new_tfs
-        st["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
-        st["sr_enabled"] = (request.form.get("sr_enabled", "off") == "on")
-        st["auto_order"] = (request.form.get("auto_order", "off") == "on")
+        s["stage_tfs"] = new_tfs
+        s["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
+        s["sr_enabled"] = (request.form.get("sr_enabled", "off") == "on")
+        s["auto_order"] = (request.form.get("auto_order", "off") == "on")
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
-                st["current_stage"] = idx + 1
+                s["current_stage"] = idx + 1
                 break
         # รีเซ็ต flags และปลด pause เพื่อเริ่มสแกนตามค่าใหม่ทันที
-        st["stage1_notified"] = False
-        st["stage2_notified"] = False
-        st["stage3_notified"] = False
-        st["execute_notified"] = False
-        st["is_active"] = True
-        st["auto_paused_today"] = False
+        s["stage1_notified"] = False
+        s["stage2_notified"] = False
+        s["stage3_notified"] = False
+        s["execute_notified"] = False
+        s["is_active"] = True
+        s["auto_paused_today"] = False
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"     
+    return redirect(url_for("home"))
+
+@app.route("/add_alert/<asset_key>", methods=["POST"])
+def add_alert(asset_key):
+    """เพิ่ม price alert: set + ย่านราคา low-high"""
+    if asset_key not in ASSETS:
+        return "Asset not found", 404
+    st = ASSETS[asset_key]["state"]
+    try:
+        lo = float(request.form.get("low", ""))
+        hi = float(request.form.get("high", ""))
+    except (TypeError, ValueError):
+        global_flash["msg"] = "❌ กรอกราคา Low/High ไม่ถูกต้อง"
+        global_flash["type"] = "error"
+        return redirect(url_for("home"))
+    if lo > hi:
+        lo, hi = hi, lo
+    al = st.setdefault("alerts", [])
+    al.append({"set": request.form.get("set", "long"), "low": lo, "high": hi, "hit": False})
+    save_state_to_sheets(asset_key, st)
+    global_flash["msg"] = f"🔔 เพิ่ม Alert #{len(al)} ของ {ASSETS[asset_key]['name']} แล้ว!"
+    global_flash["type"] = "success"
+    return redirect(url_for("home"))
+
+@app.route("/del_alert/<asset_key>/<int:idx>", methods=["POST"])
+def del_alert(asset_key, idx):
+    st = ASSETS[asset_key]["state"]
+    al = st.get("alerts", [])
+    if 0 <= idx < len(al):
+        al.pop(idx)
+        save_state_to_sheets(asset_key, st)
+        global_flash["msg"] = "ลบ Alert แล้ว"
+        global_flash["type"] = "success"
     return redirect(url_for("home"))
 
 @app.route("/toggle_status/<asset_key>/<action_type>", methods=["POST"])
@@ -1298,7 +1480,9 @@ def get_asset_config(asset_key):
         "execute_notified": st.get("execute_notified", False),
         "stage4_signal_sent": st.get("stage4_signal_sent", False),
         "s4_confirm_candle": st.get("s4_confirm_candle"),
-        "user_command": st.get("user_command")
+        "user_command": st.get("user_command"),
+        "set2": st.get("set2"),
+        "alerts": st.get("alerts", [])
     }
     print(f"📤 Sending config for {asset_key}: is_active={config['is_active']}")
     return jsonify(config)
@@ -1329,6 +1513,10 @@ def update_asset_config(asset_key):
             st["mt5_pending_since"] = float(data["mt5_pending_since"])
         if "user_command" in data:
             st["user_command"] = data["user_command"]
+        if "set2" in data and isinstance(data["set2"], dict):
+            st["set2"] = data["set2"]
+        if "alerts" in data and isinstance(data["alerts"], list):
+            st["alerts"] = data["alerts"]
         save_state_to_sheets(asset_key, st)
         return jsonify({"status": "success"})
     except Exception as e:
@@ -1346,7 +1534,13 @@ def telegram_webhook():
             text_lower = text.lower()
             chat_id = data["message"]["chat"]["id"]
             parts = text_lower.split()
-            
+            # 🏷 Alias เทรดสั้น: เติม 's' ท้ายชื่อคู่ (xaus/uss/oils/btcs) → คำสั่งทำงานกับชุดเทรดสั้น (set2)
+            set_key = "long"
+            if parts and len(parts[0]) > 1 and parts[0].endswith("s") and parts[0][:-1] in ASSETS:
+                parts[0] = parts[0][:-1]
+                set_key = "short"
+            set_lbl = " เทรดสั้น" if set_key == "short" else ""
+
             if text_lower == "sum":
                 threading.Thread(target=send_all_summary_report, args=(chat_id,)).start()
             elif text_lower == "xau":
@@ -1357,6 +1551,8 @@ def telegram_webhook():
                 threading.Thread(target=send_summary_report, args=("us", chat_id)).start()
             elif text_lower == "btc":
                 threading.Thread(target=send_summary_report, args=("btc", chat_id)).start()
+            elif text_lower in ("xaus", "uss", "oils", "btcs"):
+                threading.Thread(target=send_summary_report, args=(text_lower[:-1], chat_id)).start()
             elif text_lower == "on":
                 for k in ASSETS.keys():
                     ASSETS[k]["state"]["is_active"] = True
@@ -1387,59 +1583,65 @@ def telegram_webhook():
                     st["execute_notified"] = False
                     st["stage_tfs"] = ["4h", "1h", "15m", "5m"]
                     st["s5_enabled"] = True
+                    st["set2"] = default_set2()
+                    st["alerts"] = []
                     save_state_to_sheets(k, st)
                 send_telegram_notification("🔄 รีเซ็ตค่าสถานะ โน้ต และเรดาร์ทุกคู่กลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว!", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] == "auto" and parts[2] in ("on", "off"):
                 asset_key = parts[0]
                 st = ASSETS[asset_key]["state"]
-                st["auto_order"] = (parts[2] == "on")
-                st["is_active"] = True
-                st["auto_paused_today"] = False
-                st["current_stage"] = 1
-                st["stage1_notified"] = st["stage2_notified"] = st["stage3_notified"] = False
-                st["execute_notified"] = False
+                tgt = get_set_target(st, set_key)
+                tgt["auto_order"] = (parts[2] == "on")
+                tgt["is_active"] = True
+                tgt["auto_paused_today"] = False
+                tgt["current_stage"] = 1
+                tgt["stage1_notified"] = tgt["stage2_notified"] = tgt["stage3_notified"] = False
+                tgt["execute_notified"] = False
                 save_state_to_sheets(asset_key, st)
-                txt = "🤖 เปิดโหมดออเดอร์อัตโนมัติแล้ว — สัญญาณ Stage 5 จะยิงออเดอร์เองทันที ไม่ถาม" if st["auto_order"] else "👤 กลับเป็นโหมดยืนยันด้วยตัวเอง — Stage 5 จะถาม y/n ก่อนยิง"
-                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: {txt}", chat_id=chat_id)
+                txt = "🤖 เปิดโหมดออเดอร์อัตโนมัติแล้ว — สัญญาณ Stage 5 จะยิงออเดอร์เองทันที ไม่ถาม" if tgt["auto_order"] else "👤 กลับเป็นโหมดยืนยันด้วยตัวเอง — Stage 5 จะถาม y/n ก่อนยิง"
+                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: {txt}", chat_id=chat_id)
             elif len(parts) >= 2 and parts[0] in ASSETS and any(p.startswith(("lot", "order", "tp", "sl")) for p in parts[1:]):
                 asset_key = parts[0]
                 st = ASSETS[asset_key]["state"]
+                tgt = get_set_target(st, set_key)
                 changed = []
                 try:
                     for p in parts[1:]:
                         if p.startswith("lot") or p.startswith("order"):
-                            st["lot"] = float(p.replace("order", "").replace("lot", ""))
-                            changed.append(f"lot={st['lot']}")
+                            tgt["lot"] = float(p.replace("order", "").replace("lot", ""))
+                            changed.append(f"lot={tgt['lot']}")
                         elif p.startswith("tp"):
-                            st["tp_pips"] = int(float(p[2:]))
-                            changed.append(f"tp={st['tp_pips']}")
+                            tgt["tp_pips"] = int(float(p[2:]))
+                            changed.append(f"tp={tgt['tp_pips']}")
                         elif p.startswith("sl"):
-                            st["sl_pips"] = int(float(p[2:]))
-                            changed.append(f"sl={st['sl_pips']}")
+                            tgt["sl_pips"] = int(float(p[2:]))
+                            changed.append(f"sl={tgt['sl_pips']}")
                     if changed:
                         save_state_to_sheets(asset_key, st)
-                        send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {', '.join(changed)} เรียบร้อยแล้ว!", chat_id=chat_id)
+                        send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: ตั้งค่า {', '.join(changed)} เรียบร้อยแล้ว!", chat_id=chat_id)
                 except ValueError:
                     send_telegram_notification(f"❌ รูปแบบคำสั่งไม่ถูก — ใช้เช่น `{parts[0]} lot0.1 tp3000 sl2000`", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] == "sr" and parts[2] in ("on", "off"):
                 asset_key = parts[0]
                 st = ASSETS[asset_key]["state"]
-                st["sr_enabled"] = (parts[2] == "on")
-                st["is_active"] = True
-                st["auto_paused_today"] = False
-                st["current_stage"] = 1
-                st["stage1_notified"] = st["stage2_notified"] = st["stage3_notified"] = False
-                st["execute_notified"] = False
+                tgt = get_set_target(st, set_key)
+                tgt["sr_enabled"] = (parts[2] == "on")
+                tgt["is_active"] = True
+                tgt["auto_paused_today"] = False
+                tgt["current_stage"] = 1
+                tgt["stage1_notified"] = tgt["stage2_notified"] = tgt["stage3_notified"] = False
+                tgt["execute_notified"] = False
                 save_state_to_sheets(asset_key, st)
-                txt = "🟢 เปิดตัวกรองแนวรับ-ต้านแล้ว — Stage 1 จะสัญญาณเฉพาะเมื่อชน/ใกล้แนว" if st["sr_enabled"] else "🔴 ปิดตัวกรองแนวรับ-ต้านแล้ว — สัญญาณตาม Stoch อย่างเดียว"
-                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: {txt}", chat_id=chat_id)
+                txt = "🟢 เปิดตัวกรองแนวรับ-ต้านแล้ว — Stage 1 จะสัญญาณเฉพาะเมื่อชน/ใกล้แนว" if tgt["sr_enabled"] else "🔴 ปิดตัวกรองแนวรับ-ต้านแล้ว — สัญญาณตาม Stoch อย่างเดียว"
+                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: {txt}", chat_id=chat_id)
             elif parts[0] in ASSETS and parts[-1] in ("on", "off", "1w", "1d", "4h", "1h", "15m", "5m") and (parts[1] == "st" or (parts[1].startswith("s") and len(parts[1]) > 1)):
                 asset_key = parts[0]
                 stages_str = parts[2] if parts[1] == "st" and len(parts) >= 4 else parts[1][1:]
                 action = parts[-1]
                 if action in ["on", "off", "1w", "1d", "4h", "1h", "15m", "5m"]:
                     st = ASSETS[asset_key]["state"]
-                    current_tfs = list(st.get("stage_tfs", ["4h", "1h", "15m", "5m"]))
+                    tgt = get_set_target(st, set_key)
+                    current_tfs = list(tgt.get("stage_tfs", ["4h", "1h", "15m", "5m"]))
                     default_tfs = ["4h", "1h", "15m", "5m"]
                     target_stages = stages_str.split("/")
                     updated_stages = []
@@ -1448,7 +1650,7 @@ def telegram_webhook():
                             n = int(s)
                             if n == 5:
                                 if action in ("on", "off"):
-                                    st["s5_enabled"] = (action == "on")
+                                    tgt["s5_enabled"] = (action == "on")
                             else:
                                 idx = n - 1
                                 if action == "off":
@@ -1458,36 +1660,37 @@ def telegram_webhook():
                                 else:
                                     current_tfs[idx] = action
                             updated_stages.append(f"S{s}")
-                    st["stage_tfs"] = current_tfs
+                    tgt["stage_tfs"] = current_tfs
                     for i, tf in enumerate(current_tfs):
                         if tf != "off":
-                            st["current_stage"] = i + 1
+                            tgt["current_stage"] = i + 1
                             break
-                    if not st.get("s5_enabled", True) and st["current_stage"] == 5:
-                        st["current_stage"] = 4
-                    elif st.get("s5_enabled", True) and st["current_stage"] == 4 and st.get("execute_notified"):
-                        st["current_stage"] = 5
-                    st["stage1_notified"] = False
-                    st["stage2_notified"] = False
-                    st["stage3_notified"] = False
-                    st["execute_notified"] = False
-                    st["is_active"] = True
-                    st["auto_paused_today"] = False
+                    if not tgt.get("s5_enabled", True) and tgt["current_stage"] == 5:
+                        tgt["current_stage"] = 4
+                    elif tgt.get("s5_enabled", True) and tgt["current_stage"] == 4 and tgt.get("execute_notified"):
+                        tgt["current_stage"] = 5
+                    tgt["stage1_notified"] = False
+                    tgt["stage2_notified"] = False
+                    tgt["stage3_notified"] = False
+                    tgt["execute_notified"] = False
+                    tgt["is_active"] = True
+                    tgt["auto_paused_today"] = False
                     save_state_to_sheets(asset_key, st)
                     stages_txt = ", ".join(updated_stages)
                     act_txt = "🔴 ปิด (OFF)" if action == "off" else ("🟢 เปิด (ON)" if action == "on" else f"📈 {action.upper()}")
-                    msg = f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {st['current_stage']}"
+                    msg = f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {tgt['current_stage']}"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
             elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["on", "off"]:
                 asset_key = parts[0]
                 action = parts[1]
                 st = ASSETS[asset_key]["state"]
-                st["is_active"] = (action == "on")
-                if st["is_active"]:
-                    st["auto_paused_today"] = False
+                tgt = get_set_target(st, set_key)
+                tgt["is_active"] = (action == "on")
+                if tgt["is_active"]:
+                    tgt["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
-                status_txt = "🟢 เปิด (ON)" if st["is_active"] else "🔴 ปิด (OFF)"
-                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
+                status_txt = "🟢 เปิด (ON)" if tgt["is_active"] else "🔴 ปิด (OFF)"
+                send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: ตั้งค่าสถานะเป็น {status_txt} เรียบร้อยแล้ว", asset_key=asset_key, chat_id=chat_id)
             elif text_lower in ("y", "n") or (len(parts) == 2 and parts[0] in ASSETS and parts[1] in ("y", "n")):
                 # รับคำสั่งยืนยันออเดอร์แล้วส่งต่อให้บอท MT5 ผ่าน /api/config (user_command)
                 if text_lower in ("y", "n"):
@@ -1548,24 +1751,26 @@ def telegram_webhook():
                 asset_key = parts[0]
                 direction = parts[1].upper()
                 st = ASSETS[asset_key]["state"]
-                st["custom_mode"] = False
-                st["custom_tf"] = None
-                st["custom_dir"] = None
-                st["target_mode"] = f"{direction}_ONLY"
-                st["active_direction"] = direction
+                tgt = get_set_target(st, set_key)
+                if set_key == "long":
+                    st["custom_mode"] = False
+                    st["custom_tf"] = None
+                    st["custom_dir"] = None
+                tgt["target_mode"] = f"{direction}_ONLY"
+                tgt["active_direction"] = direction
                 # รีเซ็ตกลับ stage แรกที่ยัง ON ตามค่าที่ผู้ใช้ตั้งไว้ (ไม่แตะ stage_tfs)
-                for idx, tf in enumerate(st.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+                for idx, tf in enumerate(tgt.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
                     if tf != "off":
-                        st["current_stage"] = idx + 1
+                        tgt["current_stage"] = idx + 1
                         break
-                st["stage1_notified"] = False
-                st["stage2_notified"] = False
-                st["stage3_notified"] = False
-                st["execute_notified"] = False
-                st["is_active"] = True
-                st["auto_paused_today"] = False
+                tgt["stage1_notified"] = False
+                tgt["stage2_notified"] = False
+                tgt["stage3_notified"] = False
+                tgt["execute_notified"] = False
+                tgt["is_active"] = True
+                tgt["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
-                msg = f"⚙️ *{ASSETS[asset_key]['name']}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
+                msg = f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: เปลี่ยนโหมดเป็นล็อคฝั่ง *{direction}* เรียบร้อยแล้ว!"
                 send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
         return "OK", 200
     except Exception as e:
