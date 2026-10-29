@@ -727,6 +727,24 @@ HTML_TEMPLATE = """
                     </div>
 
 
+
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
+                {% endif %}
+                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
+                    <select name="set" style="font-size:0.72rem;">
+                        <option value="long">📈 ยาว</option>
+                        <option value="short">⚡ สั้น</option>
+                    </select>
+                    <input type="number" step="0.0001" name="low" placeholder="Low" style="width:70px; font-size:0.72rem;" required>
+                    <span style="font-size:0.7rem;">–</span>
+                    <input type="number" step="0.0001" name="high" placeholder="High" style="width:70px; font-size:0.72rem;" required>
+                    <button type="submit" class="save-btn" style="font-size:0.72rem; padding:3px 8px;">➕ เพิ่ม</button>
+                </form>
+            </div>
+
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <div class="panel-title">📈 เทรดยาว</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
@@ -843,22 +861,6 @@ HTML_TEMPLATE = """
                 <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
 
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
-                {% endif %}
-                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
-                    <select name="set" style="font-size:0.72rem;">
-                        <option value="long">📈 ยาว</option>
-                        <option value="short">⚡ สั้น</option>
-                    </select>
-                    <input type="number" step="0.0001" name="low" placeholder="Low" style="width:70px; font-size:0.72rem;" required>
-                    <span style="font-size:0.7rem;">–</span>
-                    <input type="number" step="0.0001" name="high" placeholder="High" style="width:70px; font-size:0.72rem;" required>
-                    <button type="submit" class="save-btn" style="font-size:0.72rem; padding:3px 8px;">➕ เพิ่ม</button>
-                </form>
-            </div>
 
 
 
