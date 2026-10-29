@@ -734,73 +734,16 @@ HTML_TEMPLATE = """
                 <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
                 {% endif %}
                 <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
-                    <select name="set" style="font-size:0.72rem;">
-                        <option value="long">📈 ยาว</option>
-                        <option value="short">⚡ สั้น</option>
+                    <select name="set" style="font-size:0.7rem; width:52px; flex: 0 0 52px; padding: 2px 4px;">
+                        <option value="long">📈ยาว</option>
+                        <option value="short">⚡สั้น</option>
                     </select>
-                    <input type="number" step="0.0001" name="low" placeholder="Low" style="width:70px; font-size:0.72rem;" required>
-                    <span style="font-size:0.7rem;">–</span>
-                    <input type="number" step="0.0001" name="high" placeholder="High" style="width:70px; font-size:0.72rem;" required>
-                    <button type="submit" class="save-btn" style="font-size:0.72rem; padding:3px 8px;">➕ เพิ่ม</button>
+                    <input type="number" step="0.0001" name="low" placeholder="ราคา Low" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
+                    <span style="font-size:0.7rem; flex: 0 0 auto;">–</span>
+                    <input type="number" step="0.0001" name="high" placeholder="ราคา High" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
+                    <button type="submit" class="save-btn" style="font-size:0.75rem; padding:4px 8px; flex: 0 0 auto;">➕</button>
                 </form>
             </div>
-
-            <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว</div>
-                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
-                    {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
-                    {% for idx in range(4) %}
-                    <div style="flex: 1;">
-                        <span>S{{ idx+1 }}:</span>
-                        <select name="stage_{{ idx+1 }}_tf" onchange="this.form.submit()">
-                            {% for tf in available_tfs %}
-                            <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>
-                                {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
-                        {% if idx == 0 %}
-                        <div style="margin-top: 4px;">
-                            <span>S/R:</span>
-                            <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
-                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
-                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
-                            </select>
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                    <div style="flex: 1;">
-                        <span>S5:</span>
-                        <select name="stage_5_tf" onchange="this.form.submit()">
-                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
-                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
-                        </select>
-                        <div style="margin-top: 4px;">
-                            <span>AUTO:</span>
-                            <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
-                                <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
-                                <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
-                    <div style="flex: 1;">
-                        <span>Lot:</span>
-                        <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}">
-                    </div>
-                    <div style="flex: 1;">
-                        <span>TP (pips):</span>
-                        <input type="number" name="tp_pips" value="{{ asset.state.tp_pips }}">
-                    </div>
-                    <div style="flex: 1;">
-                        <span>SL (pips):</span>
-                        <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}">
-                    </div>
-                </div>
-                <button type="submit" class="save-btn" style="background: #9b8477;">บันทึกแผนเทรด</button>
-            </form>
 
             {% set s2 = asset.state.get('set2') or {} %}
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
@@ -860,6 +803,64 @@ HTML_TEMPLATE = """
                 </div>
                 <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
+
+            <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
+                <div class="panel-title">📈 เทรดยาว</div>
+                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
+                    {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
+                    {% for idx in range(4) %}
+                    <div style="flex: 1;">
+                        <span>S{{ idx+1 }}:</span>
+                        <select name="stage_{{ idx+1 }}_tf" onchange="this.form.submit()">
+                            {% for tf in available_tfs %}
+                            <option value="{{ tf }}" {% if asset.state.stage_tfs[idx] == tf %}selected{% endif %}>
+                                {% if tf == 'off' %}🔴 OFF{% else %}{{ tf|upper }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if idx == 0 %}
+                        <div style="margin-top: 4px;">
+                            <span>S/R:</span>
+                            <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
+                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
+                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
+                            </select>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div style="flex: 1;">
+                        <span>S5:</span>
+                        <select name="stage_5_tf" onchange="this.form.submit()">
+                            <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
+                            <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
+                        </select>
+                        <div style="margin-top: 4px;">
+                            <span>AUTO:</span>
+                            <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
+                                <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
+                                <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
+                    <div style="flex: 1;">
+                        <span>Lot:</span>
+                        <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>TP (pips):</span>
+                        <input type="number" name="tp_pips" value="{{ asset.state.tp_pips }}">
+                    </div>
+                    <div style="flex: 1;">
+                        <span>SL (pips):</span>
+                        <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}">
+                    </div>
+                </div>
+                <button type="submit" class="save-btn" style="background: #9b8477;">บันทึกแผนเทรด</button>
+            </form>
+
 
 
 
