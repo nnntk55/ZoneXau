@@ -682,21 +682,6 @@ HTML_TEMPLATE = """
                         💰 ราคา: {{ "%.2f"|format(asset.state.price) }}
                     </div>
                 </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power')" id="power-btn-{{ key }}" 
-                    class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
-                        {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
-                    </button>
-                    <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction')" id="dir-btn-{{ key }}"
-                    class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                        {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
-                    </button>
-                    {% if asset.state.custom_mode %}
-                        <span class="badge badge-custom">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
-                    {% else %}
-                        <span class="badge badge-stage{{ asset.state.current_stage }}">Stage {{ asset.state.current_stage }}</span>
-                    {% endif %}
-                </div>
             </div>
             
             <div class="note-box">
@@ -747,7 +732,20 @@ HTML_TEMPLATE = """
             {% set s2 = asset.state.get('set2') or {} %}
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <input type="hidden" name="set" value="short">
-                <div class="panel-title">⚡ เทรดสั้น</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div class="panel-title" style="margin-bottom: 0;">⚡ เทรดสั้น</div>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'short')" id="power-btn-{{ key }}-short"
+                        class="badge toggle-btn {% if s2.get('is_active', True) %}badge-status-on{% else %}badge-status-off{% endif %}">
+                            {% if s2.get('is_active', True) %}🟢 ON{% else %}🔴 OFF{% endif %}
+                        </button>
+                        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'short')" id="dir-btn-{{ key }}-short"
+                        class="badge toggle-btn {% if s2.get('active_direction', 'LOW') == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+                            {% if s2.get('active_direction', 'LOW') == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                        </button>
+                        <span class="badge badge-stage{{ s2.get('current_stage', 1) }}" id="stage-badge-{{ key }}-short">Stage {{ s2.get('current_stage', 1) }}</span>
+                    </div>
+                </div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -804,7 +802,24 @@ HTML_TEMPLATE = """
             </form>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div class="panel-title" style="margin-bottom: 0;">📈 เทรดยาว</div>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'long')" id="power-btn-{{ key }}-long"
+                        class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
+                            {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+                        </button>
+                        <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'long')" id="dir-btn-{{ key }}-long"
+                        class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
+                            {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                        </button>
+                        {% if asset.state.custom_mode %}
+                            <span class="badge badge-custom" id="stage-badge-{{ key }}-long">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
+                        {% else %}
+                            <span class="badge badge-stage{{ asset.state.current_stage }}" id="stage-badge-{{ key }}-long">Stage {{ asset.state.current_stage }}</span>
+                        {% endif %}
+                    </div>
+                </div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -891,15 +906,16 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-    function toggleAssetStatus(assetKey, actionType) {
-        fetch(`/toggle_status/${assetKey}/${actionType}`, {
+    function toggleAssetStatus(assetKey, actionType, setKey) {
+        setKey = setKey || 'long';
+        fetch(`/toggle_status/${assetKey}/${actionType}?set=${setKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         })
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                const targetId = (actionType === 'power') ? `power-btn-${assetKey}` : `dir-btn-${assetKey}`;
+                const targetId = (actionType === 'power') ? `power-btn-${assetKey}-${setKey}` : `dir-btn-${assetKey}-${setKey}`;
                 const btn = document.getElementById(targetId);
                 if (btn) {
                     if (actionType === 'power') {
@@ -919,6 +935,11 @@ HTML_TEMPLATE = """
                             btn.innerText = "🔴 HIGH";
                         }
                     }
+                }
+                const stageEl = document.getElementById(`stage-badge-${assetKey}-${setKey}`);
+                if (stageEl && data.current_stage && !stageEl.classList.contains('badge-custom')) {
+                    stageEl.className = "badge badge-stage" + data.current_stage;
+                    stageEl.innerText = "Stage " + data.current_stage;
                 }
             }
         })
@@ -1315,29 +1336,32 @@ def toggle_status(asset_key, action_type):
     if asset_key not in ASSETS:
         return jsonify({"status": "error", "message": "Asset not found"}), 404
     st = ASSETS[asset_key]["state"]
+    # set=short → toggle บนชุดเทรดสั้น (set2); ค่าอื่น/ไม่ส่ง → ชุดเทรดยาวตามเดิม
+    tgt = get_set_target(st, request.args.get("set", "long"))
     if action_type == "power":
-        st["is_active"] = not st["is_active"]
-        if st["is_active"]:
-            st["auto_paused_today"] = False
-        new_val = st["is_active"]
+        tgt["is_active"] = not tgt.get("is_active", True)
+        if tgt["is_active"]:
+            tgt["auto_paused_today"] = False
+        new_val = tgt["is_active"]
     elif action_type == "direction":
-        st["active_direction"] = "HIGH" if st["active_direction"] == "LOW" else "LOW"
-        new_val = st["active_direction"]
+        tgt["active_direction"] = "HIGH" if tgt.get("active_direction", "LOW") == "LOW" else "LOW"
+        new_val = tgt["active_direction"]
         # รีเซ็ตกลับ stage แรกที่ ON แล้วปลด pause เพื่อเริ่มสแกนฝั่งใหม่ทันที
-        for idx, tf in enumerate(st.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+        for idx, tf in enumerate(tgt.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
             if tf != "off":
-                st["current_stage"] = idx + 1
+                tgt["current_stage"] = idx + 1
                 break
-        st["stage1_notified"] = False
-        st["stage2_notified"] = False
-        st["stage3_notified"] = False
-        st["execute_notified"] = False
-        st["is_active"] = True
-        st["auto_paused_today"] = False
+        tgt["stage1_notified"] = False
+        tgt["stage2_notified"] = False
+        tgt["stage3_notified"] = False
+        tgt["execute_notified"] = False
+        tgt["stage4_signal_sent"] = False
+        tgt["is_active"] = True
+        tgt["auto_paused_today"] = False
     else:
         return jsonify({"status": "error", "message": "Invalid action"}), 400
     save_state_to_sheets(asset_key, st)
-    return jsonify({"status": "success", "new_val": new_val})
+    return jsonify({"status": "success", "new_val": new_val, "current_stage": tgt.get("current_stage", 1)})
 
 _market_data_lock = threading.Lock()
 
