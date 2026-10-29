@@ -697,7 +697,7 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="note-box">
-                <div class="note-title">📝 โน้ตแผนการเทรด (แก้ไขได้เลย)</div>
+                <div class="note-title">📝 โน้ตแผนการเทรด </div>
                 <form action="/update_note/{{ key }}" method="POST" class="note-form">
                     <textarea name="note" class="note-input" rows="2" placeholder="เขียนบันทึกแผนการเทรดที่นี่...">{{ asset.state.note }}</textarea>
                     <button type="submit" class="save-btn save-tf" style="width: auto; margin-top: 0; padding: 0 18px; white-space: nowrap;">บันทึก</button>
@@ -705,7 +705,7 @@ HTML_TEMPLATE = """
             </div>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว — Timeframe & ออเดอร์</div>
+                <div class="panel-title">📈 เทรดยาว </div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -758,13 +758,13 @@ HTML_TEMPLATE = """
                         <input type="number" name="sl_pips" value="{{ asset.state.sl_pips }}">
                     </div>
                 </div>
-                <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
+                <button type="submit" class="save-btn" style="background: #9b8477;">บันทึกแผนเทรด</button>
             </form>
 
             {% set s2 = asset.state.get('set2') or {} %}
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <input type="hidden" name="set" value="short">
-                <div class="panel-title">⚡ เทรดสั้น — Timeframe & ออเดอร์ <span style="font-size:0.7rem; color:#9b8477;">(Stage {{ s2.get('current_stage', 1) }})</span></div>
+                <div class="panel-title">⚡ เทรดสั้น </div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
