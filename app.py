@@ -705,7 +705,7 @@ HTML_TEMPLATE = """
             </div>
 
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว — เลือก Timeframe แต่ละ Stage</div>
+                <div class="panel-title">📈 เทรดยาว — Timeframe & ออเดอร์</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -744,12 +744,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="save-btn save-tf">บันทึก Timeframe</button>
-            </form>
-
-            <form action="/update_order_config/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว — ตั้งค่าออเดอร์</div>
-                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
                     <div style="flex: 1;">
                         <span>Lot:</span>
                         <input type="number" step="0.01" name="lot" value="{{ asset.state.lot }}">
@@ -769,7 +764,7 @@ HTML_TEMPLATE = """
             {% set s2 = asset.state.get('set2') or {} %}
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <input type="hidden" name="set" value="short">
-                <div class="panel-title">⚡ เทรดสั้น — เลือก Timeframe แต่ละ Stage <span style="font-size:0.7rem; color:#9b8477;">(Stage {{ s2.get('current_stage', 1) }})</span></div>
+                <div class="panel-title">⚡ เทรดสั้น — Timeframe & ออเดอร์ <span style="font-size:0.7rem; color:#9b8477;">(Stage {{ s2.get('current_stage', 1) }})</span></div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -808,13 +803,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="save-btn save-tf">บันทึก Timeframe (สั้น)</button>
-            </form>
-
-            <form action="/update_order_config/{{ key }}" method="POST" class="panel">
-                <input type="hidden" name="set" value="short">
-                <div class="panel-title">⚡ เทรดสั้น — ตั้งค่าออเดอร์</div>
-                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43;">
+                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
                     <div style="flex: 1;">
                         <span>Lot:</span>
                         <input type="number" step="0.01" name="lot" value="{{ s2.get('lot', 0.01) }}">
@@ -828,7 +817,7 @@ HTML_TEMPLATE = """
                         <input type="number" name="sl_pips" value="{{ s2.get('sl_pips', 200) }}">
                     </div>
                 </div>
-                <button type="submit" class="save-btn save-order">บันทึกแผนเทรด (สั้น)</button>
+                <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
 
             <div class="panel">
@@ -1248,6 +1237,16 @@ def update_stage_tfs(asset_key):
         s["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
         s["sr_enabled"] = (request.form.get("sr_enabled", "off") == "on")
         s["auto_order"] = (request.form.get("auto_order", "off") == "on")
+        # รับ lot/tp/sl ในฟอร์มเดียวกัน (merge เป็นแผงเดียว)
+        try:
+            if request.form.get("lot"):
+                s["lot"] = float(request.form["lot"])
+            if request.form.get("tp_pips"):
+                s["tp_pips"] = int(float(request.form["tp_pips"]))
+            if request.form.get("sl_pips"):
+                s["sl_pips"] = int(float(request.form["sl_pips"]))
+        except (TypeError, ValueError):
+            pass
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
                 s["current_stage"] = idx + 1
@@ -1280,7 +1279,11 @@ def add_alert(asset_key):
     if lo > hi:
         lo, hi = hi, lo
     al = st.setdefault("alerts", [])
-    al.append({"set": request.form.get("set", "long"), "low": lo, "high": hi, "hit": False})
+    # ถ้าราคาอยู่ในย่านตั้งแต่ตอนสร้าง → ถือว่าแจ้งแล้วไปเลย (hit=True)
+    # เตือนเฉพาะครั้งที่ราคา "เดินเข้ามาชน" จากข้างนอกเท่านั้น
+    px = st.get("price", 0.0)
+    already_inside = lo <= px <= hi if px else False
+    al.append({"set": request.form.get("set", "long"), "low": lo, "high": hi, "hit": already_inside})
     save_state_to_sheets(asset_key, st)
     global_flash["msg"] = f"🔔 เพิ่ม Alert #{len(al)} ของ {ASSETS[asset_key]['name']} แล้ว!"
     global_flash["type"] = "success"
