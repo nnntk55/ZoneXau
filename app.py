@@ -494,6 +494,9 @@ HTML_TEMPLATE = """
         .toggle-btn:active { transform: scale(0.97); }
 
         .note-box {
+
+
+
             margin-top: 12px;
             background: #fdf7ec;
             border: 1px solid #e4d2c1;
@@ -697,15 +700,35 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="note-box">
-                <div class="note-title">📝 โน้ตแผนการเทรด </div>
+                <div class="note-title">📝 โน้ตแผนการเทรด</div>
                 <form action="/update_note/{{ key }}" method="POST" class="note-form">
                     <textarea name="note" class="note-input" rows="2" placeholder="เขียนบันทึกแผนการเทรดที่นี่...">{{ asset.state.note }}</textarea>
                     <button type="submit" class="save-btn save-tf" style="width: auto; margin-top: 0; padding: 0 18px; white-space: nowrap;">บันทึก</button>
                 </form>
             </div>
 
+
+            <div class="panel">
+                <div class="panel-title">🔔 Price Alerts</div>
+                {% set alerts = asset.state.get('alerts', []) %}
+                {% if alerts %}
+                <div style="font-size: 0.72rem; color: #5f4a43;">
+                    {% for al in alerts %}
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1;">
+                        <span>
+                            #{{ loop.index }}
+                            {% if al.set == 'short' %}⚡สั้น{% else %}📈ยาว{% endif %}
+                            ย่าน {{ '%.2f'|format(al.low) }}–{{ '%.2f'|format(al.high) }}
+                            {% if al.hit %}<span style="color:#9b8477;">(แจ้งแล้ว)</span>{% endif %}
+                        </span>
+                        <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
+                            <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:0.75rem;">✕ ลบ</button>
+                        </form>
+                    </div>
+
+
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
-                <div class="panel-title">📈 เทรดยาว </div>
+                <div class="panel-title">📈 เทรดยาว</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -764,7 +787,7 @@ HTML_TEMPLATE = """
             {% set s2 = asset.state.get('set2') or {} %}
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <input type="hidden" name="set" value="short">
-                <div class="panel-title">⚡ เทรดสั้น </div>
+                <div class="panel-title">⚡ เทรดสั้น</div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
@@ -820,23 +843,6 @@ HTML_TEMPLATE = """
                 <button type="submit" class="save-btn save-order">บันทึกแผนเทรด</button>
             </form>
 
-            <div class="panel">
-                <div class="panel-title">🔔 Price Alerts</div>
-                {% set alerts = asset.state.get('alerts', []) %}
-                {% if alerts %}
-                <div style="font-size: 0.72rem; color: #5f4a43;">
-                    {% for al in alerts %}
-                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1;">
-                        <span>
-                            #{{ loop.index }}
-                            {% if al.set == 'short' %}⚡สั้น{% else %}📈ยาว{% endif %}
-                            ย่าน {{ '%.2f'|format(al.low) }}–{{ '%.2f'|format(al.high) }}
-                            {% if al.hit %}<span style="color:#9b8477;">(แจ้งแล้ว)</span>{% endif %}
-                        </span>
-                        <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
-                            <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:0.75rem;">✕ ลบ</button>
-                        </form>
-                    </div>
                     {% endfor %}
                 </div>
                 {% else %}
@@ -853,6 +859,8 @@ HTML_TEMPLATE = """
                     <button type="submit" class="save-btn" style="font-size:0.72rem; padding:3px 8px;">➕ เพิ่ม</button>
                 </form>
             </div>
+
+
 
             <div class="tf-grid">
                 {% for tf_key in ['1w', '1d', '4h', '1h', '15m', '5m'] %}
