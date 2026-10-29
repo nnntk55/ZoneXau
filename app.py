@@ -733,15 +733,14 @@ HTML_TEMPLATE = """
                 {% else %}
                 <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
                 {% endif %}
-                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
-                    <select name="set" style="font-size:0.7rem; width:52px; flex: 0 0 52px; padding: 2px 4px;">
-                        <option value="long">📈ยาว</option>
-                        <option value="short">⚡สั้น</option>
+                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
+                    <select name="set" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
+                        <option value="long">📈 ยาว</option>
+                        <option value="short">⚡ สั้น</option>
                     </select>
                     <input type="number" step="0.0001" name="low" placeholder="ราคา Low" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <span style="font-size:0.7rem; flex: 0 0 auto;">–</span>
                     <input type="number" step="0.0001" name="high" placeholder="ราคา High" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn" style="font-size:0.75rem; padding:4px 8px; flex: 0 0 auto;">➕</button>
+                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 2; min-width: 0; padding: 4px 0;">➕</button>
                 </form>
             </div>
 
