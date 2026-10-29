@@ -131,7 +131,8 @@ def default_set2():
         "active_direction": "LOW", "target_mode": "AUTO", "stage_tfs": ["4h", "1h", "15m", "5m"],
         "s5_enabled": True, "sr_enabled": False, "sr_alert_sent": False, "auto_order": False,
         "current_stage": 1, "stage1_notified": False, "stage2_notified": False,
-        "stage3_notified": False, "stage4_signal_sent": False, "s4_confirm_candle": None,
+        "stage3_notified": False, "execute_notified": False,
+        "stage4_signal_sent": False, "s4_confirm_candle": None,
         "lot": 0.01, "tp_pips": 300, "sl_pips": 200,
         "is_active": True, "auto_paused_today": False, "last_trade_date": None
     }
@@ -474,7 +475,7 @@ HTML_TEMPLATE = """
             letter-spacing: 0.5px;
             border: none;
         }
-        .badge-stage1 { background: #e4d2c1; color: #5f4a43; }
+        .badge-stage1 { background: #fdf7ec; color: #5f4a43; }
         .badge-stage2 { background: #c5b0a1; color: #5f4a43; }
         .badge-stage3 { background: #9b8477; color: #f7ead9; }
         .badge-stage4 { background: #5f4a43; color: #f7ead9; }
@@ -1131,20 +1132,14 @@ def check_daily_reset_and_state(asset_key):
             st["is_active"] = True
             st["auto_paused_today"] = False
             st["current_stage"] = 1
-            st["stage1_notified"] = False
-            st["stage2_notified"] = False
-            st["stage3_notified"] = False
-            st["execute_notified"] = False
+            reset_stage_flags(st)
             save_state_to_sheets(asset_key, st)
         s2 = st.get("set2")
         if last_seen is not None and isinstance(s2, dict) and s2.get("auto_paused_today"):
             s2["is_active"] = True
             s2["auto_paused_today"] = False
             s2["current_stage"] = 1
-            s2["stage1_notified"] = False
-            s2["stage2_notified"] = False
-            s2["stage3_notified"] = False
-            s2["stage4_signal_sent"] = False
+            reset_stage_flags(s2)
             save_state_to_sheets(asset_key, st)
 
 def build_mini_chart(sub_k, sub_d):
@@ -1204,6 +1199,16 @@ def get_set_target(st, set_key):
             st["set2"] = default_set2()
         return st["set2"]
     return st
+
+def reset_stage_flags(t):
+    """รีเซ็ต flags ของเรดาร์ให้เริ่มสแกนใหม่ — ใช้เหมือนกันทั้งชุดยาว (st) และชุดสั้น (set2)"""
+    t["stage1_notified"] = False
+    t["stage2_notified"] = False
+    t["stage3_notified"] = False
+    t["execute_notified"] = False
+    t["stage4_signal_sent"] = False
+    t["s4_confirm_candle"] = None
+    t["sr_alert_sent"] = False
 
 @app.route("/update_order_config/<asset_key>", methods=["POST"])
 def update_order_config(asset_key):
@@ -1289,10 +1294,7 @@ def update_stage_tfs(asset_key):
                 s["current_stage"] = idx + 1
                 break
         # รีเซ็ต flags และปลด pause เพื่อเริ่มสแกนตามค่าใหม่ทันที
-        s["stage1_notified"] = False
-        s["stage2_notified"] = False
-        s["stage3_notified"] = False
-        s["execute_notified"] = False
+        reset_stage_flags(s)
         s["is_active"] = True
         s["auto_paused_today"] = False
         save_state_to_sheets(asset_key, st)
@@ -1357,11 +1359,7 @@ def toggle_status(asset_key, action_type):
             if tf != "off":
                 tgt["current_stage"] = idx + 1
                 break
-        tgt["stage1_notified"] = False
-        tgt["stage2_notified"] = False
-        tgt["stage3_notified"] = False
-        tgt["execute_notified"] = False
-        tgt["stage4_signal_sent"] = False
+        reset_stage_flags(tgt)
         tgt["is_active"] = True
         tgt["auto_paused_today"] = False
     else:
@@ -1620,10 +1618,7 @@ def telegram_webhook():
                     st["auto_paused_today"] = False
                     st["last_trade_date"] = None
                     st["note"] = "ยังไม่มีบันทึกแผน"
-                    st["stage1_notified"] = False
-                    st["stage2_notified"] = False
-                    st["stage3_notified"] = False
-                    st["execute_notified"] = False
+                    reset_stage_flags(st)
                     st["stage_tfs"] = ["4h", "1h", "15m", "5m"]
                     st["s5_enabled"] = True
                     st["set2"] = default_set2()
@@ -1638,8 +1633,7 @@ def telegram_webhook():
                 tgt["is_active"] = True
                 tgt["auto_paused_today"] = False
                 tgt["current_stage"] = 1
-                tgt["stage1_notified"] = tgt["stage2_notified"] = tgt["stage3_notified"] = False
-                tgt["execute_notified"] = False
+                reset_stage_flags(tgt)
                 save_state_to_sheets(asset_key, st)
                 txt = "🤖 เปิดโหมดออเดอร์อัตโนมัติแล้ว — สัญญาณ Stage 5 จะยิงออเดอร์เองทันที ไม่ถาม" if tgt["auto_order"] else "👤 กลับเป็นโหมดยืนยันด้วยตัวเอง — Stage 5 จะถาม y/n ก่อนยิง"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: {txt}", chat_id=chat_id)
@@ -1672,8 +1666,7 @@ def telegram_webhook():
                 tgt["is_active"] = True
                 tgt["auto_paused_today"] = False
                 tgt["current_stage"] = 1
-                tgt["stage1_notified"] = tgt["stage2_notified"] = tgt["stage3_notified"] = False
-                tgt["execute_notified"] = False
+                reset_stage_flags(tgt)
                 save_state_to_sheets(asset_key, st)
                 txt = "🟢 เปิดตัวกรองแนวรับ-ต้านแล้ว — Stage 1 จะสัญญาณเฉพาะเมื่อชน/ใกล้แนว" if tgt["sr_enabled"] else "🔴 ปิดตัวกรองแนวรับ-ต้านแล้ว — สัญญาณตาม Stoch อย่างเดียว"
                 send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: {txt}", chat_id=chat_id)
@@ -1712,10 +1705,7 @@ def telegram_webhook():
                         tgt["current_stage"] = 4
                     elif tgt.get("s5_enabled", True) and tgt["current_stage"] == 4 and tgt.get("execute_notified"):
                         tgt["current_stage"] = 5
-                    tgt["stage1_notified"] = False
-                    tgt["stage2_notified"] = False
-                    tgt["stage3_notified"] = False
-                    tgt["execute_notified"] = False
+                    reset_stage_flags(tgt)
                     tgt["is_active"] = True
                     tgt["auto_paused_today"] = False
                     save_state_to_sheets(asset_key, st)
@@ -1806,10 +1796,7 @@ def telegram_webhook():
                     if tf != "off":
                         tgt["current_stage"] = idx + 1
                         break
-                tgt["stage1_notified"] = False
-                tgt["stage2_notified"] = False
-                tgt["stage3_notified"] = False
-                tgt["execute_notified"] = False
+                reset_stage_flags(tgt)
                 tgt["is_active"] = True
                 tgt["auto_paused_today"] = False
                 save_state_to_sheets(asset_key, st)
