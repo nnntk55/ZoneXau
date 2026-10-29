@@ -480,6 +480,10 @@ HTML_TEMPLATE = """
         .badge-stage4 { background: #5f4a43; color: #f7ead9; }
         .badge-stage5 { background: #b0563f; color: #f7ead9; }
         .badge-custom { background: #c98a4b; color: #f7ead9; }
+        /* กรอบให้ stage badge ทุกอัน — stage1/2 สีซีดจนกลืนกับพื้นแผง #e4d2c1 มองไม่เห็นกรอบ */
+        .badge-stage1, .badge-stage2, .badge-stage3, .badge-stage4, .badge-stage5, .badge-custom {
+            border: 1px solid #9b8477;
+        }
         .badge-dir-low { background: #6f8f5f; color: #f7ead9; }
         .badge-dir-high { background: #b0563f; color: #f7ead9; }
         .badge-status-on { background: #6f8f5f; color: #f7ead9; }
@@ -743,7 +747,8 @@ HTML_TEMPLATE = """
                         class="badge toggle-btn {% if s2.get('active_direction', 'LOW') == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
                             {% if s2.get('active_direction', 'LOW') == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
                         </button>
-                        <span class="badge badge-stage{{ s2.get('current_stage', 1) }}" id="stage-badge-{{ key }}-short">Stage {{ s2.get('current_stage', 1) }}</span>
+                        {% set stg2 = s2.get('current_stage', 1)|int(1) %}
+                        <span class="badge badge-stage{{ stg2 if stg2 in [1,2,3,4,5] else 1 }}" id="stage-badge-{{ key }}-short">Stage {{ stg2 }}</span>
                     </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
@@ -816,7 +821,8 @@ HTML_TEMPLATE = """
                         {% if asset.state.custom_mode %}
                             <span class="badge badge-custom" id="stage-badge-{{ key }}-long">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
                         {% else %}
-                            <span class="badge badge-stage{{ asset.state.current_stage }}" id="stage-badge-{{ key }}-long">Stage {{ asset.state.current_stage }}</span>
+                            {% set stg1 = asset.state.current_stage|int(1) %}
+                            <span class="badge badge-stage{{ stg1 if stg1 in [1,2,3,4,5] else 1 }}" id="stage-badge-{{ key }}-long">Stage {{ stg1 }}</span>
                         {% endif %}
                     </div>
                 </div>
