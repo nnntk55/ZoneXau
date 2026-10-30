@@ -130,6 +130,7 @@ def default_set2():
     return {
         "active_direction": "LOW", "target_mode": "AUTO", "stage_tfs": ["4h", "1h", "15m", "5m"],
         "s5_enabled": True, "sr_enabled": False, "sr_alert_sent": False, "auto_order": False,
+        "trend_tf": "4h",
         "current_stage": 1, "stage1_notified": False, "stage2_notified": False,
         "stage3_notified": False, "execute_notified": False,
         "stage4_signal_sent": False, "s4_confirm_candle": None,
@@ -704,6 +705,7 @@ HTML_TEMPLATE = """
                 {% if alerts %}
                 <div style="font-size: 0.72rem; color: #5f4a43;">
                     {% for al in alerts %}
+                    {% if al.get('type') != 'sr' %}
                     <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1;">
                         <span>
                             #{{ loop.index }}
@@ -718,6 +720,7 @@ HTML_TEMPLATE = """
 
 
 
+                    {% endif %}
                     {% endfor %}
                 </div>
                 {% else %}
@@ -735,6 +738,42 @@ HTML_TEMPLATE = """
             </div>
 
             {% set s2 = asset.state.get('set2') or {} %}
+            <div class="panel">
+                <div class="panel-title">🎯 แนวรับ / แนวต้าน (ตั้งเองรายสัปดาห์)</div>
+                {% set ns = namespace(found=false) %}
+                {% for al in asset.state.get('alerts', []) %}
+                    {% if al.get('type') == 'sr' %}
+                    {% set ns.found = true %}
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1; font-size: 0.72rem;">
+                        <span>{% if al.side == 's' %}🟢 แนวรับ{% else %}🔴 แนวต้าน{% endif %} {{ '%.2f'|format(al.price) }}</span>
+                        <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
+                            <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:0.75rem;">✕ ลบ</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+                {% if not ns.found %}<div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มีแนว — ใส่ระดับราคาประจำสัปดาห์ด้านล่าง</div>{% endif %}
+                <form action="/add_srlevel/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
+                    <select name="side" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
+                        <option value="s">🟢 แนวรับ</option>
+                        <option value="r">🔴 แนวต้าน</option>
+                    </select>
+                    <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 2; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
+                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
+                </form>
+                <form action="/set_trend_tf/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 8px; align-items: center; border-top: 1px dashed #e4d2c1; padding-top: 6px;">
+                    <span style="font-size:0.72rem; color:#5f4a43;">เทรนด์ EMA50/100/200:</span>
+                    <select name="tf" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
+                        {% for tfv in ['1w','1d','4h','1h','15m','5m'] %}
+                        <option value="{{ tfv }}" {% if s2.get('trend_tf','4h') == tfv %}selected{% endif %}>{{ tfv.upper() }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">📈</button>
+                    <span style="font-size:0.72rem; flex: 2;">
+                        {{ asset.state.get('trend_tf', s2.get('trend_tf','4h'))|upper }}: <b>{{ asset.state.get('trend') or '—' }}</b>
+                    </span>
+                </form>
+            </div>
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
                 <input type="hidden" name="set" value="short">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -1209,6 +1248,8 @@ def reset_stage_flags(t):
     t["stage4_signal_sent"] = False
     t["s4_confirm_candle"] = None
     t["sr_alert_sent"] = False
+    t["s3_gate_override"] = False
+    t["s3_gate_asked"] = False
 
 def resume_if_paused(t):
     """ปลด auto-pause ให้กลับมาสแกนทันทีเมื่อผู้ใช้เปลี่ยนอะไรก็ตาม — ปลดเฉพาะที่พักอัตโนมัติ ไม่ปลุกชุดที่ผู้ใช้กด OFF เอง"""
@@ -1310,6 +1351,29 @@ def update_stage_tfs(asset_key):
         global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"     
     return redirect(url_for("home"))
+
+@app.route("/set_trend_tf/<asset_key>", methods=["POST"])
+def set_trend_tf(asset_key):
+    st = ASSETS[asset_key]["state"]
+    tf = request.form.get("tf", "4h")
+    s2 = st.setdefault("set2", default_set2())
+    if isinstance(s2, dict):
+        s2["trend_tf"] = tf
+    save_state_to_sheets(asset_key, st)
+    return redirect("/")
+
+@app.route("/add_srlevel/<asset_key>", methods=["POST"])
+def add_srlevel(asset_key):
+    st = ASSETS[asset_key]["state"]
+    try:
+        price = float(request.form.get("price"))
+    except (TypeError, ValueError):
+        return redirect("/")
+    side = request.form.get("side", "s")
+    al = st.setdefault("alerts", [])
+    al.append({"type": "sr", "side": side, "price": price, "set": "long", "hit": False})
+    save_state_to_sheets(asset_key, st)
+    return redirect("/")
 
 @app.route("/add_alert/<asset_key>", methods=["POST"])
 def add_alert(asset_key):
@@ -1533,6 +1597,8 @@ def get_asset_config(asset_key):
         "execute_notified": st.get("execute_notified", False),
         "stage4_signal_sent": st.get("stage4_signal_sent", False),
         "s4_confirm_candle": st.get("s4_confirm_candle"),
+        "s3_gate_override": st.get("s3_gate_override", False),
+        "s3_gate_asked": st.get("s3_gate_asked", False),
         "user_command": st.get("user_command"),
         "set2": st.get("set2"),
         "alerts": st.get("alerts", [])
@@ -1568,6 +1634,10 @@ def update_asset_config(asset_key):
             st["auto_paused_today"] = bool(data["auto_paused_today"])
         if "s4_confirm_candle" in data:
             st["s4_confirm_candle"] = data["s4_confirm_candle"]
+        if "s3_gate_override" in data:
+            st["s3_gate_override"] = bool(data["s3_gate_override"])
+        if "s3_gate_asked" in data:
+            st["s3_gate_asked"] = bool(data["s3_gate_asked"])
         if "mt5_pending" in data:
             st["mt5_pending"] = bool(data["mt5_pending"])
         if "mt5_pending_since" in data:
@@ -1743,6 +1813,29 @@ def telegram_webhook():
                     act_txt = "🔴 ปิด (OFF)" if action == "off" else ("🟢 เปิด (ON)" if action == "on" else f"📈 {action.upper()}")
                     msg = f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: ตั้งค่า {stages_txt} เป็น {act_txt} เรียบร้อยแล้ว!\nCurrent Stage: Stage {tgt['current_stage']}"
                     send_telegram_notification(msg, asset_key=asset_key, chat_id=chat_id)
+            elif len(parts) == 2 and parts[0] in ASSETS and parts[1] == "ok":
+                # override S3 gate — ผู้ใช้อนุมัติเข้าแม้ถ่าง/ไม่มีระยะ
+                asset_key = parts[0]
+                st = ASSETS[asset_key]["state"]
+                tgt = get_set_target(st, set_key)
+                tgt["s3_gate_override"] = True
+                tgt["s3_gate_asked"] = False
+                save_state_to_sheets(asset_key, st)
+                send_telegram_notification(f"✅ *{ASSETS[asset_key]['name']}{set_lbl}*: รับ override — จะยิงสัญญาณต่อทันที", chat_id=chat_id)
+            elif len(parts) == 2 and parts[0] in ASSETS and parts[1] == "skip":
+                # ข้ามสัญญาณที่ถูก gate ขวาง — รีเซ็ตกลับไปแสกนใหม่
+                asset_key = parts[0]
+                st = ASSETS[asset_key]["state"]
+                tgt = get_set_target(st, set_key)
+                reset_stage_flags(tgt)
+                for i, tf in enumerate(tgt.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+                    if tf != "off":
+                        tgt["current_stage"] = i + 1
+                        break
+                tgt["is_active"] = True
+                tgt["auto_paused_today"] = False
+                save_state_to_sheets(asset_key, st)
+                send_telegram_notification(f"⏭️ *{ASSETS[asset_key]['name']}{set_lbl}*: ข้ามไม้นี้ กลับไปแสกนใหม่แล้ว", chat_id=chat_id)
             elif len(parts) == 2 and parts[0] in ASSETS and parts[1] in ["on", "off"]:
                 asset_key = parts[0]
                 action = parts[1]
