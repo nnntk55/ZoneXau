@@ -742,7 +742,7 @@ HTML_TEMPLATE = """
                     <div style="display: flex; gap: 5px; align-items: center;">
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'short')" id="power-btn-{{ key }}-short"
                         class="badge toggle-btn {% if s2.get('is_active', True) and not s2.get('auto_paused_today') %}badge-status-on{% else %}badge-status-off{% endif %}">
-                            {% if not s2.get('is_active', True) %}� OFF{% elif s2.get('auto_paused_today') %}⏸ พัก-05:00{% else %}� ON{% endif %}
+                            {% if not s2.get('is_active', True) %}🔴 OFF{% elif s2.get('auto_paused_today') %}⏸ พัก-05:00{% else %}🟢 ON{% endif %}
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'short')" id="dir-btn-{{ key }}-short"
                         class="badge toggle-btn {% if s2.get('active_direction', 'LOW') == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
@@ -813,7 +813,7 @@ HTML_TEMPLATE = """
                     <div style="display: flex; gap: 5px; align-items: center;">
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'long')" id="power-btn-{{ key }}-long"
                         class="badge toggle-btn {% if asset.state.is_active and not asset.state.get('auto_paused_today') %}badge-status-on{% else %}badge-status-off{% endif %}">
-                            {% if not asset.state.is_active %}� OFF{% elif asset.state.get('auto_paused_today') %}⏸ พัก-05:00{% else %}� ON{% endif %}
+                            {% if not asset.state.is_active %}🔴 OFF{% elif asset.state.get('auto_paused_today') %}⏸ พัก-05:00{% else %}🟢 ON{% endif %}
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'long')" id="dir-btn-{{ key }}-long"
                         class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
