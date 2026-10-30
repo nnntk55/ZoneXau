@@ -720,17 +720,17 @@ HTML_TEMPLATE = """
                         <option value="s">🟢 แนวรับ</option>
                         <option value="r">🔴 แนวต้าน</option>
                     </select>
-                    <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 0 0 92px; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 0 0 64px; padding: 4px 0; color:#fff;">บันทึก</button>
+                    <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 1; min-width: 0; padding: 4px 0; color:#fff;">บันทึก</button>
                 </form>
                 <form action="/set_trend_tf/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 8px; align-items: center; border-top: 1px dashed #e4d2c1; padding-top: 6px;">
                     <span style="font-size:0.72rem; color:#5f4a43; flex: 1;">เทรนด์ EMA50/100/200:</span>
-                    <select name="tf" style="font-size:0.7rem; flex: 0 0 92px; padding: 4px 4px;">
+                    <select name="tf" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
                         {% for tfv in ['1w','1d','4h','1h','15m','5m'] %}
                         <option value="{{ tfv }}" {% if s2.get('trend_tf','4h') == tfv %}selected{% endif %}>{{ tfv.upper() }}</option>
                         {% endfor %}
                     </select>
-                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 0 0 64px; padding: 4px 0; color:#fff;">บันทึก</button>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 1; min-width: 0; padding: 4px 0; color:#fff;">บันทึก</button>
                     
                 </form>
             </div>
