@@ -710,7 +710,11 @@ HTML_TEMPLATE = """
                         <span>
                             #{{ loop.index }}
                             {% if al.set == 'short' %}⚡สั้น{% else %}📈ยาว{% endif %}
+                            {% if al.get('type') == 'level' %}
+                            {{ '🔴 สูงกว่า' if al.side == 'high' else '🟢 ต่ำกว่า' }} {{ '%.2f'|format(al.price) }}
+                            {% else %}
                             ย่าน {{ '%.2f'|format(al.low) }}–{{ '%.2f'|format(al.high) }}
+                            {% endif %}
                             {% if al.hit %}<span style="color:#9b8477;">(แจ้งแล้ว)</span>{% endif %}
                         </span>
                         <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
@@ -731,9 +735,12 @@ HTML_TEMPLATE = """
                         <option value="long">📈 ยาว</option>
                         <option value="short">⚡ สั้น</option>
                     </select>
-                    <input type="number" step="0.0001" name="low" placeholder="ราคา Low" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <input type="number" step="0.0001" name="high" placeholder="ราคา High" style="flex: 1; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 2; min-width: 0; padding: 4px 0;">➕</button>
+                    <select name="side" style="font-size:0.7rem; flex: 2; min-width: 0; padding: 4px 4px;">
+                        <option value="high">🔴 High (สูงกว่า)</option>
+                        <option value="low">🟢 Low (ต่ำกว่า)</option>
+                    </select>
+                    <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 2; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
                 </form>
             </div>
 
@@ -759,7 +766,7 @@ HTML_TEMPLATE = """
                         <option value="r">🔴 แนวต้าน</option>
                     </select>
                     <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 2; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
                 </form>
                 <form action="/set_trend_tf/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 8px; align-items: center; border-top: 1px dashed #e4d2c1; padding-top: 6px;">
                     <span style="font-size:0.72rem; color:#5f4a43;">เทรนด์ EMA50/100/200:</span>
@@ -768,7 +775,7 @@ HTML_TEMPLATE = """
                         <option value="{{ tfv }}" {% if s2.get('trend_tf','4h') == tfv %}selected{% endif %}>{{ tfv.upper() }}</option>
                         {% endfor %}
                     </select>
-                    <button type="submit" class="save-btn" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">📈</button>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">📈</button>
                     <span style="font-size:0.72rem; flex: 2;">
                         {{ asset.state.get('trend_tf', s2.get('trend_tf','4h'))|upper }}: <b>{{ asset.state.get('trend') or '—' }}</b>
                     </span>
@@ -1382,18 +1389,30 @@ def add_alert(asset_key):
         return "Asset not found", 404
     st = ASSETS[asset_key]["state"]
     try:
-        lo = float(request.form.get("low", ""))
-        hi = float(request.form.get("high", ""))
+        lo = float(request.form.get("low", "") or 0)
+        hi = float(request.form.get("high", "") or 0)
+        if request.form.get("price"):
+            float(request.form.get("price"))
     except (TypeError, ValueError):
-        global_flash["msg"] = "❌ กรอกราคา Low/High ไม่ถูกต้อง"
+        global_flash["msg"] = "❌ กรอกราคาไม่ถูกต้อง"
         global_flash["type"] = "error"
+        return redirect(url_for("home"))
+    al = st.setdefault("alerts", [])
+    px = st.get("price", 0.0)
+    # ฟอร์มใหม่: side(low/high) + price เดียว — เก็บเป็น level alert
+    if request.form.get("price"):
+        side = request.form.get("side", "high")
+        price = float(request.form.get("price"))
+        hit = (px >= price) if side == "high" else (px <= price)
+        al.append({"type": "level", "side": side, "price": price,
+                   "set": request.form.get("set", "long"), "hit": bool(px and hit)})
+        resume_if_paused(get_set_target(st, request.form.get("set", "long")))
+        save_state_to_sheets(asset_key, st)
         return redirect(url_for("home"))
     if lo > hi:
         lo, hi = hi, lo
-    al = st.setdefault("alerts", [])
     # ถ้าราคาอยู่ในย่านตั้งแต่ตอนสร้าง → ถือว่าแจ้งแล้วไปเลย (hit=True)
     # เตือนเฉพาะครั้งที่ราคา "เดินเข้ามาชน" จากข้างนอกเท่านั้น
-    px = st.get("price", 0.0)
     already_inside = lo <= px <= hi if px else False
     al.append({"set": request.form.get("set", "long"), "low": lo, "high": hi, "hit": already_inside})
     resume_if_paused(get_set_target(st, request.form.get("set", "long")))
