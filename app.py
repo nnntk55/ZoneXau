@@ -201,6 +201,13 @@ def save_state_to_sheets(asset_key, state_dict):
     if not GOOGLE_SCRIPT_URL:
         return
     try:
+        # จัดเรียงแนวรับ/ต้านอัตโนมัติ: แนวต้านขึ้นก่อน แนวรับตามหลัง ในแต่ละกลุ่มเรียงราคามาก→น้อย
+        al = state_dict.get("alerts")
+        if isinstance(al, list):
+            srs = [a for a in al if isinstance(a, dict) and a.get("type") == "sr"]
+            if len(srs) > 1:
+                srs.sort(key=lambda a: (0 if a.get("side") == "r" else 1, -(a.get("price") or 0)))
+                state_dict["alerts"] = srs + [a for a in al if not (isinstance(a, dict) and a.get("type") == "sr")]
         payload = {
             "asset": asset_key,
             "note": state_dict.get("note"),
@@ -1465,6 +1472,10 @@ def process_market_data(data):
                 st["sr_ema200"] = float(payload["sr_ema200"])
             if "sr_trend" in payload:
                 st["sr_trend"] = payload["sr_trend"]
+            if "trend" in payload:
+                st["trend"] = payload["trend"]
+            if "trend_tf" in payload:
+                st["trend_tf"] = payload["trend_tf"]
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
