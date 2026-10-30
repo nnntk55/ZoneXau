@@ -1291,32 +1291,34 @@ def update_stage_tfs(asset_key):
     st = ASSETS[asset_key]["state"]
     s = get_set_target(st, request.form.get("set", "long"))
     new_tfs = [request.form.get(f"stage_{i}_tf") for i in range(1, 5)]
-    if len(new_tfs) == 4:
+    # เขียนเฉพาะ field ที่ส่งมาจริง — กันพังค่าที่ไม่ได้ตั้ง (เช่น Midas ส่งแค่ lot)
+    if "stage_5_tf" in request.form:
+        s["s5_enabled"] = (request.form.get("stage_5_tf") == "on")
+    if "sr_enabled" in request.form:
+        s["sr_enabled"] = (request.form.get("sr_enabled") == "on")
+    if "auto_order" in request.form:
+        s["auto_order"] = (request.form.get("auto_order") == "on")
+    try:
+        if request.form.get("lot"):
+            s["lot"] = float(request.form["lot"])
+        if request.form.get("tp_pips"):
+            s["tp_pips"] = int(float(request.form["tp_pips"]))
+        if request.form.get("sl_pips"):
+            s["sl_pips"] = int(float(request.form["sl_pips"]))
+    except (TypeError, ValueError):
+        pass
+    if all(tf in ("1w", "1d", "4h", "1h", "15m", "5m", "off") for tf in new_tfs):
         s["stage_tfs"] = new_tfs
-        s["s5_enabled"] = (request.form.get("stage_5_tf", "on") == "on")
-        s["sr_enabled"] = (request.form.get("sr_enabled", "off") == "on")
-        s["auto_order"] = (request.form.get("auto_order", "off") == "on")
-        # รับ lot/tp/sl ในฟอร์มเดียวกัน (merge เป็นแผงเดียว)
-        try:
-            if request.form.get("lot"):
-                s["lot"] = float(request.form["lot"])
-            if request.form.get("tp_pips"):
-                s["tp_pips"] = int(float(request.form["tp_pips"]))
-            if request.form.get("sl_pips"):
-                s["sl_pips"] = int(float(request.form["sl_pips"]))
-        except (TypeError, ValueError):
-            pass
         for idx, tf in enumerate(new_tfs):
             if tf != "off":
                 s["current_stage"] = idx + 1
                 break
-        # รีเซ็ต flags และปลด pause เพื่อเริ่มสแกนตามค่าใหม่ทันที
         reset_stage_flags(s)
-        s["is_active"] = True
-        s["auto_paused_today"] = False
-        save_state_to_sheets(asset_key, st)
-        global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
-        global_flash["type"] = "success"     
+    s["is_active"] = True
+    s["auto_paused_today"] = False
+    save_state_to_sheets(asset_key, st)
+    global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
+    global_flash["type"] = "success"
     return redirect(url_for("home"))
 
 @app.route("/set_trend_tf/<asset_key>", methods=["POST"])
