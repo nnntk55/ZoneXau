@@ -731,7 +731,7 @@ HTML_TEMPLATE = """
                 <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
                 {% endif %}
                 <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
-                    <select name="set" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
+                    <select name="set" style="font-size:0.7rem; flex: 0 0 92px; padding: 4px 4px;">
                         <option value="long">📈 ยาว</option>
                         <option value="short">⚡ สั้น</option>
                     </select>
@@ -761,7 +761,7 @@ HTML_TEMPLATE = """
                 {% endfor %}
                 {% if not ns.found %}<div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มีแนว — ใส่ระดับราคาประจำสัปดาห์ด้านล่าง</div>{% endif %}
                 <form action="/add_srlevel/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
-                    <select name="side" style="font-size:0.7rem; flex: 1; min-width: 0; padding: 4px 4px;">
+                    <select name="side" style="font-size:0.7rem; flex: 0 0 92px; padding: 4px 4px;">
                         <option value="s">🟢 แนวรับ</option>
                         <option value="r">🔴 แนวต้าน</option>
                     </select>
