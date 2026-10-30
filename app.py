@@ -480,7 +480,7 @@ HTML_TEMPLATE = """
         .badge-stage3 { background: #9b8477; color: #f7ead9; }
         .badge-stage4 { background: #5f4a43; color: #f7ead9; }
         .badge-stage5 { background: #b0563f; color: #f7ead9; }
-        .badge-custom { background: #c98a4b; color: #f7ead9; }
+        .badge-custom { background: #fdf7ec; color: #5f4a43; }
         /* กรอบให้ stage badge ทุกอัน — stage1/2 สีซีดจนกลืนกับพื้นแผง #e4d2c1 มองไม่เห็นกรอบ */
         .badge-stage1, .badge-stage2, .badge-stage3, .badge-stage4, .badge-stage5, .badge-custom {
             border: 1px solid #9b8477;
@@ -741,8 +741,8 @@ HTML_TEMPLATE = """
                     <div class="panel-title" style="margin-bottom: 0;">⚡ เทรดสั้น</div>
                     <div style="display: flex; gap: 5px; align-items: center;">
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'short')" id="power-btn-{{ key }}-short"
-                        class="badge toggle-btn {% if s2.get('is_active', True) %}badge-status-on{% else %}badge-status-off{% endif %}">
-                            {% if s2.get('is_active', True) %}🟢 ON{% else %}🔴 OFF{% endif %}
+                        class="badge toggle-btn {% if s2.get('is_active', True) and not s2.get('auto_paused_today') %}badge-status-on{% else %}badge-status-off{% endif %}">
+                            {% if not s2.get('is_active', True) %}� OFF{% elif s2.get('auto_paused_today') %}⏸ พัก-05:00{% else %}� ON{% endif %}
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'short')" id="dir-btn-{{ key }}-short"
                         class="badge toggle-btn {% if s2.get('active_direction', 'LOW') == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
@@ -812,8 +812,8 @@ HTML_TEMPLATE = """
                     <div class="panel-title" style="margin-bottom: 0;">📈 เทรดยาว</div>
                     <div style="display: flex; gap: 5px; align-items: center;">
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'power', 'long')" id="power-btn-{{ key }}-long"
-                        class="badge toggle-btn {% if asset.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
-                            {% if asset.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+                        class="badge toggle-btn {% if asset.state.is_active and not asset.state.get('auto_paused_today') %}badge-status-on{% else %}badge-status-off{% endif %}">
+                            {% if not asset.state.is_active %}� OFF{% elif asset.state.get('auto_paused_today') %}⏸ พัก-05:00{% else %}� ON{% endif %}
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'long')" id="dir-btn-{{ key }}-long"
                         class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
@@ -1596,14 +1596,23 @@ def telegram_webhook():
                 threading.Thread(target=send_summary_report, args=(text_lower[:-1], chat_id)).start()
             elif text_lower == "on":
                 for k in ASSETS.keys():
-                    ASSETS[k]["state"]["is_active"] = True
-                    ASSETS[k]["state"]["auto_paused_today"] = False
-                    save_state_to_sheets(k, ASSETS[k]["state"])
+                    st = ASSETS[k]["state"]
+                    st["is_active"] = True
+                    st["auto_paused_today"] = False
+                    s2 = st.get("set2")
+                    if isinstance(s2, dict):
+                        s2["is_active"] = True
+                        s2["auto_paused_today"] = False
+                    save_state_to_sheets(k, st)
                 send_telegram_notification("🟢 เปิดการทำงานเรดาร์ทุกคู่เงิน (ALL ON) เรียบร้อยแล้ว", chat_id=chat_id)
             elif text_lower == "off":
                 for k in ASSETS.keys():
-                    ASSETS[k]["state"]["is_active"] = False
-                    save_state_to_sheets(k, ASSETS[k]["state"])
+                    st = ASSETS[k]["state"]
+                    st["is_active"] = False
+                    s2 = st.get("set2")
+                    if isinstance(s2, dict):
+                        s2["is_active"] = False
+                    save_state_to_sheets(k, st)
                 send_telegram_notification("🔴 ปิดการทำงานเรดาร์ทุกคู่เงิน (ALL OFF) เรียบร้อยแล้ว", chat_id=chat_id)
             elif text_lower == "reset":
                 for k in ASSETS.keys():
