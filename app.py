@@ -1210,6 +1210,12 @@ def reset_stage_flags(t):
     t["s4_confirm_candle"] = None
     t["sr_alert_sent"] = False
 
+def resume_if_paused(t):
+    """ปลด auto-pause ให้กลับมาสแกนทันทีเมื่อผู้ใช้เปลี่ยนอะไรก็ตาม — ปลดเฉพาะที่พักอัตโนมัติ ไม่ปลุกชุดที่ผู้ใช้กด OFF เอง"""
+    if isinstance(t, dict) and t.get("auto_paused_today"):
+        t["auto_paused_today"] = False
+        t["is_active"] = True
+
 @app.route("/update_order_config/<asset_key>", methods=["POST"])
 def update_order_config(asset_key):
     if asset_key not in ASSETS:
@@ -1220,6 +1226,7 @@ def update_order_config(asset_key):
         s["lot"] = float(request.form.get("lot", 0.01))
         s["tp_pips"] = int(request.form.get("tp_pips", 300))
         s["sl_pips"] = int(request.form.get("sl_pips", 200))
+        resume_if_paused(s)
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"บันทึกค่าออเดอร์ของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"
@@ -1259,6 +1266,8 @@ def update_note(asset_key):
     try:
         note = request.form.get("note", "").strip()
         st["note"] = note if note else "ยังไม่มีบันทึกแผน"
+        resume_if_paused(st)
+        resume_if_paused(st.get("set2"))
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = f"บันทึกโน้ตของ {ASSETS[asset_key]['name']} สำเร็จ!"
         global_flash["type"] = "success"
@@ -1323,6 +1332,7 @@ def add_alert(asset_key):
     px = st.get("price", 0.0)
     already_inside = lo <= px <= hi if px else False
     al.append({"set": request.form.get("set", "long"), "low": lo, "high": hi, "hit": already_inside})
+    resume_if_paused(get_set_target(st, request.form.get("set", "long")))
     save_state_to_sheets(asset_key, st)
     global_flash["msg"] = f"🔔 เพิ่ม Alert #{len(al)} ของ {ASSETS[asset_key]['name']} แล้ว!"
     global_flash["type"] = "success"
@@ -1333,7 +1343,8 @@ def del_alert(asset_key, idx):
     st = ASSETS[asset_key]["state"]
     al = st.get("alerts", [])
     if 0 <= idx < len(al):
-        al.pop(idx)
+        removed = al.pop(idx)
+        resume_if_paused(get_set_target(st, removed.get("set", "long") if isinstance(removed, dict) else "long"))
         save_state_to_sheets(asset_key, st)
         global_flash["msg"] = "ลบ Alert แล้ว"
         global_flash["type"] = "success"
@@ -1506,6 +1517,7 @@ def get_asset_config(asset_key):
         "sl_pips": st.get("sl_pips", 200),
         "current_stage": st.get("current_stage", 1),
         "is_active": st.get("is_active", True),
+        "auto_paused_today": st.get("auto_paused_today", False),
         "active_direction": st.get("active_direction", "LOW"),
         "target_mode": st.get("target_mode", "AUTO"),
         "custom_mode": st.get("custom_mode", False),
@@ -1548,6 +1560,14 @@ def update_asset_config(asset_key):
             st["stage2_notified"] = bool(data["stage2_notified"])
         if "stage3_notified" in data:
             st["stage3_notified"] = bool(data["stage3_notified"])
+        if "stage4_signal_sent" in data:
+            st["stage4_signal_sent"] = bool(data["stage4_signal_sent"])
+        if "execute_notified" in data:
+            st["execute_notified"] = bool(data["execute_notified"])
+        if "auto_paused_today" in data:
+            st["auto_paused_today"] = bool(data["auto_paused_today"])
+        if "s4_confirm_candle" in data:
+            st["s4_confirm_candle"] = data["s4_confirm_candle"]
         if "mt5_pending" in data:
             st["mt5_pending"] = bool(data["mt5_pending"])
         if "mt5_pending_since" in data:
@@ -1663,6 +1683,7 @@ def telegram_webhook():
                             tgt["sl_pips"] = int(float(p[2:]))
                             changed.append(f"sl={tgt['sl_pips']}")
                     if changed:
+                        resume_if_paused(tgt)
                         save_state_to_sheets(asset_key, st)
                         send_telegram_notification(f"⚙️ *{ASSETS[asset_key]['name']}{set_lbl}*: ตั้งค่า {', '.join(changed)} เรียบร้อยแล้ว!", chat_id=chat_id)
                 except ValueError:
@@ -1758,21 +1779,25 @@ def telegram_webhook():
             elif text_lower.startswith("xaunote "):
                 note_content = text[8:].strip()
                 ASSETS["xau"]["state"]["note"] = note_content
+                resume_if_paused(ASSETS["xau"]["state"])
                 save_state_to_sheets("xau", ASSETS["xau"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต XAUUSD สำเร็จ:\n\"{note_content}\"", asset_key="xau", chat_id=chat_id)
             elif text_lower.startswith("usnote "):
                 note_content = text[7:].strip()
                 ASSETS["us"]["state"]["note"] = note_content
+                resume_if_paused(ASSETS["us"]["state"])
                 save_state_to_sheets("us", ASSETS["us"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต US30 สำเร็จ:\n\"{note_content}\"", asset_key="us", chat_id=chat_id)
             elif text_lower.startswith("oilnote "):
                 note_content = text[8:].strip()
                 ASSETS["oil"]["state"]["note"] = note_content
+                resume_if_paused(ASSETS["oil"]["state"])
                 save_state_to_sheets("oil", ASSETS["oil"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต USOIL สำเร็จ:\n\"{note_content}\"", asset_key="oil", chat_id=chat_id)
             elif text_lower.startswith("btcnote "):
                 note_content = text[8:].strip()
                 ASSETS["btc"]["state"]["note"] = note_content
+                resume_if_paused(ASSETS["btc"]["state"])
                 save_state_to_sheets("btc", ASSETS["btc"]["state"])
                 send_telegram_notification(f"📝 บันทึกโน้ต BTCUSD สำเร็จ:\n\"{note_content}\"", asset_key="btc", chat_id=chat_id)
             elif len(parts) == 3 and parts[0] in ASSETS and parts[1] in ["1w", "1d", "4h", "1h", "15m", "5m"] and parts[2] in ["high", "low"]:
