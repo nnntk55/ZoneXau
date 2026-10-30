@@ -699,54 +699,9 @@ HTML_TEMPLATE = """
             </div>
 
 
-            <div class="panel">
-                <div class="panel-title">🔔 Price Alerts</div>
-                {% set alerts = asset.state.get('alerts', []) %}
-                {% if alerts %}
-                <div style="font-size: 0.72rem; color: #5f4a43;">
-                    {% for al in alerts %}
-                    {% if al.get('type') != 'sr' %}
-                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #e4d2c1;">
-                        <span>
-                            #{{ loop.index }}
-                            {% if al.set == 'short' %}⚡สั้น{% else %}📈ยาว{% endif %}
-                            {% if al.get('type') == 'level' %}
-                            {{ '🔴 สูงกว่า' if al.side == 'high' else '🟢 ต่ำกว่า' }} {{ '%.2f'|format(al.price) }}
-                            {% else %}
-                            ย่าน {{ '%.2f'|format(al.low) }}–{{ '%.2f'|format(al.high) }}
-                            {% endif %}
-                            {% if al.hit %}<span style="color:#9b8477;">(แจ้งแล้ว)</span>{% endif %}
-                        </span>
-                        <form action="/del_alert/{{ key }}/{{ loop.index0 }}" method="POST" style="margin:0;">
-                            <button type="submit" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:0.75rem;">✕ ลบ</button>
-                        </form>
-                    </div>
-
-
-
-                    {% endif %}
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="font-size: 0.72rem; color: #9b8477;">ยังไม่มี alert — เพิ่มด้านล่างได้เลย</div>
-                {% endif %}
-                <form action="/add_alert/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
-                    <select name="set" style="font-size:0.7rem; flex: 0 0 92px; padding: 4px 4px;">
-                        <option value="long">📈 ยาว</option>
-                        <option value="short">⚡ สั้น</option>
-                    </select>
-                    <select name="side" style="font-size:0.7rem; flex: 2; min-width: 0; padding: 4px 4px;">
-                        <option value="high">🔴 High (สูงกว่า)</option>
-                        <option value="low">🟢 Low (ต่ำกว่า)</option>
-                    </select>
-                    <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 2; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
-                </form>
-            </div>
-
             {% set s2 = asset.state.get('set2') or {} %}
             <div class="panel">
-                <div class="panel-title">🎯 แนวรับ / แนวต้าน (ตั้งเองรายสัปดาห์)</div>
+                <div class="panel-title">🎯 แนวรับ / แนวต้าน <span style="font-weight:400; font-size:0.7rem; color:#9b8477;">— เทรนด์ {{ asset.state.get('trend_tf', s2.get('trend_tf','4h'))|upper }}: {{ asset.state.get('trend') or '—' }}</span></div>
                 {% set ns = namespace(found=false) %}
                 {% for al in asset.state.get('alerts', []) %}
                     {% if al.get('type') == 'sr' %}
@@ -766,7 +721,7 @@ HTML_TEMPLATE = """
                         <option value="r">🔴 แนวต้าน</option>
                     </select>
                     <input type="number" step="0.0001" name="price" placeholder="ระดับราคา" style="flex: 2; min-width: 0; font-size:0.72rem; padding: 5px 6px;" required>
-                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">➕</button>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 1; min-width: 0; padding: 4px 0; color:#fff;">บันทึก</button>
                 </form>
                 <form action="/set_trend_tf/{{ key }}" method="POST" style="display: flex; gap: 6px; margin-top: 8px; align-items: center; border-top: 1px dashed #e4d2c1; padding-top: 6px;">
                     <span style="font-size:0.72rem; color:#5f4a43;">เทรนด์ EMA50/100/200:</span>
@@ -775,10 +730,8 @@ HTML_TEMPLATE = """
                         <option value="{{ tfv }}" {% if s2.get('trend_tf','4h') == tfv %}selected{% endif %}>{{ tfv.upper() }}</option>
                         {% endfor %}
                     </select>
-                    <button type="submit" class="save-btn save-tf" style="font-size:0.85rem; flex: 1; min-width: 0; padding: 4px 0;">📈</button>
-                    <span style="font-size:0.72rem; flex: 2;">
-                        {{ asset.state.get('trend_tf', s2.get('trend_tf','4h'))|upper }}: <b>{{ asset.state.get('trend') or '—' }}</b>
-                    </span>
+                    <button type="submit" class="save-btn save-tf" style="font-size:0.75rem; flex: 1; min-width: 0; padding: 4px 0; color:#fff;">บันทึก</button>
+                    
                 </form>
             </div>
             <form action="/update_stage_tfs/{{ key }}" method="POST" class="panel">
