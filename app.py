@@ -35,6 +35,9 @@ def check_access():
         return None
     if path.startswith("/telegram-webhook"):
         return None  # Telegram server เรียกเอง ใส่ auth ไม่ได้
+    # Midas/บอท ส่ง X-Api-Key มาแทน basic auth ได้ทุก route (ฟอร์ม POST ด้วย)
+    if API_KEY and request.headers.get("X-Api-Key") == API_KEY:
+        return None
     if DASH_USER and DASH_PASS:
         auth = request.authorization
         if not auth or auth.username != DASH_USER or auth.password != DASH_PASS:
@@ -1629,6 +1632,20 @@ def update_asset_config(asset_key):
             st["mt5_pending_since"] = float(data["mt5_pending_since"])
         if "user_command" in data:
             st["user_command"] = data["user_command"]
+        # lot/tp/sl + stage plan เขียนตรงผ่าน API ได้ (Midas ใช้ — เขียนเฉพาะที่ส่ง)
+        for num_f in ("lot", "tp_pips", "sl_pips"):
+            if num_f in data:
+                st[num_f] = float(data[num_f])
+        for bool_f in ("s5_enabled", "sr_enabled", "auto_order"):
+            if bool_f in data:
+                st[bool_f] = bool(data[bool_f])
+        if "stage_tfs" in data and isinstance(data["stage_tfs"], list):
+            st["stage_tfs"] = data["stage_tfs"]
+            for idx, tf in enumerate(data["stage_tfs"]):  # รีเซ็ตกลับ stage แรกที่ไม่ off
+                if tf != "off":
+                    st["current_stage"] = idx + 1
+                    break
+            reset_stage_flags(st)
         if "set2" in data and isinstance(data["set2"], dict):
             st["set2"] = data["set2"]
         if "alerts" in data and isinstance(data["alerts"], list):
