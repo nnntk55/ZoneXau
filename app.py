@@ -1273,6 +1273,11 @@ def update_order_config(asset_key):
         global_flash["type"] = "error"
     return redirect(url_for("home"))
 
+@app.route("/healthz")
+def healthz():
+    """health check เบาๆ สำหรับ Render — ตอบทันทีไม่วาดกราฟ กัน health check timeout ตอน deploy"""
+    return "ok", 200
+
 @app.route("/")
 def home():
     global global_flash
