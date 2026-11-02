@@ -90,6 +90,38 @@ def devin_session(sid):
     r = requests.get(f"{API}/sessions/{sid}", headers={"Authorization": f"Bearer {KEY}"}, timeout=15)
     return r.json() if r.status_code == 200 else None
 
+REMINDERS_URL = "https://raw.githubusercontent.com/nnntk55/ZoneXau/main/reminders.json"
+
+def check_reminders(st):
+    """ตัวเตือนที่วินตั้งเองผ่าน reminders.json ใน repo (ไม่ต้องใช้ Automation ของ Devin ที่ต้องกดอนุมัติ)
+    แต่ละรายการ: {"id", "at": ISO8601 มี timezone, "text": ส่ง Telegram นิน (ไม่ใส่ก็ได้), "devin": ข้อความปลุกวิน}"""
+    from datetime import datetime, timezone, timedelta
+    try:
+        items = requests.get(REMINDERS_URL, params={"t": int(time.time())}, timeout=15).json()
+    except Exception as e:
+        print(f"reminders err: {e}")
+        return
+    fired = st.setdefault("fired", [])
+    now = datetime.now(timezone.utc)
+    for it in items if isinstance(items, list) else []:
+        try:
+            rid, at = str(it["id"]), datetime.fromisoformat(it["at"])
+        except Exception:
+            continue
+        if rid in fired or at > now or now - at > timedelta(hours=12):
+            continue
+        if it.get("text"):
+            send(it["text"])
+        if it.get("devin"):
+            sid = st.get("session_id")
+            if not (sid and devin_message(sid, "[REMINDER] " + it["devin"])):
+                sid, _ = devin_create("[REMINDER] " + it["devin"])
+                if sid:
+                    st["session_id"] = sid; st["seen"] = 0
+        fired.append(rid)
+        del fired[:-50]
+        save_state(st)
+
 SELF_UPDATE_REPO = "nnntk55/ZoneXau"
 SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
@@ -130,7 +162,7 @@ def main():
         return
     st = load_state()
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
-    last_poll = 0
+    last_poll = last_rem = 0
     while True:
         try:
             # รับข้อความพี่
@@ -184,6 +216,9 @@ def main():
                         st["seen"] = len(msgs)
                         save_state(st)
                     # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
+            if time.time() - last_rem > 60:
+                last_rem = time.time()
+                check_reminders(st)
             time.sleep(2)
         except Exception as e:
             print(f"loop err: {e}")
