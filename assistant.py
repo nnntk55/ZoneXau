@@ -14,6 +14,7 @@ Telegram (ภาษาคน) -> Gemini function calling -> Render Dashboard API
 import os
 import sys
 import json
+import re
 import time
 import base64
 import requests
@@ -942,6 +943,21 @@ def _to_openai_messages():
     flush_pending()
     return msgs
 
+def _short_retry_wait(r):
+    """429 แบบโควต้าต่อนาที (Groq TPM) มักบอกให้รอไม่กี่วิ — คืนวินาทีที่ควรรอ ถ้าเกิน 20 วิคืน None"""
+    if r.status_code != 429:
+        return None
+    wait = None
+    try:
+        wait = float(r.headers.get("retry-after") or "")
+    except ValueError:
+        m = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", r.text or "")
+        if m:
+            wait = int(m.group(1) or 0) * 60 + float(m.group(2))
+    if wait is None or wait > 20:
+        return None
+    return wait + 0.5
+
 def groq_call():
     """เรียก Groq -> แปลงคำตอบกลับเป็น parts แบบ Gemini เพื่อใช้ลูปเดิม"""
     if not GROQ_API_KEY:
@@ -950,10 +966,16 @@ def groq_call():
         "description": d.get("description", ""), "parameters": d.get("parameters", {})}}
         for d in GEMINI_TOOLS[0]["function_declarations"]]
     try:
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={"model": GROQ_MODEL, "messages": _to_openai_messages(),
-                  "tools": tools, "temperature": 0.3}, timeout=60)
+        for attempt in range(2):
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json={"model": GROQ_MODEL, "messages": _to_openai_messages(),
+                      "tools": tools, "temperature": 0.3}, timeout=60)
+            wait = _short_retry_wait(r) if attempt == 0 else None
+            if wait is None:
+                break
+            print(f"Groq 429 — รอ {wait:.1f}s แล้วลองใหม่")
+            time.sleep(wait)
         if r.status_code != 200:
             _ai_errors.append(r.status_code)
             print(f"Groq HTTP {r.status_code}: {r.text[:200]}")
@@ -1058,6 +1080,19 @@ def _ai_fail_message():
         why = "สมอง AI สะดุดชั่วคราวคับพี่"
     return why
 
+def _summarize_tool_log(turn_log):
+    lines = []
+    for name, out in turn_log[-6:]:
+        if isinstance(out, dict):
+            ok = out.get("ok")
+            mark = "สำเร็จ" if ok is True else ("ไม่สำเร็จ" if ok is False or out.get("error") else "ทำแล้ว")
+            detail = {k: v for k, v in out.items() if k not in ("ok", "image_b64")}
+            d = json.dumps(detail, ensure_ascii=False)[:300] if detail else ""
+        else:
+            mark, d = "ทำแล้ว", str(out)[:300]
+        lines.append(f"- {name}: {mark} {d}".rstrip())
+    return "\n".join(lines)
+
 AI_RETRY_DELAYS = [60, 180, 600]  # วินาที — คิวลองใหม่อัตโนมัติเมื่อสมองล่มทุกตัว
 retry_queue = []  # [{"text","chat_id","tries","at"}]
 
@@ -1092,6 +1127,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
     chat_history.append({"role": "user", "parts": parts})
     chat_history = _sanitize_history(chat_history[-MAX_HISTORY:])
     turn_msg = chat_history[-1]
+    turn_log = []  # (tool, ผล) ที่รันไปแล้วในเทิร์นนี้
 
     for step in range(MAX_AGENT_STEPS):
         save_memory()
@@ -1121,6 +1157,9 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
             if step > 0:
                 # tool บางตัวรันไปแล้ว — ไม่ลองซ้ำเอง กันคำสั่งซ้ำ (เช่น add_alert ซ้ำ)
                 print(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
+                if turn_log:
+                    return (f"{why} เลยสรุปให้เป็นภาษาคนไม่ได้ — แต่คำสั่งทำไปแล้ว ผลจริงตามนี้คับ:\n"
+                            + _summarize_tool_log(turn_log) + "\nเช็คก่อนสั่งซ้ำนะคับ")
                 return f"{why} — คำสั่งบางส่วนอาจทำไปแล้ว เช็คสถานะก่อนสั่งซ้ำนะคับ"
             # ถอยเทิร์นนี้ออก (กันข้อความซ้ำตอนลองใหม่) แล้วเข้าคิวลองใหม่เอง
             turn_start = next((i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg), None)
@@ -1166,6 +1205,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
                 # เก็บรูปไว้ส่งให้โมเดลดูรอบถัดไป (อย่าใส่ไว้ใน functionResponse เพราะใหญ่เกิน)
                 pending_images.append(out["image_b64"])
                 out = {k: v for k, v in out.items() if k != "image_b64"}
+            turn_log.append((name, out))
             responses.append({"functionResponse": {"name": name, "response": {"result": out}}})
         chat_history.append({"role": "user", "parts": responses})
         # แนบรูปกราฟให้โมเดลเห็นก่อนวิเคราะห์ต่อ
