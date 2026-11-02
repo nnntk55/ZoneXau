@@ -180,9 +180,19 @@ def dash_auth():
     """basic auth เหมือนพี่ล็อกอินหน้าเว็บ — ใช้ทุก request (ฟอร์ม route ต้องการ)"""
     return (DASH_USER, DASH_PASS) if DASH_USER and DASH_PASS else None
 
+DASH_TIMEOUT = 30
+
 def dash_get_config(asset):
-    res = requests.get(f"{RENDER_DASHBOARD_URL}/api/config/{asset}", timeout=10, headers=dash_headers(), auth=dash_auth())
-    return res.json() if res.status_code == 200 else None
+    for i in range(3):
+        try:
+            res = requests.get(f"{RENDER_DASHBOARD_URL}/api/config/{asset}", timeout=DASH_TIMEOUT,
+                               headers=dash_headers(), auth=dash_auth())
+            if res.status_code == 200:
+                return res.json()
+        except requests.RequestException as e:
+            print(f"dash_get_config {asset} ครั้งที่ {i + 1}: {e}")
+        time.sleep(2)
+    return None
 
 def dash_get_market():
     try:
@@ -193,11 +203,19 @@ def dash_get_market():
 
 def dash_patch(asset, fields):
     """เขียน field ลง state ผ่าน /api/update_config"""
-    res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields, timeout=10, headers=dash_headers(), auth=dash_auth())
-    return res.status_code == 200
+    for i in range(2):
+        try:
+            res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields,
+                                timeout=DASH_TIMEOUT, headers=dash_headers(), auth=dash_auth())
+            if res.status_code == 200:
+                return True
+        except requests.RequestException as e:
+            print(f"dash_patch {asset} ครั้งที่ {i + 1}: {e}")
+        time.sleep(2)
+    return False
 
 def dash_post_form(path, form):
-    res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=10, headers=dash_headers(), auth=dash_auth())
+    res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=DASH_TIMEOUT, headers=dash_headers(), auth=dash_auth())
     return res.status_code in (200, 302)
 
 def get_set_obj(cfg, set_key):
@@ -343,20 +361,23 @@ def _upsert_quota(alerts_list, set_key, per_day=None, window=None, zone_low=None
                         "risk_pct": risk_pct or None})
 
 def tool_set_power(asset, set_key, on):
-    cfg = dash_get_config(asset)
-    if not cfg:
-        return {"error": "ดึง config ไม่ได้"}
-    if set_key == "short":
-        s2 = cfg.get("set2") or {}
-        s2["is_active"] = bool(on)
-        if on:
-            s2["auto_paused_today"] = False
-        return {"ok": dash_patch(asset, {"set2": s2}), "เทรดสั้น": "ON" if on else "OFF"}
+    """เขียนเฉพาะ is_active (+ปลด pause ตอนเปิด) — update_config merge set2 ให้เอง
+    แล้วอ่านกลับมายืนยันว่าบน Render เป็นค่าที่สั่งจริง"""
     fields = {"is_active": bool(on)}
     if on:
         # ปลด pause ด้วย — toggle endpoint จัดการให้ แต่ที่นี่เขียนตรง
         fields["auto_paused_today"] = False
-    return {"ok": dash_patch(asset, fields), "เทรดยาว": "ON" if on else "OFF"}
+    label = "เทรดสั้น" if set_key == "short" else "เทรดยาว"
+    payload = {"set2": fields} if set_key == "short" else fields
+    sent = dash_patch(asset, payload)
+    cfg = dash_get_config(asset)
+    actual = get_set_obj(cfg, set_key).get("is_active") if cfg else None
+    if actual is None:
+        return {"ok": False, "error": "อ่านสถานะกลับจาก dashboard ไม่ได้ — ยังยืนยันไม่ได้ว่า" + label + ("เปิด" if on else "ปิด") + "แล้ว",
+                "ส่งคำสั่ง": sent}
+    ok = bool(actual) == bool(on)
+    return {"ok": ok, label: "ON" if actual else "OFF",
+            **({} if ok else {"error": "สถานะบน dashboard ยังไม่ตรงกับที่สั่ง"})}
 
 def tool_set_note(asset, note):
     ok = dash_post_form(f"/update_note/{asset}", {"note": note})
