@@ -1367,31 +1367,35 @@ def _us_eastern_dst(dt_naive):
     return dst_start <= dt_naive < dst_end
 
 def fetch_news_events():
-    """ดึงข่าวแรง USD จาก ForexFactory feed — cache 1 ชม. — คืน list {thai, title}"""
-    if time.time() - NEWS_CACHE["fetched"] < 3600:
+    """ข่าวแรง USD จาก ForexFactory feed (ผ่าน cache ร่วม news_feed.py) — คืน list {thai, title}
+    เช็ค cache ทุก 60 วิ; ยิงเน็ตจริงไม่เกิน 1 ครั้ง/ชม. — ดึงไม่ได้/โดน 429 = ใช้ข่าวชุดเดิม ไม่ล้างทิ้ง"""
+    if time.time() - NEWS_CACHE["fetched"] < 60:
         return NEWS_CACHE["events"]
+    NEWS_CACHE["fetched"] = time.time()
     try:
         import xml.etree.ElementTree as ET
-        r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", timeout=15)
+        from news_feed import get_calendar_xml
+        feed = get_calendar_xml()
+        if not feed["xml"] or feed["fetched"] == NEWS_CACHE.get("xml_ts"):
+            return NEWS_CACHE["events"]
         evts = []
-        if r.status_code == 200:
-            for e in ET.fromstring(r.content).iter("event"):
-                if (e.findtext("impact") or "").strip() != "High":
-                    continue
-                if (e.findtext("country") or "").strip() != "USD":
-                    continue
-                t, d = (e.findtext("time") or "").strip(), (e.findtext("date") or "").strip()
-                if not t or "day" in t.lower() or "tentative" in t.lower():
-                    continue
-                try:
-                    et = datetime.strptime(f"{d} {t}", "%m-%d-%Y %I:%M%p")
-                except ValueError:
-                    continue
-                off = -4 if _us_eastern_dst(et) else -5  # ET -> UTC -> ไทย (+7)
-                thai = et - timedelta(hours=off) + timedelta(hours=7)
-                evts.append({"thai": thai, "title": e.findtext("title") or ""})
-        NEWS_CACHE["fetched"] = time.time()
+        for e in ET.fromstring(feed["xml"].encode("utf-8")).iter("event"):
+            if (e.findtext("impact") or "").strip() != "High":
+                continue
+            if (e.findtext("country") or "").strip() != "USD":
+                continue
+            t, d = (e.findtext("time") or "").strip(), (e.findtext("date") or "").strip()
+            if not t or "day" in t.lower() or "tentative" in t.lower():
+                continue
+            try:
+                et = datetime.strptime(f"{d} {t}", "%m-%d-%Y %I:%M%p")
+            except ValueError:
+                continue
+            off = -4 if _us_eastern_dst(et) else -5  # ET -> UTC -> ไทย (+7)
+            thai = et - timedelta(hours=off) + timedelta(hours=7)
+            evts.append({"thai": thai, "title": e.findtext("title") or ""})
         NEWS_CACHE["events"] = evts
+        NEWS_CACHE["xml_ts"] = feed["fetched"]
     except Exception as e:
         print(f"news fetch error: {e}")
     return NEWS_CACHE["events"]

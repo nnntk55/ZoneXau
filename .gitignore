@@ -7,3 +7,4 @@ request_*.txt
 run_all.bat
 run_midas.bat
 bot_state.json
+ff_calendar_cache.json*
