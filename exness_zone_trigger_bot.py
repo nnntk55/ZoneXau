@@ -548,8 +548,16 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     d = k.rolling(window=d_period).mean()
     return k, d
 
+import re
+_EMOJI_RE = re.compile(r'[\U0001F300-\U0001FAFF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF\uFE0F\u2190-\u21FF\u2B05-\u2B55]')
+
+def _no_emoji(t):
+    """พี่สั่ง: ไม่เอาอีโมจิในข้อความ Telegram — strip ที่จุดส่งทีเดียวครอบทุกข้อความ"""
+    return _EMOJI_RE.sub('', str(t)).strip()
+
 def send_telegram_notification(message):
     try:
+        message = _no_emoji(message)
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         res = requests.post(url, json=payload, timeout=10)
@@ -599,7 +607,7 @@ def send_telegram_confirmation(asset_key, symbol, action, latest_k, latest_d, cl
 
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
+            "text": _no_emoji(message),
             "parse_mode": "Markdown"
         }
         res = requests.post(url, json=payload, timeout=10)
@@ -671,6 +679,7 @@ def clear_user_command(asset_key):
 def send_telegram_photo(photo_bytes, caption):
     if not photo_bytes:
         return send_telegram_notification(caption)
+    caption = _no_emoji(caption)
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("chart.png", photo_bytes, "image/png")}
@@ -1109,7 +1118,7 @@ def send_to_midas(text):
     if MIDAS_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             requests.post(f"https://api.telegram.org/bot{MIDAS_BOT_TOKEN}/sendMessage",
-                          json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+                          json={"chat_id": TELEGRAM_CHAT_ID, "text": _no_emoji(text)}, timeout=10)
         except Exception:
             pass
 
