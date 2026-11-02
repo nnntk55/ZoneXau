@@ -25,13 +25,17 @@ def tg(method, **kw):
         return {}
 
 def tg_image_attachment(msg):
-    """โหลดรูปจาก Telegram (photo หรือไฟล์รูป) -> อัปขึ้น Devin attachments -> คืนบรรทัด ATTACHMENT ให้ Devin เปิดดูได้"""
+    """โหลดรูป/ข้อความเสียงจาก Telegram (photo, ไฟล์รูป, voice, audio) -> อัปขึ้น Devin attachments -> คืนบรรทัด ATTACHMENT ให้ Devin เปิดดูได้"""
     photos = msg.get("photo") or []
     doc = msg.get("document") or {}
     if photos:
         fid, name = photos[-1]["file_id"], "photo.jpg"  # ไซซ์ใหญ่สุดอยู่ท้ายลิสต์เสมอ
     elif str(doc.get("mime_type", "")).startswith("image/"):
         fid, name = doc["file_id"], doc.get("file_name") or "image.jpg"
+    elif msg.get("voice"):
+        fid, name = msg["voice"]["file_id"], "voice.ogg"
+    elif msg.get("audio"):
+        fid, name = msg["audio"]["file_id"], msg["audio"].get("file_name") or "audio.mp3"
     else:
         return None
     try:
@@ -137,13 +141,16 @@ def main():
                 if str(msg.get("chat", {}).get("id")) != str(CHAT):
                     continue
                 text = (msg.get("text") or msg.get("caption") or "").strip()
-                if msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
+                is_voice = bool(msg.get("voice") or msg.get("audio"))
+                if is_voice or msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
                     att = tg_image_attachment(msg)
+                    what = "เสียง" if is_voice else "รูป"
                     if att:
-                        text = (text or "นินส่งรูปมา เปิดดูและวิเคราะห์") + "\n" + att
-                        send("ได้รูปแล้ว วินกำลังดู")
+                        text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
+                                         else "นินส่งรูปมา เปิดดูและวิเคราะห์")) + "\n" + att
+                        send("ได้เสียงแล้ว วินกำลังฟัง" if is_voice else "ได้รูปแล้ว วินกำลังดู")
                     else:
-                        send("อัปรูปให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
+                        send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
                 if not text:
                     continue
                 if text == "/new":
