@@ -252,6 +252,7 @@ def sync_config_from_render(asset_key):
                 if pend:
                     handle_pending_reply(asset_key, cmd, pend.get("msg_id"))
                 clear_user_command(asset_key)
+            st["_synced_once"] = True  # ปลดล็อก push — กัน push ค่า default ทับค่าจริงก่อน sync รอบแรก
             print(f"✅ Synced config for {asset_key} from Render, is_active={st['is_active']}")
         else:
             print(f"⚠️ Config sync failed for {asset_key}: {res.status_code}")
@@ -275,7 +276,11 @@ def push_market_data_to_render(asset_key, price, stoch_data):
         print(f"❌ Push Market Data Error ({asset_key}): {e}")
 
 def push_config_to_render(asset_key):
-    """ส่งค่า config กลับไป Render Dashboard (หลังจากเทรดเสร็จหรือเปลี่ยนสถานะ)"""
+    """ส่งค่า config กลับไป Render Dashboard (หลังจากเทรดเสร็จหรือเปลี่ยนสถานะ)
+    ห้าม push ก่อน sync รอบแรกสำเร็จ — ไม่งั้นค่า default (is_active=True) จะทับค่า OFF ที่ผู้ใช้ตั้งไว้"""
+    st = ASSETS[asset_key]["state"]
+    if not st.get("_synced_once"):
+        return
     try:
         url = f"{RENDER_DASHBOARD_URL}/api/update_config/{asset_key}"
         st = ASSETS[asset_key]["state"]

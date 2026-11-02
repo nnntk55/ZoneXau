@@ -1317,8 +1317,7 @@ def update_stage_tfs(asset_key):
                 s["current_stage"] = idx + 1
                 break
         reset_stage_flags(s)
-    s["is_active"] = True
-    s["auto_paused_today"] = False
+    resume_if_paused(s)  # ปลดเฉพาะ auto-pause — เคารพ OFF ที่ผู้ใช้ตั้งเอง ห้ามบังคับเปิด
     save_state_to_sheets(asset_key, st)
     global_flash["msg"] = f"อัปเดต Timeframe ของ {ASSETS[asset_key]['name']} สำเร็จ!"
     global_flash["type"] = "success"

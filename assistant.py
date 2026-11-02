@@ -130,18 +130,10 @@ def load_memory():
     except Exception:
         chat_history = []
 
-def _sanitize_history(hist):
-    """ให้ history เริ่มที่ข้อความ user ปกติเสมอ — ตัดแล้วหัวไม่ค้างเป็น functionResponse/model (ทำให้ provider ตอบ 400 ทุกครั้ง)"""
-    for i, m in enumerate(hist):
-        ps = m.get("parts") or []
-        if m.get("role") == "user" and ps and not any("functionResponse" in p for p in ps):
-            return hist[i:]
-    return []
-
 def save_memory():
     try:
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(_sanitize_history(chat_history[-MAX_HISTORY:]), f, ensure_ascii=False)
+            json.dump(chat_history[-MAX_HISTORY:], f, ensure_ascii=False)
     except Exception as e:
         print(f"memory save error: {e}")
 
@@ -295,8 +287,6 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             return {"error": "ดึง config ไม่ได้"}
         s2 = cfg.get("set2") or {}
         s2.update(fields)
-        s2["is_active"] = True
-        s2["auto_paused_today"] = False
         payload = {"set2": s2}
         if any(v is not None for v in plan_kw.values()):
             al = cfg.get("alerts") or []
@@ -304,8 +294,6 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             payload["alerts"] = al
         out["ok"] = dash_patch(asset, payload)
     else:
-        fields["is_active"] = True
-        fields["auto_paused_today"] = False
         if any(v is not None for v in plan_kw.values()):
             cfg = dash_get_config(asset)
             if not cfg:
@@ -669,7 +657,7 @@ def tool_view_chart(asset, tf):
         time.sleep(1)
         if os.path.exists(img_path):
             img = open(img_path, "rb").read()
-            tg_send_photo(img, f"{asset.upper()} {tf.upper()} | EMA10/50/100/200")
+            tg_send_photo(img, f"📊 {asset.upper()} {tf.upper()} | EMA10/50/100/200")
             return {"ok": True, "image_b64": base64.b64encode(img).decode()}
         if os.path.exists(err_path):
             return {"error": f"บอทวาดกราฟไม่ได้: {open(err_path, encoding='utf-8').read()}"}
@@ -813,8 +801,6 @@ GEMINI_TOOLS = [{
 # ==========================================
 pending_confirm = {"action": None, "args": None, "desc": None}
 
-_ai_errors = []  # สาเหตุที่ provider ล้มในรอบล่าสุด (HTTP code หรือ "net")
-
 GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-2.5-flash-lite"]
 
 def gemini_call(contents):
@@ -832,7 +818,6 @@ def gemini_call(contents):
             res = requests.post(url, json=body, timeout=90)
         except Exception as e:
             last_err = e
-            _ai_errors.append("net")
             print(f"Gemini {model} exception: {e}")
             continue
         if res.status_code == 200:
@@ -841,8 +826,7 @@ def gemini_call(contents):
             return res.json()
         last_err = res.status_code
         print(f"Gemini {model} HTTP {res.status_code}: {res.text[:200]}")
-        _ai_errors.append(res.status_code)
-        if res.status_code not in (404, 429, 500, 502, 503, 504):
+        if res.status_code not in (429, 500, 502, 503, 504):
             break  # error แบบ key/สิทธิ์ผิด ลองโมเดลอื่นไม่ช่วย
     print(f"❌ ทุกโมเดลล้มเหลว (last={last_err})")
     return None
@@ -851,49 +835,21 @@ def gemini_call(contents):
 # GROQ — provider สำรอง (OpenAI-compatible)
 # ==========================================
 def _to_openai_messages():
-    """แปลง history แบบ Gemini -> OpenAI: tool_calls ของเทิร์นเดียวรวมใน assistant message เดียว
-    id ไม่ซ้ำ และทุก tool_call ต้องมี tool response ตามทันที (ไม่งั้น Groq/OpenRouter ตอบ 400)"""
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-    pending = []  # [(id, name)] tool_calls ที่ยังไม่ได้ผล
-    n = 0
-
-    def flush_pending():
-        for cid, _ in pending:
-            msgs.append({"role": "tool", "tool_call_id": cid, "content": json.dumps({"error": "no result"})})
-        pending.clear()
-
-    for m in _sanitize_history(chat_history):
-        parts = m.get("parts", [])
-        texts = "".join(p["text"] for p in parts if "text" in p)
-        if m["role"] == "model":
-            flush_pending()
-            calls = [p["functionCall"] for p in parts if "functionCall" in p]
-            msg = {"role": "assistant", "content": texts or None}
-            if calls:
-                msg["tool_calls"] = []
-                for fc in calls:
-                    n += 1
-                    cid = f"call_{n}"
-                    msg["tool_calls"].append({"id": cid, "type": "function", "function": {
-                        "name": fc["name"], "arguments": json.dumps(fc.get("args") or {}, ensure_ascii=False)}})
-                    pending.append((cid, fc["name"]))
-            if texts or calls:
-                msgs.append(msg)
-            continue
-        for p in parts:
-            if "functionResponse" not in p:
-                continue
-            fr = p["functionResponse"]
-            idx = next((i for i, (_, nm) in enumerate(pending) if nm == fr.get("name")), None)
-            if idx is None:
-                continue  # response ไม่มี call คู่ -> ทิ้ง
-            cid, _ = pending.pop(idx)
-            msgs.append({"role": "tool", "tool_call_id": cid,
-                         "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
-        if texts:
-            flush_pending()
-            msgs.append({"role": "user", "content": texts})
-    flush_pending()
+    for m in chat_history:
+        role = "assistant" if m["role"] == "model" else "user"
+        for p in m.get("parts", []):
+            if "text" in p:
+                msgs.append({"role": role, "content": p["text"]})
+            elif "functionCall" in p:
+                fc = p["functionCall"]
+                msgs.append({"role": "assistant", "tool_calls": [{"id": "c_" + fc["name"],
+                    "type": "function", "function": {"name": fc["name"],
+                    "arguments": json.dumps(fc.get("args") or {})}}]})
+            elif "functionResponse" in p:
+                fr = p["functionResponse"]
+                msgs.append({"role": "tool", "tool_call_id": "c_" + fr["name"],
+                    "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
     return msgs
 
 def groq_call():
@@ -909,7 +865,6 @@ def groq_call():
             json={"model": GROQ_MODEL, "messages": _to_openai_messages(),
                   "tools": tools, "temperature": 0.3}, timeout=60)
         if r.status_code != 200:
-            _ai_errors.append(r.status_code)
             print(f"Groq HTTP {r.status_code}: {r.text[:200]}")
             return None
         m = r.json()["choices"][0]["message"]
@@ -926,7 +881,6 @@ def groq_call():
         print("✅ ใช้สมองสำรอง Groq")
         return {"candidates": [{"content": {"parts": parts}}]}
     except Exception as e:
-        _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
         print(f"Groq error: {e}")
         return None
 
@@ -944,7 +898,6 @@ def openrouter_call():
                 json={"model": model, "messages": _to_openai_messages(),
                       "tools": tools, "temperature": 0.3}, timeout=60)
             if r.status_code != 200:
-                _ai_errors.append(r.status_code)
                 print(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
                 continue
             m = r.json()["choices"][0]["message"]
@@ -961,7 +914,6 @@ def openrouter_call():
             print(f"✅ ใช้สมองสำรอง OpenRouter ({model})")
             return {"candidates": [{"content": {"parts": parts}}]}
         except Exception as e:
-            _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
             print(f"OpenRouter {model} error: {e}")
             continue
     return None
@@ -977,65 +929,8 @@ def tg_download_photo(file_id):
 MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "groq,openrouter,gemini").split(",") if m.strip()]
 PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call, "openrouter": openrouter_call}
 
-def _call_providers():
-    """ไล่ provider ตาม MODEL_ORDER — คืนคำตอบแรกที่มี parts จริง"""
-    for prov in MODEL_ORDER:
-        fn = PROVIDERS.get(prov)
-        if not fn:
-            continue
-        try:
-            data = fn()
-        except Exception as e:
-            print(f"{prov} error: {e}")
-            _ai_errors.append("err")
-            data = None
-        if data and (data.get("candidates") or [{}])[0].get("content", {}).get("parts"):
-            return data
-        if data:
-            print(f"{prov} ตอบว่างเปล่า — ลองตัวถัดไป")
-            _ai_errors.append("empty")
-    return None
-
-def _ai_fail_message():
-    """ข้อความแจ้งพี่ตามสาเหตุจริง แทน error ดิบ"""
-    errs = list(_ai_errors)
-    if not any(PROVIDERS.get(p) and (p != "groq" or GROQ_API_KEY) and (p != "openrouter" or OPENROUTER_API_KEY)
-               for p in MODEL_ORDER):
-        return "ตอนนี้ผมไม่มีสมอง AI ให้ใช้เลยคับพี่ — เช็ค MODEL_ORDER กับ key ของ Groq/OpenRouter/Gemini หน่อยน้า"
-    if errs and all(e in (401, 403) for e in errs):
-        return "key ของสมอง AI ใช้ไม่ได้คับพี่ (401/403) — ฝากพี่เช็ค key ใน loop_midas.bat หน่อยน้า"
-    if 429 in errs:
-        why = "สมอง AI ทุกตัวโดนจำกัดโควต้าชั่วคราวคับพี่"
-    elif errs and all(e == "net" for e in errs):
-        why = "เน็ตฝั่งผมต่อสมอง AI ไม่ติดคับพี่"
-    else:
-        why = "สมอง AI สะดุดชั่วคราวคับพี่"
-    return why
-
-AI_RETRY_DELAYS = [60, 180, 600]  # วินาที — คิวลองใหม่อัตโนมัติเมื่อสมองล่มทุกตัว
-retry_queue = []  # [{"text","chat_id","tries","at"}]
-
-def _queue_retry(user_text, chat_id, tries=0):
-    if tries >= len(AI_RETRY_DELAYS):
-        return False
-    retry_queue[:] = retry_queue[-4:]
-    retry_queue.append({"text": user_text, "chat_id": chat_id, "tries": tries,
-                        "at": time.time() + AI_RETRY_DELAYS[tries]})
-    return True
-
-def process_retry_queue():
-    """เรียกจาก main loop — ถึงเวลาแล้วลองส่งข้อความที่ค้างให้ AI ใหม่ ได้ผลค่อยตอบพี่"""
-    now = time.time()
-    for item in [q for q in retry_queue if q["at"] <= now]:
-        retry_queue.remove(item)
-        print(f"retry AI ({item['tries'] + 1}): {item['text'][:60]}")
-        reply = run_agent(item["text"], item["chat_id"], None, _retry_tries=item["tries"] + 1)
-        if reply:
-            tg_send(reply, item["chat_id"])
-
-def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
-    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า AI จะตอบข้อความ
-    สมองล่มทุกตัว: ลองซ้ำ -> ตัดบริบทเก่าที่อาจเสีย -> ถอยเทิร์นนี้ออกแล้วเข้าคิวลองใหม่อัตโนมัติ"""
+def run_agent(user_text, chat_id, image_bytes=None):
+    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า AI จะตอบข้อความ"""
     global chat_history
     import base64
     parts = []
@@ -1044,53 +939,22 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
                      "data": base64.b64encode(image_bytes).decode()}})
     parts.append({"text": user_text or "วิเคราะห์กราฟนี้ให้หน่อย"})
     chat_history.append({"role": "user", "parts": parts})
-    chat_history = _sanitize_history(chat_history[-MAX_HISTORY:])
-    turn_msg = chat_history[-1]
+    chat_history = chat_history[-MAX_HISTORY:]
 
     for step in range(MAX_AGENT_STEPS):
         save_memory()
-        _ai_errors.clear()
-        data = _call_providers()
-        if not data:
-            time.sleep(3)
-            data = _call_providers()
-        if not data:
-            # บริบทเก่าอาจทำให้ provider ปฏิเสธ — ลองใหม่ด้วยเฉพาะเทิร์นนี้ (สำรอง history เดิมไว้)
-            turn_start = next(i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg)
-            if turn_start > 0:
-                old = chat_history
-                chat_history = old[turn_start:]
-                data = _call_providers()
+        data = None
+        for prov in MODEL_ORDER:
+            fn = PROVIDERS.get(prov)
+            if fn:
+                data = fn()
                 if data:
-                    print("ตัดบริบทเก่าแล้วสมองกลับมาตอบ — สำรอง history เดิมไว้ที่ midas_memory.bak.json")
-                    try:
-                        with open(MEMORY_FILE.replace(".json", ".bak.json"), "w", encoding="utf-8") as f:
-                            json.dump(old, f, ensure_ascii=False)
-                    except Exception as e:
-                        print(f"memory backup error: {e}")
-                else:
-                    chat_history = old
+                    break
         if not data:
-            why = _ai_fail_message()
-            if step > 0:
-                # tool บางตัวรันไปแล้ว — ไม่ลองซ้ำเอง กันคำสั่งซ้ำ (เช่น add_alert ซ้ำ)
-                print(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
-                return f"{why} — คำสั่งบางส่วนอาจทำไปแล้ว เช็คสถานะก่อนสั่งซ้ำนะคับ"
-            # ถอยเทิร์นนี้ออก (กันข้อความซ้ำตอนลองใหม่) แล้วเข้าคิวลองใหม่เอง
-            turn_start = next((i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg), None)
-            if turn_start is not None:
-                del chat_history[turn_start:]
-            save_memory()
-            if image_bytes or not _queue_retry(user_text, chat_id, _retry_tries):
-                print(f"AI ล้มเหลว (errors={_ai_errors}) — ไม่เข้าคิวลองใหม่")
-                if _retry_tries:
-                    return f"{why} — ลองใหม่ให้หลายรอบแล้วยังไม่ติด พี่ส่งมาใหม่อีกทีตอนสะดวกนะคับ"
-                return f"{why} — พี่ส่งมาใหม่อีกสักครู่นะคับ"
-            print(f"AI ล้มเหลว (errors={_ai_errors}) — เข้าคิวลองใหม่ใน {AI_RETRY_DELAYS[_retry_tries]}s")
-            if _retry_tries:
-                return None  # แจ้งพี่ไปแล้วรอบแรก ไม่ต้องสแปม
-            return f"{why} — เดี๋ยวผมลองใหม่เองแล้วตอบกลับนะพี่"
+            return "❌ AI ตอบไม่ได้ตอนนี้ (ดู console)"
         parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        if not parts:
+            return "❌ AI ตอบว่างเปล่า"
         chat_history.append({"role": "model", "parts": parts})
 
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
@@ -1107,7 +971,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
             # คำสั่งกระทบเงิน + เปิดโหมดถามก่อน → จัดคิวรอ y/n
             if REQUIRE_CONFIRM and name in MONEY_TOOLS and fn:
                 pending_confirm.update({"action": name, "args": args})
-                tg_send(f"จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
+                tg_send(f"⚠️ จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
                 responses.append({"functionResponse": {"name": name,
                                   "response": {"result": {"queued": "รอยืนยันจากพี่"}}}})
                 continue
@@ -1128,7 +992,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
                 {"inline_data": {"mime_type": "image/png", "data": img64}},
                 {"text": "นี่คือรูปกราฟที่ขอ วิเคราะห์ให้พี่หน่อย"}]})
 
-    return "งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
+    return "⚠️ งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
 
 # ==========================================
 # MAIN LOOP
@@ -1179,14 +1043,13 @@ def main():
         return
     load_memory()
     print("🤖 AI Assistant started — รอคำสั่งทาง Telegram ...")
-    tg_send("Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
+    tg_send("😈 Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
     offset = 0
     inbox_path = os.path.join(CHART_DIR, "midas_inbox.txt")
     last_weekly_report = None
     while True:
         try:
             poll_devin_sessions(inbox_path)
-            process_retry_queue()
             # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             now_th = datetime.now(timezone.utc) + timedelta(hours=7)
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
@@ -1218,9 +1081,9 @@ def main():
                 if pending_confirm["action"] and text.lower() in ("y", "n"):
                     if text.lower() == "y":
                         out = TOOL_IMPL[pending_confirm["action"]](pending_confirm["args"])
-                        tg_send(f"ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
+                        tg_send(f"✅ ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
                     else:
-                        tg_send("ยกเลิกคำสั่งนั้นแล้ว")
+                        tg_send("❌ ยกเลิกคำสั่งนั้นแล้ว")
                     pending_confirm.update({"action": None, "args": None})
                     continue
                 photo = msg.get("photo")
@@ -1229,8 +1092,7 @@ def main():
                 print(f"📩 {text or '[รูป]'}")
                 img = tg_download_photo(photo[-1]["file_id"]) if photo else None
                 reply = run_agent(text, chat_id, img)
-                if reply:
-                    tg_send(reply)
+                tg_send(reply)
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(5)
