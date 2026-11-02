@@ -1662,7 +1662,10 @@ def update_asset_config(asset_key):
                     break
             reset_stage_flags(st)
         if "set2" in data and isinstance(data["set2"], dict):
-            st["set2"] = data["set2"]
+            # merge เข้ากับ set2 เดิม — อย่าแทนทั้ง dict เดี๋ยวค่าที่ไม่ได้ส่งหายหมด
+            base = st.get("set2") if isinstance(st.get("set2"), dict) else default_set2()
+            base.update(data["set2"])
+            st["set2"] = base
         if "alerts" in data and isinstance(data["alerts"], list):
             st["alerts"] = data["alerts"]
         save_state_to_sheets(asset_key, st)
