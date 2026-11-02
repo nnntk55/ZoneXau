@@ -141,9 +141,17 @@ def save_memory():
 # TELEGRAM
 # ==========================================
 def tg_send(text, chat_id=None):
+    """ส่งข้อความเป็นกล่องๆ — แยกตามบรรทัดว่าง (หรือบรรทัดเดี่ยวถ้ายาว) ไม่ยัดยาวกล่องเดียว"""
     try:
         url = f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": chat_id or TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+        cid = chat_id or TELEGRAM_CHAT_ID
+        bubbles = [b.strip() for b in text.split("\n\n") if b.strip()]
+        if len(bubbles) <= 1 and len(text) > 400:
+            bubbles = [l.strip() for l in text.split("\n") if l.strip()]
+        for b in (bubbles or [text])[:8]:
+            requests.post(url, json={"chat_id": cid, "text": b}, timeout=10)
+            if len(bubbles) > 1:
+                time.sleep(0.4)
     except Exception as e:
         print(f"Telegram send error: {e}")
 
@@ -921,8 +929,12 @@ def tg_download_photo(file_id):
         return None
     return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
 
+# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER (เช่น "groq,openrouter,gemini")
+MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "groq,openrouter,gemini").split(",") if m.strip()]
+PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call, "openrouter": openrouter_call}
+
 def run_agent(user_text, chat_id, image_bytes=None):
-    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า Gemini จะตอบข้อความ"""
+    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า AI จะตอบข้อความ"""
     global chat_history
     import base64
     parts = []
@@ -935,7 +947,13 @@ def run_agent(user_text, chat_id, image_bytes=None):
 
     for step in range(MAX_AGENT_STEPS):
         save_memory()
-        data = gemini_call(chat_history) or groq_call() or openrouter_call()
+        data = None
+        for prov in MODEL_ORDER:
+            fn = PROVIDERS.get(prov)
+            if fn:
+                data = fn()
+                if data:
+                    break
         if not data:
             return "❌ AI ตอบไม่ได้ตอนนี้ (ดู console)"
         parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
