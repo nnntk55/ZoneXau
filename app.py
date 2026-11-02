@@ -35,6 +35,8 @@ def check_access():
         return None
     if path.startswith("/telegram-webhook"):
         return None  # Telegram server เรียกเอง ใส่ auth ไม่ได้
+    if path == "/healthz":
+        return None  # Render health check ต้องผ่านได้โดยไม่ต้อง auth
     # Midas/บอท ส่ง X-Api-Key มาแทน basic auth ได้ทุก route (ฟอร์ม POST ด้วย)
     if API_KEY and request.headers.get("X-Api-Key") == API_KEY:
         return None
