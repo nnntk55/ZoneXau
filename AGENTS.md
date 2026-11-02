@@ -11,7 +11,7 @@
 
 ## โครงระบบ
 
-- **app.py** — แดชบอร์ด Flask บน Render (`zonexau.onrender.com`, basic auth NTK) — deploy อัตโนมัติเมื่อ push เข้า main
+- **app.py** — แดชบอร์ด Flask บน Render (`zonexau.onrender.com`, basic auth NTK, service `srv-db2l7nnlk1mc73cl4png`) — ตั้ง auto-deploy ไว้แต่ webhook จาก GitHub ไม่เข้า (deploy ทุกครั้งเป็น manual) หลัง push ต้องเช็ค `https://zonexau.onrender.com/healthz` (ตอบ `ok <commit>`) ว่าตรงกับ commit ล่าสุด ถ้าไม่ตรงต้อง deploy ผ่าน Render API/dashboard
 - **assistant.py** — "น้องมิดาส" Telegram AI assistant (Groq→OpenRouter→Gemini) แปลคำสั่งภาษาคนเป็น config บน dashboard
 - **exness_zone_trigger_bot.py** — บอทเทรด MT5 บน VPS loop 5 วิ: stage engine S1-S5, stoch 80/20, EMA10 confirm, quota/zone/news/weekend gates, dynamic lot
 - **devin_bridge.py** — สะพาน Telegram↔Devin Cloud (ไฟล์นี้ที่นินคุยด้วยอยู่)
