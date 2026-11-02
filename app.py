@@ -711,8 +711,8 @@ HTML_TEMPLATE = """
             .note-form { flex-direction: column; }
             .note-input { min-height: 72px; }
             .note-form .save-btn { padding: 8px 18px !important; }
-            .stage-row { flex-wrap: wrap; row-gap: 8px; }
-            .stage-row > div { flex: 1 1 30% !important; min-width: 0; }
+            .stage-row { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px !important; }
+            .stage-row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .panel select, .panel input { padding: 5px 4px; }
         }
     </style>
@@ -815,15 +815,6 @@ HTML_TEMPLATE = """
                             </option>
                             {% endfor %}
                         </select>
-                        {% if idx == 0 %}
-                        <div style="margin-top: 4px;">
-                            <span>S/R:</span>
-                            <select name="sr_enabled" onchange="this.form.submit()">
-                                <option value="off" {% if not s2.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
-                                <option value="on" {% if s2.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
-                            </select>
-                        </div>
-                        {% endif %}
                     </div>
                     {% endfor %}
                     <div style="flex: 1;">
@@ -832,14 +823,23 @@ HTML_TEMPLATE = """
                             <option value="on" {% if s2.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
                             <option value="off" {% if not s2.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
                         </select>
-                        <div style="margin-top: 4px;">
+                    </div>
+                </div>
+                <div class="stage-row stage-row2" style="display: flex; gap: 6px; font-size: 0.75rem; color: #5f4a43; margin-top: 6px;">
+                        <div style="flex: 1;">
+                            <span>S/R:</span>
+                            <select name="sr_enabled" onchange="this.form.submit()">
+                                <option value="off" {% if not s2.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
+                                <option value="on" {% if s2.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
                             <span>AUTO:</span>
                             <select name="auto_order" onchange="this.form.submit()">
                                 <option value="off" {% if not s2.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
                                 <option value="on" {% if s2.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
                             </select>
                         </div>
-                    </div>
                 </div>
                 <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
                     <div style="flex: 1;">
@@ -890,15 +890,6 @@ HTML_TEMPLATE = """
                             </option>
                             {% endfor %}
                         </select>
-                        {% if idx == 0 %}
-                        <div style="margin-top: 4px;">
-                            <span>S/R:</span>
-                            <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
-                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
-                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
-                            </select>
-                        </div>
-                        {% endif %}
                     </div>
                     {% endfor %}
                     <div style="flex: 1;">
@@ -907,14 +898,23 @@ HTML_TEMPLATE = """
                             <option value="on" {% if asset.state.get('s5_enabled', True) %}selected{% endif %}>🟢 ON</option>
                             <option value="off" {% if not asset.state.get('s5_enabled', True) %}selected{% endif %}>🔴 OFF</option>
                         </select>
-                        <div style="margin-top: 4px;">
+                    </div>
+                </div>
+                <div class="stage-row stage-row2" style="display: flex; gap: 6px; font-size: 0.75rem; color: #5f4a43; margin-top: 6px;">
+                        <div style="flex: 1;">
+                            <span>S/R:</span>
+                            <select name="sr_enabled" onchange="this.form.submit()" title="ตัวกรองแนวรับ-ต้าน: Stage 1 ต้องชน/ใกล้แนว">
+                                <option value="off" {% if not asset.state.get('sr_enabled', False) %}selected{% endif %}>🔴 OFF</option>
+                                <option value="on" {% if asset.state.get('sr_enabled', False) %}selected{% endif %}>🟢 ON</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
                             <span>AUTO:</span>
                             <select name="auto_order" onchange="this.form.submit()" title="ยิงออเดอร์อัตโนมัติเมื่อ Stage 5 ครบ ไม่ต้องยืนยัน">
                                 <option value="off" {% if not asset.state.get('auto_order', False) %}selected{% endif %}>👤 ถามก่อน</option>
                                 <option value="on" {% if asset.state.get('auto_order', False) %}selected{% endif %}>🤖 อัตโนมัติ</option>
                             </select>
                         </div>
-                    </div>
                 </div>
                 <div style="display: flex; gap: 6px; align-items: center; font-size: 0.75rem; color: #5f4a43; margin-top: 8px; border-top: 1px solid #e4d2c1; padding-top: 8px;">
                     <div style="flex: 1;">
