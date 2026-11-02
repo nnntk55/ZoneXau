@@ -702,6 +702,19 @@ HTML_TEMPLATE = """
             color: #9b8477;
             margin-top: 18px;
         }
+        @media (max-width: 600px) {
+            body { padding: 6px; }
+            .container { padding: 12px 8px; border-radius: 18px; }
+            .card { padding: 10px 8px; border-radius: 16px; margin-bottom: 12px; }
+            .panel { padding: 10px 8px; }
+            .note-box { padding: 10px 8px; }
+            .note-form { flex-direction: column; }
+            .note-input { min-height: 72px; }
+            .note-form .save-btn { padding: 8px 18px !important; }
+            .stage-row { flex-wrap: wrap; row-gap: 8px; }
+            .stage-row > div { flex: 1 1 30% !important; min-width: 0; }
+            .panel select, .panel input { padding: 5px 4px; }
+        }
     </style>
 </head>
 <body>
@@ -790,7 +803,7 @@ HTML_TEMPLATE = """
                         <span class="badge badge-stage{{ stg2 if stg2 in [1,2,3,4,5] else 1 }}" id="stage-badge-{{ key }}-short">Stage {{ stg2 }}</span>
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
+                <div class="stage-row" style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs2 = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
                     <div style="flex: 1;">
@@ -865,7 +878,7 @@ HTML_TEMPLATE = """
                         {% endif %}
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
+                <div class="stage-row" style="display: flex; justify-content: space-between; gap: 6px; font-size: 0.75rem; color: #5f4a43;">
                     {% set available_tfs = ['1w', '1d', '4h', '1h', '15m', '5m', 'off'] %}
                     {% for idx in range(4) %}
                     <div style="flex: 1;">
