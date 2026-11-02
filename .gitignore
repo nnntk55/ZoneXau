@@ -1,0 +1,8 @@
+__pycache__/
+*.png
+*.err
+midas_inbox.txt
+account.json
+request_*.txt
+run_all.bat
+run_midas.bat

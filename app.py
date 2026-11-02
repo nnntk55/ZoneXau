@@ -1549,6 +1549,21 @@ def log_trade():
             print(f"Log Trade to Sheets Error: {e}")
     return jsonify({"status": "success"})
 
+DEVIN_TASKS = []  # คิวงานที่ Midas ส่งให้ Devin — in-memory (หายถ้า Render restart)
+
+@app.route('/api/devin_tasks', methods=['GET', 'POST', 'DELETE'])
+def devin_tasks():
+    if request.method == 'POST':
+        data = request.json or {}
+        txt = (data.get("task") or "").strip()
+        if txt:
+            DEVIN_TASKS.append({"task": txt, "ts": datetime.now(timezone.utc).isoformat()})
+        return jsonify({"status": "success", "queued": len(DEVIN_TASKS)})
+    if request.method == 'DELETE':
+        DEVIN_TASKS.clear()
+        return jsonify({"status": "cleared"})
+    return jsonify({"tasks": DEVIN_TASKS})
+
 @app.route('/api/get_market_data', methods=['GET'])
 def get_market_data():
     output = {}

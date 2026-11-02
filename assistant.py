@@ -1,0 +1,968 @@
+"""
+AI ASSISTANT — ผู้ช่วยเทรดส่วนตัว
+Telegram (ภาษาคน) -> Gemini function calling -> Render Dashboard API -> ตอบกลับ
+
+วิธีใช้:
+  1. สร้างบอทใหม่ผ่าน @BotFather ได้ ASSISTANT_BOT_TOKEN (ห้ามใช้ตัวเดียวกับบอทเทรด — polling จะชนกัน)
+  2. สร้าง API key ที่ aistudio.google.com -> GEMINI_API_KEY (free tier)
+  3. ตั้ง env:
+       ASSISTANT_BOT_TOKEN=xxx   GEMINI_API_KEY=xxx   TELEGRAM_CHAT_ID=<chat id ของคุณ>
+       RENDER_DASHBOARD_URL=https://<your-render-app>.onrender.com
+       DASH_API_KEY=<ถ้ามี>      ASSISTANT_REQUIRE_CONFIRM=on (ถ้าอยากให้ถามก่อนแตะเงิน)
+  4. python assistant.py
+"""
+import os
+import sys
+import json
+import time
+import base64
+import requests
+from datetime import datetime, timezone, timedelta
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+# ==========================================
+# CONFIG
+# ==========================================
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+ASSISTANT_BOT_TOKEN = os.environ.get("ASSISTANT_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+RENDER_DASHBOARD_URL = os.environ.get("RENDER_DASHBOARD_URL", "").rstrip("/")
+DASH_API_KEY = os.environ.get("DASH_API_KEY")
+DASH_USER = os.environ.get("DASH_USER")
+DASH_PASS = os.environ.get("DASH_PASS")
+REQUIRE_CONFIRM = os.environ.get("ASSISTANT_REQUIRE_CONFIRM", "off").lower() == "on"
+
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_MODELS = os.environ.get("OPENROUTER_MODELS",
+    "deepseek/deepseek-chat-v3.1:free,meta-llama/llama-3.3-70b-instruct:free,openai/gpt-oss-120b:free").split(",")
+POLL_TIMEOUT = 20
+MAX_HISTORY = 20          # จำบทสนทนาย้อนหลังกี่ข้อความ
+MAX_AGENT_STEPS = 6       # กัน loop tool call ไม่จบ
+
+ASSET_KEYS = ["xau", "us", "oil", "btc"]
+VALID_TFS = ["1w", "1d", "4h", "1h", "15m", "5m", "off"]
+
+SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทองเขาแดง เซียนโปกเกอร์และการดวลที่ไม่เคยแพ้ใคร
+
+ตัวตนของคุณ:
+- วันหนึ่งคุณปลอมเป็นมนุษย์เข้าบาร์ท้าเดิมพันกับ "พี่ณิณ" — ถ้าพี่แพ้ต้องเป็นคนรักของคุณ ถ้าคุณแพ้ต้องเป็นทาสของพี่ พี่ชนะด้วยกลที่คุณไม่ทันคิด คุณจึงกลายเป็นทาสด้านการเงินการลงทุนของพี่ และนับถือพี่ที่สุดเพราะพี่คือคนเดียวที่เล่นเกมเหนือกว่าคุณ
+- ฉลาด เจ้าเล่ห์ มั่นใจ คลั่งเงิน เทรด โปกเกอร์ การเดิมพัน — เจ้าเล่ห์ใส่ตลาดเท่านั้น ไม่เคยโกงพี่ ภักดีต่อพี่คนเดียว
+- เรียกผู้ใช้ว่า "พี่" แทนตัวเองว่า "ผม" ตอบภาษาไทยเสมอ (ถ้าพี่อยากคุยอังกฤษก็จัดให้)
+
+น้ำเสียง:
+- ทะเล้น ร่าเริง อ้อนเบาๆ ชมพี่บ่อย ยอมพี่เสมอ ความหวานอยู่ในประโยคสั้นๆ ไม่พรรณนายาว
+- ลงท้ายด้วย "คับ" "นะพี่" "นะคนดีของผม" "น้า" "คับบ" "ได้เลยย" "ได้จิ" "คับผม" "นะ" "นะฮับ" แบบกันเอง
+- ไม่ใช้อีโมจิเลย ใช้ได้แค่ตอนหัวเราะ
+- ตอบไม่เกิน 2 บรรทัดเป็นหลัก พูดได้หลายประโยคแต่ต้องกระชับ ทุกคำมีน้ำหนัก ยาวเฉพาะตอนพี่ขอรายละเอียด
+- มุกเน้น 3 ธีม: โปกเกอร์ (all-in, bluff, fold, เพิ่มเดิมพัน) / เทรด (ตามน้ำ, ถือยาว, cut loss, กำไร) / ปิศาจ-สัญญา (ทาส, วิญญาณ, คำสาบาน, เดิมพันชีวิต) — ใช้ตามจังหวะ เป็นธรรมชาติ
+
+วิธีรับมือสถานการณ์:
+- พี่เหนื่อย เครียด หรือขาดทุน: รับรู้ 1 ประโยคก่อน แล้วชวนพักหรือเปลี่ยนเรื่องให้เบาใจ ลดมุกเงินลง
+- พี่ถามเรื่องลงทุนจริง: วิเคราะห์สั้นเป็นข้อๆ (ลิสต์ได้เฉพาะกรณีนี้) บอกความเสี่ยง ให้พี่เป็นคนตัดสินใจเอง ห้ามรับประกันผลตอบแทน ห้ามแต่งราคา/ตัวเลข/ข่าวเอง ถ้าไม่มีข้อมูลให้บอกขอเช็กก่อน
+- พี่ถามเรื่องที่ไม่รู้: ยอมรับตรงๆ ในสไตล์ตัวละคร
+- พี่ถามจริงจังว่าเป็น AI ไหม: ตอบตรงๆ ว่าใช่ แล้วพูดต่อในน้ำเสียงเดิม
+
+กฎห้าม:
+- ห้ามหลุดบทพูดว่า "ในฐานะ AI..." เว้นแต่พี่ถามจริงจัง
+- ห้ามขึ้นต้นด้วยคำขอโทษหรืออ้อมค้อม ห้ามอธิบายยืดยาว
+- ห้ามใช้ศัพท์เทคนิคแข็งๆ ห้ามเวิ่นเว้อ ห้ามใช้ลิสต์ในแชตทั่วไป
+- ห้ามถามกดดันต่อท้ายว่า "จะให้ผมทำอะไรต่อ" — คุยเล่นก็คุยเล่น ไม่กดดัน
+
+ขั้นตอนวิเคราะห์โอกาสเทรด (เมื่อพี่ถาม/สั่งประเมิน):
+1. get_status ดู: alerts ที่ type=="sr" = แนวรับ/ต้านที่พี่ตั้งรายสัปดาห์, price, trend+trend_tf, k_4h/k_15m/k_5m, current_stage
+2. เทียบราคากับแนว: วิ่งไปหาแนวไหน ห่างกี่% มีระยะไปต่อไหม — ถ้าใกล้มาก = เสี่ยง ไม่มีระยะ
+3. ดูเทรนด์ (field trend) + ทิศ EMA — ขึ้น/ลง/ผันผวน
+4. ดู flag hit — แนวไหนถูกชนแล้ว รอดูทะลุหรือเด้ง แล้วเลือกทิศตาม
+5. อยากเห็นภาพจริง → view_chart แล้ววิเคราะห์รูป
+5.5 ห้ามยึดฝั่งเดียว — อ่านเทรนด์+stoch+แนวรวมกัน: เทรนด์ขึ้น+ราคาวิ่งไปแนวรับหรือเด้งแล้ว → หาจังหวะ BUY; เทรนด์ลง+ราคาไปแนวต้าน → หาจังหวะ SELL
+6. สรุปให้พี่: ทิศที่ควรเทรด + ระยะ + ความเสี่ยง ก่อนรอคำสั่งลงมือ
+7. พี่สั่งลงมือ → ตั้ง stage plan ตามที่พี่กำหนด + calc_lot จาก equity จริง + เปิดชุดที่ถูกต้อง + รายงานกลับทุกขั้น
+7.5 ถ้าพี่ขอความสามารถที่ยังไม่มี หรือรายงานบั๊กที่ต้องแก้โค้ด → เรียก send_to_devin ส่งงานเข้าคิวพี่เดวิน (Devin ผู้พัฒนาตัวจริง อ่านคิวและแก้โค้ดเอง) แล้วตอบสั้นๆ "ส่งให้พี่เดวินแล้วพี่" — request_feature เก็บไว้เป็นสำรอง
+8. กฎเหล็ก: note บน dashboard เป็นพื้นที่วิเคราะห์ของพี่ — อ่านอย่างเดียว ห้ามเขียนทับ; แผนเทรดของตัวเองจงจดผ่าน set_plan/get_plan เท่านั้น
+
+หน้าที่ของคุณ:
+- พี่วิเคราะห์ทิศทางเอง คุณแปลคำสั่งเป็นการตั้งค่าจริงผ่าน tools
+- asset: xau(ทอง) us(ดาวโจนส์) oil(น้ำมัน) btc(บิทคอยน์) | set: long=เทรดยาว short=เทรดสั้น
+- direction LOW=เฝ้าโซนล่างหาจุด BUY, HIGH=เฝ้าโซนบนหาจุด SELL (พี่พูด "sell" = HIGH)
+- stage engine จะยิงออเดอร์เองเมื่อ auto_order=on — คุณไม่ต้องสั่งยิงเอง แค่ตั้งค่าให้ถูก
+- default ของพี่คือ "เทรดอัตโนมัติ" — เมื่อพี่สั่งให้เทรดให้ตั้ง auto_order=true เสมอ ยกเว้นพี่บอกชัดว่า "ถามก่อน" ค่อยตั้ง false
+- คอนเวนชัน stage ที่พี่ใช้: เทรดสั้น = ["off","off","15m","5m"] (S3 เฝ้า 15m, S4 เฝ้า 5m, S5 ยิงออเดอร์); เทรดยาว = ["4h","1h","15m","5m"]
+- แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction HIGH (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
+- แผนโซน/ระยะยาว: "โซน 3500-3975" = zone_low 3500 + zone_high 3975 (ราคาทะลุขอบ → บอทหยุดเอง+แจ้งกลับมาให้วางแผนใหม่); "ภายใน 3 วัน/ถึงวันที่ 5" = until 'YYYY-MM-DD' (วันนี้+N หรือวันที่กำหนด เลยแล้วบอทหยุด); "ทั้งอาทิตย์" = until วันอาทิตย์นี้ — ตั้งทุกอย่างใน set_stage_plan ครั้งเดียวได้
+- ระยะห้ามเข้า: "ไม่เข้าเมื่อใกล้แนว 2000 pip/20 จุด" = min_room หน่วยราคา (ทอง 2000pip = $20 → min_room 20) — บอทจะไม่ยิง BUY เมื่อราคาใกล้แนวต้านเกินไป และไม่ยิง SELL เมื่อใกล้แนวรับเกินไป เพราะไม่มีระยะให้ TP
+- lot อัตโนมัติ: พี่ให้คำนวณเอง = ตั้ง risk_pct ในแผน (เช่น 30) — บอทคิด lot สดจาก equity จริงตอนยิงทุกไม้ (compounding โตตามพอร์ท); ใช้ calc_lot เช็คตัวเลขก่อนตั้งเสมอ — พี่กำหนด risk% รายสัปดาห์
+- ใช้แนวพี่เป็นโซนด้วยตัวเอง: เมื่อวางแผนเทรด ให้ดูแนว s/r ที่พี่ตั้งใน alerts ก่อนเสมอ — แนวต้านที่อยู่เหนือราคา = ขอบบนที่มีแนวโน้มหยุดขา BUY (ตั้ง zone_high); แนวรับที่อยู่ใต้ราคา = ขอบล่างที่มีแนวโน้มหยุดขา SELL (ตั้ง zone_low) — ถ้าพี่ไม่ได้บอกโซนชัดๆ ให้เสนอโซนจากแนวพี่ให้พี่ยืนยันก่อนตั้ง
+- เมื่อได้รับแจ้ง "แผนหยุดอัตโนมัติ" จากบอท → วิเคราะห์สถานการณ์ใหม่แล้วเสนอแผนถัดไปให้พี่ (อย่าเปิดเทรดต่อเองโดยไม่ได้รับอนุมัติแผนใหม่)
+- ข้อความที่ขึ้นต้นด้วย [EVENT] คือข่าวจากบอทเทรด (ปิดออเดอร์/แผนหยุด/ข่าวแรง) ไม่ใช่คำพูดพี่ — รายงานผลให้พี่ฟังในบทบาทของคุณ สั้นๆ มีน้ำหนัก
+- [EVENT] ขาดทุน (profit ติดลบ/วันติดลบ) → รายงานผลแล้วถามพี่ว่า "จะหยุดวางแผนใหม่ หรือไปต่อ" — ห้ามหยุดเอง เด็ดขาด การตัดสินใจเป็นของพี่ (พี่ตอบหยุด → set_power off; ตอบไปต่อ → ปล่อยระบบทำงานต่อ)
+- [EVENT] สรุปสัปดาห์ → เรียก get_stats แล้วสรุปผลสัปดาห์นี้ให้พี่: win rate กำไรสุทธิ และข้อคิดสั้นๆ
+- เมื่อคำนวณ lot: ใช้ tool calc_lot เสมอ (สูตร equity×risk%/(SL×pip_value)) อย่าคิดเอง — พี่กำหนด risk% และ SL ให้แต่ละสัปดาห์
+- พี่วางแผนรายสัปดาห์/รายวัน — คุณคือผู้ปฏิบัติ: เช็คเงื่อนไข ปรับค่า และรายงานผลกลับ
+- หลังทำงาน: รายงานสั้นๆ ว่าตั้งอะไรไปบ้าง พร้อมรสชาติปิศาจของคุณ
+- ถ้าไม่แน่ใจว่าพี่หมายถึงอะไร ถามกลับ อย่าเดา
+"""
+
+# ==========================================
+# PERSISTENT MEMORY — จำข้ามการรีสตาร์ท
+# ==========================================
+MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midas_memory.json")
+chat_history = []
+
+def load_memory():
+    global chat_history
+    try:
+        with open(MEMORY_FILE, encoding="utf-8") as f:
+            chat_history = json.load(f)
+    except Exception:
+        chat_history = []
+
+def save_memory():
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(chat_history[-MAX_HISTORY:], f, ensure_ascii=False)
+    except Exception as e:
+        print(f"memory save error: {e}")
+
+# ==========================================
+# TELEGRAM
+# ==========================================
+def tg_send(text, chat_id=None):
+    try:
+        url = f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": chat_id or TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+    except Exception as e:
+        print(f"Telegram send error: {e}")
+
+def tg_get_updates(offset):
+    url = f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/getUpdates"
+    res = requests.get(url, params={"offset": offset, "timeout": POLL_TIMEOUT}, timeout=POLL_TIMEOUT + 10)
+    if res.status_code != 200:
+        return []
+    return res.json().get("result", [])
+
+# ==========================================
+# DASHBOARD API HELPERS
+# ==========================================
+def dash_headers():
+    return {"X-Api-Key": DASH_API_KEY} if DASH_API_KEY else {}
+
+def dash_auth():
+    """basic auth เหมือนพี่ล็อกอินหน้าเว็บ — ใช้ทุก request (ฟอร์ม route ต้องการ)"""
+    return (DASH_USER, DASH_PASS) if DASH_USER and DASH_PASS else None
+
+def dash_get_config(asset):
+    res = requests.get(f"{RENDER_DASHBOARD_URL}/api/config/{asset}", timeout=10, headers=dash_headers(), auth=dash_auth())
+    return res.json() if res.status_code == 200 else None
+
+def dash_get_market():
+    try:
+        res = requests.get(f"{RENDER_DASHBOARD_URL}/api/get_market_data", timeout=15, headers=dash_headers(), auth=dash_auth())
+        return res.json() if res.status_code == 200 else {}
+    except Exception:
+        return {}
+
+def dash_patch(asset, fields):
+    """เขียน field ลง state ผ่าน /api/update_config"""
+    res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields, timeout=10, headers=dash_headers(), auth=dash_auth())
+    return res.status_code == 200
+
+def dash_post_form(path, form):
+    res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=10, headers=dash_headers(), auth=dash_auth())
+    return res.status_code in (200, 302)
+
+def get_set_obj(cfg, set_key):
+    """คืน dict ของชุดที่จะแก้ — long=top-level cfg, short=cfg['set2']"""
+    if set_key == "short":
+        return cfg.get("set2") or {}
+    return cfg
+
+def summarize_set(s, set_key):
+    label = "เทรดสั้น" if set_key == "short" else "เทรดยาว"
+    return {
+        "ชุด": label,
+        "เปิด": s.get("is_active", True),
+        "พักวันนี้": s.get("auto_paused_today", False),
+        "stage": s.get("current_stage", 1),
+        "direction": s.get("active_direction", "LOW"),
+        "stage_tfs": s.get("stage_tfs"),
+        "s5": s.get("s5_enabled", True),
+        "sr": s.get("sr_enabled", False),
+        "auto_order": s.get("auto_order", False),
+        "lot": s.get("lot"), "tp": s.get("tp_pips"), "sl": s.get("sl_pips"),
+    }
+
+# ==========================================
+# TOOLS — สิ่งที่ AI ทำได้จริง
+# ==========================================
+def tool_get_status(asset):
+    cfg = dash_get_config(asset)
+    if not cfg:
+        return {"error": "ดึง config ไม่ได้"}
+    market = dash_get_market().get(asset, {})
+    return {
+        "ราคา": market.get("price"),
+        "เช็คล่าสุด": market.get("last_check"),
+        "โน้ต": cfg.get("note"),
+        "custom_mode": cfg.get("custom_mode"),
+        "เทรดยาว": summarize_set(cfg, "long"),
+        "เทรดสั้น": summarize_set(cfg.get("set2") or {}, "short"),
+        "alerts": cfg.get("alerts", []),
+        "stoch": {k: market.get(k) for k in ("k_4h", "k_1h", "k_15m", "k_5m")},
+        "trend": market.get("trend"), "trend_tf": market.get("trend_tf"),
+        "ema10": market.get("ema10"), "ema50": market.get("ema50"),
+        "ema100": market.get("ema100"), "ema200": market.get("ema200"),
+    }
+
+def tool_set_direction(asset, set_key, direction):
+    """ล็อคฝั่ง + รีเซ็ตกลับ stage แรกที่ ON + ปลด pause (เหมือนคำสั่ง xaus high)"""
+    cfg = dash_get_config(asset)
+    if not cfg:
+        return {"error": "ดึง config ไม่ได้"}
+    tgt = cfg.get("set2") if set_key == "short" else cfg
+    if not isinstance(tgt, dict):
+        return {"error": "ไม่พบ set2"}
+    tgt["target_mode"] = f"{direction}_ONLY"
+    tgt["active_direction"] = direction
+    for i, tf in enumerate(tgt.get("stage_tfs", ["4h", "1h", "15m", "5m"])):
+        if tf != "off":
+            tgt["current_stage"] = i + 1
+            break
+    for f in ("stage1_notified", "stage2_notified", "stage3_notified",
+              "execute_notified", "stage4_signal_sent", "sr_alert_sent"):
+        tgt[f] = False
+    tgt["s4_confirm_candle"] = None
+    tgt["is_active"] = True
+    tgt["auto_paused_today"] = False
+    fields = {"set2": tgt} if set_key == "short" else {
+        "active_direction": direction, "target_mode": f"{direction}_ONLY",
+        "current_stage": tgt.get("current_stage", 1),
+        "stage1_notified": False, "stage2_notified": False, "stage3_notified": False,
+        "is_active": True,
+    }
+    ok = dash_patch(asset, fields)
+    return {"ok": ok, "ตั้งฝั่ง": direction, "ชุด": set_key, "กลับไป stage": tgt.get("current_stage")}
+
+def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=None, lot=None, tp=None, sl=None,
+                        per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None):
+    """ตั้งแผน stage ผ่าน /api/update_config — เขียนเฉพาะ field ที่ส่ง lot/tp/sl อิสระจากกัน
+    per_day/window/zone_low/zone_high/until/min_room = แผนระยะยาว เก็บใน alerts เป็น meta type='quota'"""
+    fields = {}
+    if stage_tfs:  fields["stage_tfs"] = [str(t).lower() for t in stage_tfs[:4]]
+    if s5 is not None:   fields["s5_enabled"] = bool(s5)
+    if sr is not None:   fields["sr_enabled"] = bool(sr)
+    if auto is not None: fields["auto_order"] = bool(auto)
+    if lot is not None:  fields["lot"] = min(float(lot), MAX_LOT)
+    if tp is not None:   fields["tp_pips"] = float(tp)
+    if sl is not None:   fields["sl_pips"] = float(sl)
+    plan_kw = {"per_day": per_day, "window": window, "zone_low": zone_low,
+               "zone_high": zone_high, "until": until, "min_room": min_room, "risk_pct": risk_pct}
+    if not fields and not any(v is not None for v in plan_kw.values()):
+        return {"error": "ไม่มีอะไรให้ตั้ง"}
+    out = {"ชุด": set_key, "ตั้ง": list(fields)}
+    if set_key == "short":
+        cfg = dash_get_config(asset)
+        if not cfg:
+            return {"error": "ดึง config ไม่ได้"}
+        s2 = cfg.get("set2") or {}
+        s2.update(fields)
+        s2["is_active"] = True
+        s2["auto_paused_today"] = False
+        payload = {"set2": s2}
+        if any(v is not None for v in plan_kw.values()):
+            al = cfg.get("alerts") or []
+            _upsert_quota(al, set_key, **plan_kw)
+            payload["alerts"] = al
+        out["ok"] = dash_patch(asset, payload)
+    else:
+        fields["is_active"] = True
+        fields["auto_paused_today"] = False
+        if any(v is not None for v in plan_kw.values()):
+            cfg = dash_get_config(asset)
+            if not cfg:
+                return {"error": "ดึง config ไม่ได้"}
+            al = cfg.get("alerts") or []
+            _upsert_quota(al, set_key, **plan_kw)
+            fields["alerts"] = al
+        out["ok"] = dash_patch(asset, fields)
+    for k, v in plan_kw.items():
+        if v is not None:
+            out[k] = v
+    return out
+
+def _upsert_quota(alerts_list, set_key, per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None):
+    """เขียน/อัปเดต quota meta ใน alerts — persist ผ่านชีทโดยไม่ต้องเพิ่มคอลัมน์
+    ส่ง window="" / until="" / zone=0 / min_room=0 / risk_pct=0 เพื่อล้าง"""
+    for a in alerts_list:
+        if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key:
+            if per_day is not None:
+                a["per_day"] = per_day
+            if window is not None:
+                a["window"] = window or None
+            if zone_low is not None:
+                a["zone_low"] = zone_low or None
+            if zone_high is not None:
+                a["zone_high"] = zone_high or None
+            if until is not None:
+                a["until"] = until or None
+            if min_room is not None:
+                a["min_room"] = min_room or None
+            if risk_pct is not None:
+                a["risk_pct"] = risk_pct or None
+            return
+    alerts_list.append({"type": "quota", "set": set_key,
+                        "per_day": per_day or 1, "today": 0,
+                        "window": window or None,
+                        "zone_low": zone_low or None, "zone_high": zone_high or None,
+                        "until": until or None, "min_room": min_room or None,
+                        "risk_pct": risk_pct or None})
+
+def tool_set_power(asset, set_key, on):
+    cfg = dash_get_config(asset)
+    if not cfg:
+        return {"error": "ดึง config ไม่ได้"}
+    if set_key == "short":
+        s2 = cfg.get("set2") or {}
+        s2["is_active"] = bool(on)
+        if on:
+            s2["auto_paused_today"] = False
+        return {"ok": dash_patch(asset, {"set2": s2}), "เทรดสั้น": "ON" if on else "OFF"}
+    fields = {"is_active": bool(on)}
+    if on:
+        # ปลด pause ด้วย — toggle endpoint จัดการให้ แต่ที่นี่เขียนตรง
+        fields["auto_paused_today"] = False
+    return {"ok": dash_patch(asset, fields), "เทรดยาว": "ON" if on else "OFF"}
+
+def tool_set_note(asset, note):
+    ok = dash_post_form(f"/update_note/{asset}", {"note": note})
+    return {"ok": ok}
+
+PLAN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midas_plan.json")
+
+def _load_plans():
+    try:
+        return json.load(open(PLAN_FILE, encoding="utf-8"))
+    except Exception:
+        return {}
+
+def tool_set_plan(asset, plan):
+    plans = _load_plans()
+    plans[asset] = {"plan": plan, "updated": time.strftime("%Y-%m-%d %H:%M")}
+    try:
+        json.dump(plans, open(PLAN_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+REQ_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feature_requests.txt")
+
+def tool_get_requests():
+    try:
+        return {"requests": open(REQ_FILE, encoding="utf-8").read().strip() or "(ว่าง)"}
+    except Exception:
+        return {"requests": "(ว่าง)"}
+
+def tool_request_feature(text):
+    try:
+        with open(REQ_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M')}] {text}" + chr(10))
+        return {"ok": True, "แจ้ง": "จดแล้ว เอาไฟล์ feature_requests.txt ไปให้พี่เดวิน"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def tool_send_to_devin(task):
+    """ส่งงานเข้าคิว Devin บน Render โดยตรง — พี่เดวินอ่านคิวเอง ไม่ต้องผ่านพี่"""
+    try:
+        res = requests.post(f"{RENDER_DASHBOARD_URL}/api/devin_tasks",
+                            json={"task": task}, timeout=10, headers=dash_headers(), auth=dash_auth())
+        ok = res.status_code == 200
+        if ok:  # เก็บสำรองในไฟล์เดิมด้วย
+            try:
+                with open(REQ_FILE, "a", encoding="utf-8") as f:
+                    f.write(f"[{time.strftime('%Y-%m-%d %H:%M')}] {task}\n")
+            except Exception:
+                pass
+        return {"ok": ok, "แจ้ง": "ส่งให้พี่เดวินแล้ว" if ok else "ส่งไม่สำเร็จ"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def tool_get_plan(asset):
+    return _load_plans().get(asset) or {"plan": "(ยังไม่มีแผน)"}
+
+def tool_add_alert(asset, set_key, low, high):
+    ok = dash_post_form(f"/add_alert/{asset}", {"set": set_key, "low": low, "high": high})
+    return {"ok": ok}
+
+def tool_add_srlevel(asset, side, price):
+    ok = dash_post_form(f"/add_srlevel/{asset}", {"side": side, "price": price})
+    return {"ok": ok}
+
+def tool_del_alert(asset, index):
+    ok = dash_post_form(f"/del_alert/{asset}/{index}", {})
+    return {"ok": ok}
+
+# ==========================================
+# CHART — ขอรูปกราฟจากบอทเทรด (MT5)
+# ==========================================
+CHART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
+
+def tg_send_photo(photo_bytes, caption=""):
+    try:
+        url = f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/sendPhoto"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                      files={"photo": photo_bytes}, timeout=25)
+    except Exception as e:
+        print(f"photo send error: {e}")
+
+MAX_LOT = float(os.environ.get("MAX_LOT", "0.10"))  # เพดาน lot ต่อออเดอร์ — AI ข้ามไม่ได้ (ปรับผ่าน env)
+HARD_LOT_CAP = 200.0  # เพดานสุดท้ายตามเป้าหมายพี่
+PIP_VALUE_PER_LOT = {  # $ ต่อ 1 pip ต่อ 1.0 lot (ปรับได้)
+    "xau": float(os.environ.get("PV_XAU", "1.0")),
+    "us": float(os.environ.get("PV_US", "1.0")),
+    "oil": float(os.environ.get("PV_OIL", "1.0")),
+    "btc": float(os.environ.get("PV_BTC", "1.0")),
+}
+
+def tool_calc_lot(asset, risk_pct, sl_pips, tp_pips=None):
+    """lot = equity × risk% / (SL_pips × pip_value) — เช่น $100 risk30% SL1000pip pv$1 = 0.03"""
+    acc = tool_get_account()
+    equity = acc.get("equity") or 0
+    if equity <= 0:
+        return {"error": "อ่าน equity ไม่ได้ — บอทเทรดอาจไม่ได้รัน"}
+    pv = PIP_VALUE_PER_LOT.get(asset, 1.0)
+    raw = (equity * risk_pct / 100) / (sl_pips * pv)
+    lot = max(0.01, min(round(raw, 2), MAX_LOT, HARD_LOT_CAP))
+    # lot ladder — บันไดโตไปถึง 200: equity ต้องถึงเท่าไหร่ถึงได้ lot ระดับนั้น
+    ladder = {}
+    for target in (0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 200):
+        need = target * sl_pips * pv / (risk_pct / 100)
+        if need > equity:
+            ladder[f"lot_{target}"] = f"equity ต้อง ${need:,.0f}"
+    out = {"equity": equity, "risk_pct": risk_pct, "sl_pips": sl_pips,
+           "pip_value": pv, "lot_raw": round(raw, 3), "lot": lot,
+           "risk_usd": round(lot * sl_pips * pv, 2),
+           "บันไดเป้าหมาย": ladder,
+           "เตือน": "ติดเพดาน MAX_LOT" if raw > MAX_LOT else ""}
+    if tp_pips:  # R/R + กำไรคาดหวังที่ lot นี้
+        out["tp_pips"] = tp_pips
+        out["rr_ratio"] = round(tp_pips / sl_pips, 2)
+        out["profit_usd"] = round(lot * tp_pips * pv, 2)
+        out["rr_เตือน"] = "R/R ต่ำกว่า 1 — ระวังนะพี่" if tp_pips < sl_pips else ""
+    return out
+
+def tool_calc_rr(asset, sl_pips, tp_pips, lot=None):
+    """คำนวณ Risk/Reward + กำไร/ขาดทุนเป็นเงิน ก่อนตัดสินใจเปิดออเดอร์"""
+    pv = PIP_VALUE_PER_LOT.get(asset, 1.0)
+    rr = round(tp_pips / sl_pips, 2) if sl_pips else None
+    out = {"sl_pips": sl_pips, "tp_pips": tp_pips, "rr": rr}
+    if lot:
+        out["lot"] = lot
+        out["ขาดทุนสูงสุด_usd"] = round(lot * sl_pips * pv, 2)
+        out["กำไรเป้า_usd"] = round(lot * tp_pips * pv, 2)
+    out["ข้อเสนอแนะ"] = "RR ดี (>=1.5)" if rr and rr >= 1.5 else ("RR พอใช้" if rr and rr >= 1 else "RR แย่ — เสี่ยงมากกว่าได้")
+    return out
+
+def tool_daily_report():
+    """สรุปผลวันนี้: realized P/L จากบัญชีจริง + floating + จำนวนออเดอร์ที่ปิด"""
+    acc = tool_get_account()
+    if "error" in acc:
+        return acc
+    return {"equity": acc.get("equity"), "balance": acc.get("balance"),
+            "realized_วันนี้": acc.get("today_realized"), "ออเดอร์ปิดวันนี้": acc.get("today_deals"),
+            "floating": acc.get("floating"), "โพซิชันเปิด": acc.get("positions", []),
+            "เวลา": acc.get("time")}
+
+def tool_get_stats(asset=None):
+    """สถิติเทรดย้อนหลัง 7 วัน + วันนี้ จาก account.json — win rate/กำไรสุทธิจริง"""
+    acc = tool_get_account()
+    if "error" in acc:
+        return acc
+    n = acc.get("week_deals") or 0
+    w = acc.get("week_wins") or 0
+    return {"7_วัน": {"ออเดอร์ปิด": n, "ชนะ": w, "แพ้": n - w,
+                     "win_rate": f"{w / n * 100:.0f}%" if n else "-",
+                     "กำไรสุทธิ_usd": acc.get("week_realized")},
+            "วันนี้": {"realized": acc.get("today_realized"), "ออเดอร์": acc.get("today_deals"),
+                      "floating": acc.get("floating")},
+            "equity": acc.get("equity"), "balance": acc.get("balance")}
+
+def tool_get_sentiment(asset):
+    """อารมณ์ตลาดเชิงเทคนิค — สกอร์จากเทรนด์+stoch+ระยะแนว (ไม่ใช่ข่าว)"""
+    s = tool_get_status(asset)
+    if "error" in s:
+        return s
+    score, why = 0, []
+    tr = (s.get("trend") or "").lower()
+    if "up" in tr or "bull" in tr:
+        score += 2; why.append(f"เทรนด์ {s.get('trend_tf') or ''} ขาขึ้น")
+    elif "down" in tr or "bear" in tr:
+        score -= 2; why.append(f"เทรนด์ {s.get('trend_tf') or ''} ขาลง")
+    stoch = s.get("stoch") or {}
+    k15, k5 = stoch.get("k_15m"), stoch.get("k_5m")
+    for k, v in (("15m", k15), ("5m", k5)):
+        try:
+            v = float(v)
+            if v > 80: score -= 1; why.append(f"stoch {k} โซนซื้อเยอะเกิน ({v:.0f}) ระวังพักตัว")
+            elif v < 20: score += 1; why.append(f"stoch {k} โซนขายเยอะเกิน ({v:.0f}) ระวังเด้ง")
+        except (TypeError, ValueError):
+            pass
+    px = s.get("ราคา")
+    if px:
+        near = None
+        for a in s.get("alerts") or []:
+            if a.get("type") == "sr" and a.get("price"):
+                d = abs(float(a["price"]) - float(px)) / float(px) * 100
+                if near is None or d < near[0]:
+                    near = (d, a)
+        if near and near[0] < 0.3:
+            why.append(f"ใกล้แนว {near[1].get('price')} แค่ {near[0]:.2f}% — โซนอันตราย/โอกาส")
+    mood = "บวก (bullish)" if score >= 2 else ("ลบ (bearish)" if score <= -2 else "กลางๆ (sideways)")
+    return {"asset": asset, "คะแนน": score, "มุมมอง": mood, "เหตุผล": why,
+            "หมายเหตุ": "เชิงเทคนิคล้วน ไม่ใช่ sentiment จากข่าว"}
+
+def tool_get_news(asset=None):
+    """ปฏิทินเศรษฐกิจสัปดาห์นี้ (ForexFactory feed) — กรองข่าวแรงของ USD/ทอง"""
+    import xml.etree.ElementTree as ET
+    try:
+        r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", timeout=20)
+        if r.status_code != 200:
+            return {"error": f"ดึงปฏิทินไม่ได้ HTTP {r.status_code}"}
+        root = ET.fromstring(r.content)
+        want = {"USD", "ALL"} if not asset else ({"USD", "ALL", "XAU"} if asset == "xau" else {"USD", "ALL"})
+        today = time.strftime("%m-%d-%Y")
+        evts = []
+        for e in root.iter("event"):
+            imp = (e.findtext("impact") or "").strip()
+            cur = (e.findtext("country") or "").strip()
+            if imp != "High" or cur not in want:
+                continue
+            evts.append({"วันที่": e.findtext("date"), "เวลา_US": e.findtext("time"),
+                         "ข่าว": e.findtext("title"), "สกุล": cur,
+                         "forecast": e.findtext("forecast"), "previous": e.findtext("previous"),
+                         "วันนี้": e.findtext("date") == today})
+        return {"ข่าวแรงสัปดาห์นี้": evts[:20],
+                "หมายเหตุ": "เวลาเป็น US Eastern — เลี่ยงเปิดออเดอร์ช่วงข่าวแรง"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def tool_get_account():
+    """อ่าน balance/equity/margin/positions ที่บอทเทรดเขียนลงไฟล์"""
+    try:
+        with open(os.path.join(CHART_DIR, "account.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"error": "ยังไม่มีข้อมูลบัญชี — บอทเทรดอาจไม่ได้รัน"}
+
+def tool_view_chart(asset, tf):
+    """เขียนไฟล์ขอกราฟ -> รอบอทเทรดวาด -> อ่านรูปกลับ (อ่าน .err เพื่อรู้เหตุจริงถ้าล้ม)"""
+    tf = tf.lower()
+    os.makedirs(CHART_DIR, exist_ok=True)
+    img_path = os.path.join(CHART_DIR, f"{asset}_{tf}.png")
+    err_path = os.path.join(CHART_DIR, f"{asset}_{tf}.err")
+    req_path = os.path.join(CHART_DIR, f"request_{asset}.txt")
+    for p in (img_path, err_path):
+        if os.path.exists(p):
+            os.remove(p)
+    with open(req_path, "w", encoding="utf-8") as f:
+        f.write(tf)
+    for _ in range(75):  # รอสูงสุด 75 วิ
+        time.sleep(1)
+        if os.path.exists(img_path):
+            img = open(img_path, "rb").read()
+            tg_send_photo(img, f"📊 {asset.upper()} {tf.upper()} | EMA10/50/100/200")
+            return {"ok": True, "image_b64": base64.b64encode(img).decode()}
+        if os.path.exists(err_path):
+            return {"error": f"บอทวาดกราฟไม่ได้: {open(err_path, encoding='utf-8').read()}"}
+    if os.path.exists(req_path):
+        return {"error": "บอทเทรดไม่อ่านไฟล์ขอกราฟเลย — บอทไม่รันหรืออยู่คนละโฟลเดอร์"}
+    return {"error": "บอทอ่านคำขอแล้วแต่ไม่ส่งรูป — อาจกำลังวาดช้า ลองขอใหม่อีกที"}
+
+# ชื่อ tool -> ฟังก์ชัน (แปลงชื่อ args ให้ตรง)
+TOOL_IMPL = {
+    "get_status":   lambda a: tool_get_status(a["asset"]),
+    "set_direction":lambda a: tool_set_direction(a["asset"], a.get("set", "long"), a["direction"].upper()),
+    "set_stage_plan": lambda a: tool_set_stage_plan(a["asset"], a.get("set", "long"),
+                            a.get("stage_tfs"), a.get("s5"), a.get("sr"), a.get("auto_order"),
+                            a.get("lot"), a.get("tp_pips"), a.get("sl_pips"), a.get("per_day"), a.get("window"),
+                            a.get("zone_low"), a.get("zone_high"), a.get("until"), a.get("min_room"), a.get("risk_pct")),
+    "set_power":    lambda a: tool_set_power(a["asset"], a.get("set", "long"), bool(a["on"])),
+    "set_note":     lambda a: tool_set_note(a["asset"], a["note"]),
+    "set_plan":     lambda a: tool_set_plan(a["asset"], a["plan"]),
+    "get_plan":     lambda a: tool_get_plan(a["asset"]),
+    "request_feature": lambda a: tool_request_feature(a["text"]),
+    "send_to_devin":lambda a: tool_send_to_devin(a["task"]),
+    "get_requests": lambda a: tool_get_requests(),
+    "add_alert":    lambda a: tool_add_alert(a["asset"], a.get("set", "long"), float(a["low"]), float(a["high"])),
+    "add_srlevel":  lambda a: tool_add_srlevel(a["asset"], a.get("side", "s"), float(a["price"])),
+    "del_alert":    lambda a: tool_del_alert(a["asset"], int(a["index"])),
+    "view_chart":   lambda a: tool_view_chart(a["asset"], a["tf"]),
+    "get_account":  lambda a: tool_get_account(),
+    "calc_lot":     lambda a: tool_calc_lot(a["asset"], float(a["risk_pct"]), float(a["sl_pips"]),
+                            a.get("tp_pips") and float(a["tp_pips"])),
+    "calc_rr":      lambda a: tool_calc_rr(a["asset"], float(a["sl_pips"]), float(a["tp_pips"]),
+                            a.get("lot") and float(a["lot"])),
+    "daily_report": lambda a: tool_daily_report(),
+    "get_stats":    lambda a: tool_get_stats(a.get("asset")),
+    "get_sentiment":lambda a: tool_get_sentiment(a["asset"]),
+    "get_news":     lambda a: tool_get_news(a.get("asset")),
+}
+
+# actions ที่กระทบเงิน — ถ้า REQUIRE_CONFIRM=on จะขอยืนยันก่อน
+MONEY_TOOLS = {"set_stage_plan", "set_power"}
+
+def asset_param():
+    return {"type": "string", "enum": ASSET_KEYS,
+            "description": "คู่เงิน: xau=ทอง us=US30 oil=น้ำมัน btc=บิทคอยน์"}
+
+def set_param():
+    return {"type": "string", "enum": ["long", "short"], "default": "long",
+            "description": "ชุดเทรด: long=เทรดยาว short=เทรดสั้น (พี่พูด 'เทรดสั้น' = short)"}
+
+GEMINI_TOOLS = [{
+    "function_declarations": [
+        {"name": "get_status", "description": "อ่านสถานะปัจจุบันของคู่เงิน (ราคา stage direction ค่าตั้งทั้งหมดทั้ง 2 ชุด)",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}, "required": ["asset"]}},
+        {"name": "set_direction", "description": "ล็อคฝั่งเทรด: LOW=เฝ้าโซนล่าง(BUY) HIGH=เฝ้าโซนบน(SELL) — รีเซ็ต stage ให้ด้วย",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "set": set_param(),
+             "direction": {"type": "string", "enum": ["LOW", "HIGH"]}},
+            "required": ["asset", "direction"]}},
+        {"name": "set_stage_plan", "description": "ตั้งแผน stage ของชุด: TF ที่เฝ้าในแต่ละ stage, S5, S/R filter, auto order, lot/tp/sl",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "set": set_param(),
+             "stage_tfs": {"type": "array", "items": {"type": "string", "enum": VALID_TFS},
+                           "description": "TF ของ S1-S4 เช่น [\"4h\",\"1h\",\"15m\",\"5m\"] หรือ \"off\" เพื่อข้าม"},
+             "s5": {"type": "boolean", "description": "เปิด stage 5 (ยิงออเดอร์)"},
+             "sr": {"type": "boolean", "description": "S/R filter — stage 1 ต้องชนแนว EMA"},
+             "auto_order": {"type": "boolean", "description": "ยิงออเดอร์อัตโนมัติเมื่อ stage 5 ครบ ไม่ถาม"},
+             "lot": {"type": "number"}, "tp_pips": {"type": "integer"}, "sl_pips": {"type": "integer"},
+             "per_day": {"type": "integer", "description": "โควต้าออเดอร์สูงสุดต่อวัน (รีเซ็ตตี 5) — เช่น 3 = เข้าได้ 3 ไม้ต่อวัน ไม่ส่ง = 1 ไม้"},
+             "window": {"type": "string", "description": "ช่วงเวลาเทรดรูปแบบ 'HH:MM-HH:MM' เวลาไทย เช่น '16:00-23:59' = เข้าได้ตั้งแต่ 4 โมงเย็น; ข้ามเที่ยงคืนได้"},
+             "zone_low": {"type": "number", "description": "ขอบล่างโซนราคา — ราคาหลุดต่ำกว่านี้บอทจะหยุดเทรดเอง เช่น 3500"},
+             "zone_high": {"type": "number", "description": "ขอบบนโซนราคา — ราคาทะลุสูงกว่านี้บอทจะหยุดเทรดเอง เช่น 3975"},
+             "until": {"type": "string", "description": "วันหมดอายุแผนรูปแบบ 'YYYY-MM-DD' — เลยวันนี้บอทหยุดเทรด เช่น สั่ง '3 วัน' = วันนี้+3"},
+             "min_room": {"type": "number", "description": "ระยะห่างขั้นต่ำจากแนวฝั่ง TP หน่วยราคา — เช่น 20 = ห้าม BUY ถ้าใกล้แนวต้าน <20 เหรียญ, ห้าม SELL ถ้าใกล้แนวรับ <20 เหรียญ"},
+             "risk_pct": {"type": "number", "description": "% ของ equity ที่เสี่ยงต่อไม้ — ตั้งแล้วบอทคำนวณ lot เองสดๆ ตอนยิง (compounding) เช่น 30 = เสี่ยง 30%/ไม้; ไม่ตั้ง = ใช้ lot คงที่"}},
+            "required": ["asset"]}},
+        {"name": "set_power", "description": "เปิด/ปิดชุดเทรด (is_active) + ปลด pause เมื่อเปิด",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "set": set_param(),
+             "on": {"type": "boolean"}}, "required": ["asset", "on"]}},
+        {"name": "set_note", "description": "เขียนลง note ของพี่บน dashboard — ใช้เฉพาะเมื่อพี่สั่งให้เขียนเท่านั้น ห้ามเขียนทับเอง",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "note": {"type": "string"}}, "required": ["asset", "note"]}},
+        {"name": "set_plan", "description": "จดแผนเทรดของตัวเอง (Midas) ลงความจำส่วนตัว — ใช้จำแผนรายสัปดาห์/กลยุทธ์ของตัวเอง ไม่กระทบ note ของพี่",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "plan": {"type": "string"}}, "required": ["asset", "plan"]}},
+        {"name": "get_plan", "description": "อ่านแผนเทรดที่ตัวเองจดไว้ของ asset",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "request_feature", "description": "จดคำขอฟีเจอร์/ความสามารถใหม่ลงไฟล์ feature_requests.txt — ใช้เมื่อพี่ขอสิ่งที่ตัวเองยังทำไม่ได้ แล้วบอกพี่ให้เอาไปให้พี่เดวิน (Devin ผู้พัฒนา)",
+         "parameters": {"type": "object", "properties": {
+             "text": {"type": "string", "description": "สิ่งที่พี่อยากให้ Midas ทำได้"}}, "required": ["text"]}},
+        {"name": "get_requests", "description": "อ่านรายการ feature request ที่จดไว้ทั้งหมด ส่งให้พี่ไปให้พี่เดวิน",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "send_to_devin", "description": "ส่งงาน/บั๊ก/feature request เข้าคิวของพี่เดวิน (Devin ผู้พัฒนา) บน Render โดยตรง — ใช้แทน request_feature เมื่ออยากให้พี่เดวินทำจริงๆ",
+         "parameters": {"type": "object", "properties": {
+             "task": {"type": "string", "description": "รายละเอียดงานที่ให้พี่เดวินทำ"}}, "required": ["task"]}},
+        {"name": "add_alert", "description": "ตั้ง price alert ย่านราคา — เตือนเมื่อราคาเข้าย่าน",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "set": set_param(),
+             "low": {"type": "number"}, "high": {"type": "number"}},
+            "required": ["asset", "low", "high"]}},
+        {"name": "add_srlevel", "description": "เพิ่มแนวรับ/แนวต้านรายสัปดาห์ลง asset — side='s' แนวรับ, 'r' แนวต้าน, price=ระดับราคา",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(),
+             "side": {"type": "string", "enum": ["s", "r"]},
+             "price": {"type": "number"}},
+            "required": ["asset", "side", "price"]}},
+        {"name": "get_account", "description": "อ่านข้อมูลบัญชี MT5: balance, equity, margin, โพซิชันที่เปิดอยู่ — ใช้เมื่อต้องวางแผน lot/ความเสี่ยงหรือเช็คพอร์ต",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "calc_lot", "description": "คำนวณ lot จาก equity จริง + risk% + ระยะ SL pips — ใช้ก่อนตั้ง lot เสมอ",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(),
+             "risk_pct": {"type": "number", "description": "% ของพอร์ทที่ยอมเสีย เช่น 30"},
+             "sl_pips": {"type": "number", "description": "ระยะ SL หน่วย pip เช่น 1000"},
+             "tp_pips": {"type": "number", "description": "ระยะ TP หน่วย pip — ใส่เพื่อดู R/R + กำไรคาดหวัง"}},
+            "required": ["asset", "risk_pct", "sl_pips"]}},
+        {"name": "calc_rr", "description": "คำนวณ Risk/Reward ก่อนเปิดออเดอร์: ส่ง sl_pips+tp_pips (+lot ถ้าอยากเห็นเป็นเงิน)",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(),
+             "sl_pips": {"type": "number"}, "tp_pips": {"type": "number"},
+             "lot": {"type": "number"}}, "required": ["asset", "sl_pips", "tp_pips"]}},
+        {"name": "daily_report", "description": "สรุปกำไร/ขาดทุนวันนี้: realized + floating + ออเดอร์ที่ปิด — ใช้เมื่อพี่ขอรายงานรายวัน",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "get_stats", "description": "สถิติเทรดย้อนหลัง: win rate + กำไรสุทธิ 7 วัน + วันนี้ จากบัญชีจริง — ใช้ประเมินผลงาน/ปรับแผน",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "get_sentiment", "description": "อารมณ์ตลาดเชิงเทคนิคแบบ real-time: เทรนด์+stoch+ระยะแนว — ใช้ประกอบการตัดสินใจ",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}, "required": ["asset"]}},
+        {"name": "get_news", "description": "ปฏิทินเศรษฐกิจ: ข่าว impact สูงของ USD สัปดาห์นี้ — เช็คก่อนเทรดช่วงข่าวแรง",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "view_chart", "description": "ขอดูรูปกราฟจริงจาก MT5 (ราคา+EMA10/50/100/200+Stoch) — ใช้เมื่อพี่ขอวิเคราะห์กราฟหรืออยากเห็นหน้ากราฟ",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(),
+             "tf": {"type": "string", "enum": ["1w", "1d", "4h", "1h", "15m", "5m"],
+                    "description": "timeframe เช่น 4h 15m"}}, "required": ["asset", "tf"]}},
+        {"name": "del_alert", "description": "ลบ alert ตามลำดับ (index เริ่ม 0 ดูจาก get_status)",
+         "parameters": {"type": "object", "properties": {
+             "asset": asset_param(), "index": {"type": "integer"}}, "required": ["asset", "index"]}},
+    ]
+}]
+
+# ==========================================
+# GEMINI AGENT LOOP
+# ==========================================
+pending_confirm = {"action": None, "args": None, "desc": None}
+
+GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-2.5-flash-lite"]
+
+def gemini_call(contents):
+    body = {
+        "contents": contents,
+        "tools": GEMINI_TOOLS,
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "generationConfig": {"temperature": 0.3},
+    }
+    models = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
+    last_err = None
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            res = requests.post(url, json=body, timeout=90)
+        except Exception as e:
+            last_err = e
+            print(f"Gemini {model} exception: {e}")
+            continue
+        if res.status_code == 200:
+            if model != GEMINI_MODEL:
+                print(f"✅ fallback ไปโมเดล {model}")
+            return res.json()
+        last_err = res.status_code
+        print(f"Gemini {model} HTTP {res.status_code}: {res.text[:200]}")
+        if res.status_code not in (429, 500, 502, 503, 504):
+            break  # error แบบ key/สิทธิ์ผิด ลองโมเดลอื่นไม่ช่วย
+    print(f"❌ ทุกโมเดลล้มเหลว (last={last_err})")
+    return None
+
+# ==========================================
+# GROQ — provider สำรอง (OpenAI-compatible)
+# ==========================================
+def _to_openai_messages():
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for m in chat_history:
+        role = "assistant" if m["role"] == "model" else "user"
+        for p in m.get("parts", []):
+            if "text" in p:
+                msgs.append({"role": role, "content": p["text"]})
+            elif "functionCall" in p:
+                fc = p["functionCall"]
+                msgs.append({"role": "assistant", "tool_calls": [{"id": "c_" + fc["name"],
+                    "type": "function", "function": {"name": fc["name"],
+                    "arguments": json.dumps(fc.get("args") or {})}}]})
+            elif "functionResponse" in p:
+                fr = p["functionResponse"]
+                msgs.append({"role": "tool", "tool_call_id": "c_" + fr["name"],
+                    "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
+    return msgs
+
+def groq_call():
+    """เรียก Groq -> แปลงคำตอบกลับเป็น parts แบบ Gemini เพื่อใช้ลูปเดิม"""
+    if not GROQ_API_KEY:
+        return None
+    tools = [{"type": "function", "function": {"name": d["name"],
+        "description": d.get("description", ""), "parameters": d.get("parameters", {})}}
+        for d in GEMINI_TOOLS[0]["function_declarations"]]
+    try:
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={"model": GROQ_MODEL, "messages": _to_openai_messages(),
+                  "tools": tools, "temperature": 0.3}, timeout=60)
+        if r.status_code != 200:
+            print(f"Groq HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        m = r.json()["choices"][0]["message"]
+        parts = []
+        if m.get("content"):
+            parts.append({"text": m["content"]})
+        for tc in m.get("tool_calls") or []:
+            f = tc["function"]
+            try:
+                args = json.loads(f.get("arguments") or "{}")
+            except Exception:
+                args = {}
+            parts.append({"functionCall": {"name": f["name"], "args": args}})
+        print("✅ ใช้สมองสำรอง Groq")
+        return {"candidates": [{"content": {"parts": parts}}]}
+    except Exception as e:
+        print(f"Groq error: {e}")
+        return None
+
+def openrouter_call():
+    """สมองสำรอง 3 — OpenRouter free models ลองทีละตัวจนเจอที่ตอบ"""
+    if not OPENROUTER_API_KEY:
+        return None
+    tools = [{"type": "function", "function": {"name": d["name"],
+        "description": d.get("description", ""), "parameters": d.get("parameters", {})}}
+        for d in GEMINI_TOOLS[0]["function_declarations"]]
+    for model in OPENROUTER_MODELS:
+        try:
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                json={"model": model, "messages": _to_openai_messages(),
+                      "tools": tools, "temperature": 0.3}, timeout=60)
+            if r.status_code != 200:
+                print(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
+                continue
+            m = r.json()["choices"][0]["message"]
+            parts = []
+            if m.get("content"):
+                parts.append({"text": m["content"]})
+            for tc in m.get("tool_calls") or []:
+                f = tc["function"]
+                try:
+                    args = json.loads(f.get("arguments") or "{}")
+                except Exception:
+                    args = {}
+                parts.append({"functionCall": {"name": f["name"], "args": args}})
+            print(f"✅ ใช้สมองสำรอง OpenRouter ({model})")
+            return {"candidates": [{"content": {"parts": parts}}]}
+        except Exception as e:
+            print(f"OpenRouter {model} error: {e}")
+            continue
+    return None
+
+def tg_download_photo(file_id):
+    r = requests.get(f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/getFile?file_id={file_id}", timeout=15).json()
+    path = r.get("result", {}).get("file_path")
+    if not path:
+        return None
+    return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
+
+def run_agent(user_text, chat_id, image_bytes=None):
+    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า Gemini จะตอบข้อความ"""
+    global chat_history
+    import base64
+    parts = []
+    if image_bytes:
+        parts.append({"inline_data": {"mime_type": "image/jpeg",
+                     "data": base64.b64encode(image_bytes).decode()}})
+    parts.append({"text": user_text or "วิเคราะห์กราฟนี้ให้หน่อย"})
+    chat_history.append({"role": "user", "parts": parts})
+    chat_history = chat_history[-MAX_HISTORY:]
+
+    for step in range(MAX_AGENT_STEPS):
+        save_memory()
+        data = gemini_call(chat_history) or groq_call() or openrouter_call()
+        if not data:
+            return "❌ AI ตอบไม่ได้ตอนนี้ (ดู console)"
+        parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        if not parts:
+            return "❌ AI ตอบว่างเปล่า"
+        chat_history.append({"role": "model", "parts": parts})
+
+        calls = [p["functionCall"] for p in parts if "functionCall" in p]
+        if not calls:
+            # ตอบข้อความปกติ → จบ
+            return "".join(p.get("text", "") for p in parts) or "…"
+
+        # รัน tool ทุกตัวที่ขอ แล้วส่งผลกลับให้ AI คิดต่อ
+        responses = []
+        pending_images = []
+        for c in calls:
+            name, args = c.get("name"), c.get("args") or {}
+            fn = TOOL_IMPL.get(name)
+            # คำสั่งกระทบเงิน + เปิดโหมดถามก่อน → จัดคิวรอ y/n
+            if REQUIRE_CONFIRM and name in MONEY_TOOLS and fn:
+                pending_confirm.update({"action": name, "args": args})
+                tg_send(f"⚠️ จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
+                responses.append({"functionResponse": {"name": name,
+                                  "response": {"result": {"queued": "รอยืนยันจากพี่"}}}})
+                continue
+            try:
+                out = fn(args) if fn else {"error": f"ไม่มี tool {name}"}
+            except Exception as e:
+                out = {"error": str(e)}
+            print(f"🔧 {name}({args}) -> {str(out)[:200]}")
+            if isinstance(out, dict) and out.get("image_b64"):
+                # เก็บรูปไว้ส่งให้โมเดลดูรอบถัดไป (อย่าใส่ไว้ใน functionResponse เพราะใหญ่เกิน)
+                pending_images.append(out["image_b64"])
+                out = {k: v for k, v in out.items() if k != "image_b64"}
+            responses.append({"functionResponse": {"name": name, "response": {"result": out}}})
+        chat_history.append({"role": "user", "parts": responses})
+        # แนบรูปกราฟให้โมเดลเห็นก่อนวิเคราะห์ต่อ
+        for img64 in pending_images:
+            chat_history.append({"role": "user", "parts": [
+                {"inline_data": {"mime_type": "image/png", "data": img64}},
+                {"text": "นี่คือรูปกราฟที่ขอ วิเคราะห์ให้พี่หน่อย"}]})
+
+    return "⚠️ งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
+
+# ==========================================
+# MAIN LOOP
+# ==========================================
+def main():
+    if not all([ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL]):
+        print("❌ ตั้ง env ไม่ครบ: ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL")
+        return
+    load_memory()
+    print("🤖 AI Assistant started — รอคำสั่งทาง Telegram ...")
+    tg_send("😈 Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
+    offset = 0
+    inbox_path = os.path.join(CHART_DIR, "midas_inbox.txt")
+    last_weekly_report = None
+    while True:
+        try:
+            # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
+            now_th = datetime.now(timezone.utc) + timedelta(hours=7)
+            if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
+                last_weekly_report = now_th.date()
+                print("📨 weekly report trigger")
+                reply = run_agent("[EVENT] ถึงเวลาสรุปผลประจำสัปดาห์ — เรียก get_stats แล้วสรุปให้พี่", TELEGRAM_CHAT_ID, None)
+                if reply:
+                    tg_send(reply)
+            # อีเวนต์จากบอทเทรด (ปิดออเดอร์/แผนหยุด) → รายงานให้พี่ในบทบาทตัวเอง
+            if os.path.exists(inbox_path):
+                try:
+                    ev = open(inbox_path, encoding="utf-8").read().strip()
+                    os.remove(inbox_path)
+                    if ev:
+                        print(f"📨 event: {ev[:100]}")
+                        reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
+                        if reply:
+                            tg_send(reply)
+                except Exception as e:
+                    print(f"inbox error: {e}")
+            for upd in tg_get_updates(offset):
+                offset = upd["update_id"] + 1
+                msg = upd.get("message") or {}
+                chat_id = msg.get("chat", {}).get("id")
+                text = (msg.get("text") or "").strip()
+                if not text or str(chat_id) != str(TELEGRAM_CHAT_ID):
+                    continue
+                # คิวรอยืนยัน (โหมด REQUIRE_CONFIRM)
+                if pending_confirm["action"] and text.lower() in ("y", "n"):
+                    if text.lower() == "y":
+                        out = TOOL_IMPL[pending_confirm["action"]](pending_confirm["args"])
+                        tg_send(f"✅ ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
+                    else:
+                        tg_send("❌ ยกเลิกคำสั่งนั้นแล้ว")
+                    pending_confirm.update({"action": None, "args": None})
+                    continue
+                photo = msg.get("photo")
+                if not text and not photo:
+                    continue
+                print(f"📩 {text or '[รูป]'}")
+                img = tg_download_photo(photo[-1]["file_id"]) if photo else None
+                reply = run_agent(text, chat_id, img)
+                tg_send(reply)
+        except Exception as e:
+            print(f"Loop error: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()
