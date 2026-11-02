@@ -161,6 +161,51 @@ def init_mt5():
 
 SET_LABELS = {"long": "เทรดยาว", "short": "เทรดสั้น"}
 
+# lock ต่อคู่เงิน — กัน thread callback (ตอบ y/n) กับ thread เรดาร์แก้ state ชุดเดียวกันพร้อมกัน (ถามซ้ำ/ยิงซ้ำ)
+ASSET_LOCKS = {k: threading.RLock() for k in ASSETS}
+
+# field ความคืบหน้าที่บอทเป็นเจ้าของ — ถ้า push ขึ้น Render ไม่สำเร็จ ห้ามให้ sync รอบถัดไปดึงค่าเก่ามาทับ
+# (is_active ไม่อยู่ในนี้ — คำสั่ง OFF จากพี่/Midas ต้องชนะเสมอ)
+PROGRESS_KEYS = ("current_stage", "active_direction",
+                 "stage1_notified", "stage2_notified", "stage3_notified",
+                 "stage4_signal_sent", "s4_confirm_candle", "last_trade_date")
+
+def _progress_snapshot(s):
+    snap = {k: s[k] for k in PROGRESS_KEYS if k in s}
+    snap["_tfs"] = s.get("stage_tfs")
+    snap["_active"] = s.get("is_active", True)
+    snap["_paused"] = s.get("auto_paused_today", False)
+    return snap
+
+def _progress_restore(s, snap):
+    """คืนค่าความคืบหน้าของบอท — ยกเว้นพี่เพิ่งเปลี่ยน stage_tfs/เปิดชุดใหม่ (ตั้งใจให้รีเซ็ต)"""
+    if s.get("stage_tfs") != snap["_tfs"] or (not snap["_active"] and s.get("is_active", True)):
+        return
+    s.update({k: v for k, v in snap.items() if not k.startswith("_")})
+    if snap["_paused"]:
+        s["auto_paused_today"] = True  # บอทพักเอง (ครบโควต้า) แต่ push ไม่ถึง Render → ห้ามปลด pause เอง
+
+BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.json")
+
+def load_last_seen_dates():
+    """วันเทรดล่าสุดที่บอทเห็น — เก็บลงไฟล์ ให้รีสตาร์ทข้ามตี 5 แล้วยังปลด pause ได้"""
+    try:
+        with open(BOT_STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("last_seen_date", {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_last_seen_date(asset_key, date_str):
+    with ASSET_LOCKS[asset_key]:
+        try:
+            data = load_last_seen_dates()
+            data[asset_key] = date_str
+            with open(BOT_STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"last_seen_date": data}, f)
+        except Exception as e:
+            print(f"save last_seen_date error ({asset_key}): {e}")
+
 def default_set2():
     """โครงสร้างชุดเทรดสั้น — field เหมือนชุดหลักเป๊ะ (stage/direction/lot/tp/sl/sr/auto/flags แยกอิสระ)"""
     return {
@@ -197,6 +242,8 @@ def sync_config_from_render(asset_key):
     """ดึงค่าคอนฟิกและสถานะล่าสุดจาก Render Dashboard มาอัปเดตใส่บอทแบบ Real-time"""
     try:
         url = f"{RENDER_DASHBOARD_URL}/api/config/{asset_key}"
+        # push รอบก่อนล้มเหลว → ลองส่งใหม่ก่อน ถ้ายังไม่ได้ให้คงค่าความคืบหน้าของบอทไว้ (กัน stage ถอยหลัง/แจ้งซ้ำ/ปลด pause เอง)
+        dirty = ASSETS[asset_key].get("config_dirty") and not push_config_to_render(asset_key)
         res = requests.get(url, timeout=10, headers=dash_headers())
         if res.status_code == 200:
             data = res.json()
@@ -206,6 +253,8 @@ def sync_config_from_render(asset_key):
                 "is_active": data.get("is_active"), "auto_paused_today": data.get("auto_paused_today"),
                 "set2": data.get("set2") if isinstance(data.get("set2"), dict) else None,
                 "alerts": data.get("alerts") if isinstance(data.get("alerts"), list) else None})
+            keep_long = _progress_snapshot(st) if dirty else None
+            keep_short = _progress_snapshot(st["set2"]) if dirty and isinstance(st.get("set2"), dict) else None
             if "lot" in data: st["lot"] = float(data["lot"])
             if "tp_pips" in data: st["tp_pips"] = int(data["tp_pips"])
             if "sl_pips" in data: st["sl_pips"] = int(data["sl_pips"])
@@ -251,6 +300,11 @@ def sync_config_from_render(asset_key):
                          "s3_gate_override", "s3_gate_asked"):
                 if flag in data: st[flag] = bool(data[flag])
             if "s4_confirm_candle" in data: st["s4_confirm_candle"] = data["s4_confirm_candle"]
+            if dirty:
+                _progress_restore(st, keep_long)
+                if keep_short is not None and isinstance(st.get("set2"), dict):
+                    _progress_restore(st["set2"], keep_short)
+                print(f"⚠️ {asset_key}: push ค้างอยู่ — คงค่า stage/flags ของบอทไว้ ไม่ใช้ค่าจาก Render รอบนี้")
             # ตรวจคำสั่ง yes/no ที่ผู้ใช้พิมพ์ผ่าน Telegram webhook ของ Dashboard
             cmd = data.get("user_command")
             if cmd in ("y", "n"):
@@ -313,9 +367,14 @@ def push_config_to_render(asset_key):
         res = requests.post(url, json=payload, timeout=15, headers=dash_headers())
         if res.status_code == 200:
             _mark_pushed(asset_key, payload)
-        print(f"✅ Pushed config to Render for {asset_key}")
+            ASSETS[asset_key]["config_dirty"] = False
+            print(f"✅ Pushed config to Render for {asset_key}")
+            return True
+        print(f"Push Config HTTP {res.status_code} ({asset_key}): {res.text[:200]}")
     except Exception as e:
         print(f"Push Config Error ({asset_key}): {e}")
+    ASSETS[asset_key]["config_dirty"] = True
+    return False
 
 _MISSING = object()
 
@@ -361,9 +420,12 @@ def check_daily_reset_and_state(asset_key):
     """ขึ้นวันเทรดใหม่ (05:00 น.) → ปลด pause เฉพาะคู่ที่จบรอบแล้ว โดยไม่แตะการตั้งค่าใดๆ"""
     st = ASSETS[asset_key]["state"]
     current_date = current_trade_date()
+    if "last_seen_date" not in st:
+        st["last_seen_date"] = load_last_seen_dates().get(asset_key)
     last_seen = st.get("last_seen_date")
     if last_seen != current_date:
         st["last_seen_date"] = current_date
+        save_last_seen_date(asset_key, current_date)
         if last_seen is not None and st.get("auto_paused_today"):
             st["is_active"] = True
             st["auto_paused_today"] = False
@@ -421,65 +483,68 @@ def handle_telegram_callback():
                             answer_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
                             requests.post(answer_url, json={"callback_query_id": callback_id}, timeout=5)
 
-                            if action_type == "execute":
-                                # ยิงออเดอร์ — อัปเดตชุดที่ถามยืนยันไว้ (long/short) ไม่ใช่ชุดยาวเสมอไป
-                                st = ASSETS[asset_key]["state"]
-                                symbol = ASSETS[asset_key]["symbol"]
-                                pend = ASSETS[asset_key].get("pending_confirmation") or {}
-                                ensure_sets(st)
-                                s = st["set2"] if pend.get("set") == "short" else st
-                                execute_exness_order(symbol, order_action, dynamic_lot(st, s, pend.get("set", "long"), asset_key), s.get('sl_pips', 200), s.get('tp_pips', 300), asset_key=asset_key)
+                            if asset_key not in ASSETS:
+                                continue
+                            with ASSET_LOCKS[asset_key]:
+                                if action_type == "execute":
+                                    # ยิงออเดอร์ — อัปเดตชุดที่ถามยืนยันไว้ (long/short) ไม่ใช่ชุดยาวเสมอไป
+                                    st = ASSETS[asset_key]["state"]
+                                    symbol = ASSETS[asset_key]["symbol"]
+                                    pend = ASSETS[asset_key].get("pending_confirmation") or {}
+                                    ensure_sets(st)
+                                    s = st["set2"] if pend.get("set") == "short" else st
+                                    execute_exness_order(symbol, order_action, dynamic_lot(st, s, pend.get("set", "long"), asset_key), s.get('sl_pips', 200), s.get('tp_pips', 300), asset_key=asset_key)
 
-                                # อัปเดทสถานะ
-                                s["active_direction"] = "HIGH" if order_action == "BUY" else "LOW"
-                                s["current_stage"] = 1
-                                s["stage1_notified"] = False
-                                s["stage2_notified"] = False
-                                s["stage3_notified"] = False
-                                s["is_active"] = False
-                                s["auto_paused_today"] = True
-                                s["last_trade_date"] = current_trade_date()
-                                s["stage4_signal_sent"] = False
-                                s["s4_confirm_candle"] = None
-                                ASSETS[asset_key]["pending_confirmation"] = None
-                                push_config_to_render(asset_key)
+                                    # อัปเดทสถานะ
+                                    s["active_direction"] = "HIGH" if order_action == "BUY" else "LOW"
+                                    s["current_stage"] = 1
+                                    s["stage1_notified"] = False
+                                    s["stage2_notified"] = False
+                                    s["stage3_notified"] = False
+                                    s["is_active"] = False
+                                    s["auto_paused_today"] = True
+                                    s["last_trade_date"] = current_trade_date()
+                                    s["stage4_signal_sent"] = False
+                                    s["s4_confirm_candle"] = None
+                                    ASSETS[asset_key]["pending_confirmation"] = None
+                                    push_config_to_render(asset_key)
 
-                                # แก้ข้อความเดิม
-                                edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
-                                edit_payload = {
-                                    "chat_id": chat_id,
-                                    "message_id": message_id,
-                                    "text": f"✅ *{ASSETS[asset_key]['name']}*: ยิงออเดอร์ {order_action} สำเร็จแล้ว!",
-                                    "parse_mode": "Markdown"
-                                }
-                                requests.post(edit_url, json=edit_payload, timeout=5)
+                                    # แก้ข้อความเดิม
+                                    edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+                                    edit_payload = {
+                                        "chat_id": chat_id,
+                                        "message_id": message_id,
+                                        "text": f"✅ *{ASSETS[asset_key]['name']}*: ยิงออเดอร์ {order_action} สำเร็จแล้ว!",
+                                        "parse_mode": "Markdown"
+                                    }
+                                    requests.post(edit_url, json=edit_payload, timeout=5)
 
-                            elif action_type == "skip":
-                                # ข้ามออเดอร์ — พักเฉพาะชุดที่ถามยืนยันไว้
-                                st = ASSETS[asset_key]["state"]
-                                pend = ASSETS[asset_key].get("pending_confirmation") or {}
-                                ensure_sets(st)
-                                s = st["set2"] if pend.get("set") == "short" else st
-                                s["current_stage"] = 1
-                                s["stage1_notified"] = False
-                                s["stage2_notified"] = False
-                                s["stage3_notified"] = False
-                                s["stage4_signal_sent"] = False
-                                s["s4_confirm_candle"] = None
-                                s["is_active"] = False
-                                s["auto_paused_today"] = True
-                                ASSETS[asset_key]["pending_confirmation"] = None
-                                push_config_to_render(asset_key)
+                                elif action_type == "skip":
+                                    # ข้ามออเดอร์ — พักเฉพาะชุดที่ถามยืนยันไว้
+                                    st = ASSETS[asset_key]["state"]
+                                    pend = ASSETS[asset_key].get("pending_confirmation") or {}
+                                    ensure_sets(st)
+                                    s = st["set2"] if pend.get("set") == "short" else st
+                                    s["current_stage"] = 1
+                                    s["stage1_notified"] = False
+                                    s["stage2_notified"] = False
+                                    s["stage3_notified"] = False
+                                    s["stage4_signal_sent"] = False
+                                    s["s4_confirm_candle"] = None
+                                    s["is_active"] = False
+                                    s["auto_paused_today"] = True
+                                    ASSETS[asset_key]["pending_confirmation"] = None
+                                    push_config_to_render(asset_key)
 
-                                # แก้ข้อความเดิม
-                                edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
-                                edit_payload = {
-                                    "chat_id": chat_id,
-                                    "message_id": message_id,
-                                    "text": f"❌ *{ASSETS[asset_key]['name']}*: ข้ามออเดอร์นี้แล้ว พักระบบรอรอบใหม่ตี 5 วันถัดไป",
-                                    "parse_mode": "Markdown"
-                                }
-                                requests.post(edit_url, json=edit_payload, timeout=5)
+                                    # แก้ข้อความเดิม
+                                    edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+                                    edit_payload = {
+                                        "chat_id": chat_id,
+                                        "message_id": message_id,
+                                        "text": f"❌ *{ASSETS[asset_key]['name']}*: ข้ามออเดอร์นี้แล้ว พักระบบรอรอบใหม่ตี 5 วันถัดไป",
+                                        "parse_mode": "Markdown"
+                                    }
+                                    requests.post(edit_url, json=edit_payload, timeout=5)
 
                     elif "message" in update:
                         # รับคำสั่ง yes/no ที่ผู้ใช้พิมพ์ตอบยืนยันออเดอร์
@@ -669,6 +734,10 @@ def send_telegram_confirmation(asset_key, symbol, action, latest_k, latest_d, cl
 
 def handle_pending_reply(asset_key, answer, orig_msg_id=None):
     """ประมวลผลคำตอบ yes/no จาก Telegram สำหรับสัญญาณ Stage 4 ที่รอยืนยัน"""
+    with ASSET_LOCKS[asset_key]:
+        _handle_pending_reply(asset_key, answer, orig_msg_id)
+
+def _handle_pending_reply(asset_key, answer, orig_msg_id=None):
     asset = ASSETS[asset_key]
     pend = asset.get("pending_confirmation")
     if not pend:
@@ -834,6 +903,12 @@ def execute_exness_order(symbol, action, lot, sl_pips, tp_pips, asset_key=None):
     }
 
     result = mt5.order_send(request_payload)
+    if result is None:
+        # order_send คืน None เมื่อ MT5 หลุด/request ผิด — เดิม crash ด้วย AttributeError ทำให้ state ค้างและไม่มีแจ้งเตือน
+        err = mt5.last_error()
+        print(f"❌ Order failed: order_send returned None {err}")
+        send_telegram_notification(f"⚠️ *[EXECUTION FAILED]* {symbol} {action}: MT5 ไม่ตอบกลับ {err}")
+        return False
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         print(f"❌ Order failed: {result.comment}")
         send_telegram_notification(f"⚠️ *[EXECUTION FAILED]* {symbol} {action}: {result.comment}")
@@ -858,7 +933,11 @@ def check_open_position(asset_key):
     name = asset["name"]
 
     positions = mt5.positions_get(symbol=symbol)
-    still_open = any(p.magic == 202610 for p in (positions or []))
+    if positions is None:
+        # None = MT5 error/หลุด (ไม่ใช่ "ไม่มี position") — อย่าตีว่าปิดแล้ว ไม่งั้นบอทอาจเปิดไม้ซ้อน
+        print(f"⚠️ {name}: positions_get error {mt5.last_error()} — ข้ามการเช็ครอบนี้")
+        return
+    still_open = any(p.magic == 202610 for p in positions)
     if still_open:
         return
 
@@ -890,6 +969,20 @@ def check_open_position(asset_key):
     midas_inbox(f"[EVENT] {name}: ออเดอร์ {pos['action']} @ {pos['price']:.2f} ปิดแล้ว ({close_reason} @ {close_price:.2f}) ผลลัพธ์ {sign}{profit:.2f} USD")
     print(f"🏁 {name}: position closed ({close_reason}) profit={profit:.2f}")
 
+def restore_open_positions():
+    """บอทรีสตาร์ท → ดึง position ของบอท (magic 202610) ที่ยังเปิดอยู่ใน MT5 กลับมา กันเปิดไม้ซ้อนและให้แจ้งผลตอนปิดได้"""
+    for key, asset in ASSETS.items():
+        positions = mt5.positions_get(symbol=asset["symbol"]) or []
+        mine = [p for p in positions if p.magic == 202610]
+        if mine:
+            p = mine[0]
+            asset["open_position"] = {
+                "action": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
+                "price": p.price_open, "lot": p.volume, "sl": p.sl, "tp": p.tp,
+                "opened": min(float(p.time), time.time())
+            }
+            print(f"♻️ {asset['name']}: พบ position ค้าง {asset['open_position']['action']} @ {p.price_open} — รอปิดก่อนล่าสัญญาณใหม่")
+
 def run_asset_radar(asset_key):
     asset = ASSETS[asset_key]
     st = asset["state"]
@@ -899,9 +992,10 @@ def run_asset_radar(asset_key):
 
     while True:
         try:
-            check_daily_reset_and_state(asset_key)
+            # sync ก่อน → daily reset เห็นสถานะ pause จริงจาก Render (บอทเพิ่งรีสตาร์ท state ในเครื่องยังเป็นค่า default)
             sync_config_from_render(asset_key)
             ensure_sets(st)
+            check_daily_reset_and_state(asset_key)
             check_open_position(asset_key)
             announce_today_news()
 
@@ -1042,7 +1136,8 @@ def run_asset_radar(asset_key):
 
             elif st.get("is_active", True) and not st.get("auto_paused_today"):
                 try:
-                    process_stage_set(asset_key, st, "long")
+                    with ASSET_LOCKS[asset_key]:
+                        process_stage_set(asset_key, st, "long")
                 except Exception as e:
                     print(f"Radar Error ({name} เทรดยาว): {e}")
 
@@ -1050,7 +1145,8 @@ def run_asset_radar(asset_key):
             s2 = st.get("set2")
             if isinstance(s2, dict) and s2.get("is_active", True) and not s2.get("auto_paused_today"):
                 try:
-                    process_stage_set(asset_key, s2, "short")
+                    with ASSET_LOCKS[asset_key]:
+                        process_stage_set(asset_key, s2, "short")
                 except Exception as e:
                     print(f"Radar Error ({name} เทรดสั้น): {e}")
         except Exception as e:
@@ -1420,8 +1516,8 @@ def process_stage_set(asset_key, s, set_key):
 
     # 🔧 Auto-find first active stage (ข้าม stage ที่เป็น "off")
     current_stage = s.get("current_stage", 1)
-    if current_stage > 5:
-        # ถ้า stage เกิน 5 ให้ค้นหา stage แรกที่ไม่ใช่ "off"
+    if not isinstance(current_stage, int) or current_stage > 5 or current_stage < 1:
+        # stage นอกช่วง 1-5 (เช่น 0/ติดลบจาก Render) → ค้นหา stage แรกที่ไม่ใช่ "off" ไม่งั้นค้างเงียบตลอด
         for i, tf in enumerate(stage_tfs):
             if tf != "off":
                 s["current_stage"] = i + 1
@@ -1778,6 +1874,7 @@ if __name__ == "__main__":
         # รีเซ็ต pending_confirmation ทุก asset เมื่อเริ่มรันใหม่
         for key in ASSETS.keys():
             ASSETS[key]["pending_confirmation"] = None
+        restore_open_positions()
 
         send_telegram_notification("🟢 *[ALL-IN-ONE BOT STARTED]* บอทเรดาร์เฝ้ากราฟ Exness MT5 พร้อมเชื่อมต่อ Render Dashboard แล้ว!")
         threads = []
