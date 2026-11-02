@@ -183,6 +183,15 @@ def dash_headers():
     """header สำหรับเรียก API ของ dashboard (ถ้าตั้ง DASH_API_KEY)"""
     return {"X-Api-Key": DASH_API_KEY} if DASH_API_KEY else {}
 
+def _reset_stage_progress(s):
+    """stage_tfs เปลี่ยน/เปิด-ปิด stage ไหนก็ตาม → เริ่มสแกนใหม่ที่ stage แรกที่เปิดอยู่"""
+    tfs = s.get("stage_tfs", ["4h", "1h", "15m", "5m"])
+    s["current_stage"] = next((i + 1 for i, t in enumerate(tfs) if t != "off"), 1)
+    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+    s["stage4_signal_sent"] = False
+    s["s4_confirm_candle"] = None
+    s["sr_alert_sent"] = False
+
 def sync_config_from_render(asset_key):
     """ดึงค่าคอนฟิกและสถานะล่าสุดจาก Render Dashboard มาอัปเดตใส่บอทแบบ Real-time"""
     try:
@@ -195,17 +204,39 @@ def sync_config_from_render(asset_key):
             if "tp_pips" in data: st["tp_pips"] = int(data["tp_pips"])
             if "sl_pips" in data: st["sl_pips"] = int(data["sl_pips"])
             if "current_stage" in data: st["current_stage"] = int(data["current_stage"])
-            if "is_active" in data: st["is_active"] = bool(data["is_active"])
+            if "is_active" in data:
+                if not st.get("is_active", True) and bool(data["is_active"]):
+                    _reset_stage_progress(st)
+                    print(f"🔄 {asset_key}: เทรดยาวเปิดใหม่ — รีเซ็ตไป Stage {st['current_stage']}")
+                st["is_active"] = bool(data["is_active"])
             if "active_direction" in data: st["active_direction"] = str(data["active_direction"])
             if "target_mode" in data: st["target_mode"] = str(data["target_mode"])
             if "custom_mode" in data: st["custom_mode"] = bool(data["custom_mode"])
             if "custom_tf" in data: st["custom_tf"] = data["custom_tf"]
             if "custom_dir" in data: st["custom_dir"] = data["custom_dir"]
-            if "stage_tfs" in data: st["stage_tfs"] = list(data["stage_tfs"])
+            if "stage_tfs" in data:
+                new_tfs = list(data["stage_tfs"])
+                if st.get("stage_tfs") != new_tfs:
+                    st["stage_tfs"] = new_tfs
+                    _reset_stage_progress(st)
+                    print(f"🔄 {asset_key}: stage_tfs เปลี่ยนเป็น {new_tfs} — รีเซ็ตไป Stage {st['current_stage']}")
+                    push_config_to_render(asset_key)
+                else:
+                    st["stage_tfs"] = new_tfs
             if "s5_enabled" in data: st["s5_enabled"] = bool(data["s5_enabled"])
             if "sr_enabled" in data: st["sr_enabled"] = bool(data["sr_enabled"])
             if "auto_order" in data: st["auto_order"] = bool(data["auto_order"])
-            if "set2" in data and isinstance(data["set2"], dict): st["set2"] = data["set2"]
+            if "set2" in data and isinstance(data["set2"], dict):
+                old_s2 = st.get("set2") or {}
+                st["set2"] = data["set2"]
+                s2_reactivated = not old_s2.get("is_active", True) and st["set2"].get("is_active", True)
+                if s2_reactivated:
+                    _reset_stage_progress(st["set2"])
+                    print(f"🔄 {asset_key} เทรดสั้นเปิดใหม่ — รีเซ็ตไป Stage {st['set2']['current_stage']}")
+                if s2_reactivated or old_s2.get("stage_tfs") != st["set2"].get("stage_tfs"):
+                    _reset_stage_progress(st["set2"])
+                    print(f"🔄 {asset_key} เทรดสั้น: stage_tfs เปลี่ยน — รีเซ็ตไป Stage {st['set2']['current_stage']}")
+                    push_config_to_render(asset_key)
             if "alerts" in data and isinstance(data["alerts"], list): st["alerts"] = data["alerts"]
             # sync flag การแจ้งเตือนด้วย — ป้องกัน flag เก่าค้างทำให้ข้าม stage เงียบๆ หลัง user รีเซ็ตค่า
             # auto_paused_today ต้อง sync ด้วย ไม่งั้นปลด pause บนเว็บแล้วบอทยังพักเงียบอยู่ดี
@@ -1462,16 +1493,6 @@ def process_stage_set(asset_key, s, set_key):
             # Stage 5: Stoch จบแล้ว — รอแท่งเทียนของ TF Stage 4 ปิดเหนือ EMA10 → ถามยืนยัน BUY (ครั้งเดียวต่อแท่ง)
             df_s4 = fetch_mt5_candles(symbol, tf_s4)
             if df_s4 is not None and len(df_s4) > 10:
-                # setup หลุด: stoch กลับข้ามเส้นกลาง (K>50) ก่อนเทียนปิดเหนือ EMA10 → เซตอัพตาย กลับไปสแกนใหม่
-                k5, _ = calculate_stochastic_rsi(df_s4)
-                if k5 is not None and float(k5.iloc[-1]) > 50:
-                    s["current_stage"] = 1
-                    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
-                    s["stage4_signal_sent"] = False
-                    s["s4_confirm_candle"] = None
-                    send_telegram_notification(f"🔄 *{name}*: เซตอัพหลุดจาก Low Zone (K={float(k5.iloc[-1]):.1f}) — กลับไปเริ่มสแกน Stage 1 ใหม่")
-                    push_config_to_render(asset_key)
-                    return
                 df_s4['EMA10'] = df_s4['Close'].ewm(span=10, adjust=False).mean()
                 closed_close = float(df_s4['Close'].iloc[-2])
                 closed_ema10 = float(df_s4['EMA10'].iloc[-2])
@@ -1611,16 +1632,6 @@ def process_stage_set(asset_key, s, set_key):
             # Stage 5: Stoch จบแล้ว — รอแท่งเทียนของ TF Stage 4 ปิดใต้ EMA10 → ถามยืนยัน SELL (ครั้งเดียวต่อแท่ง)
             df_s4 = fetch_mt5_candles(symbol, tf_s4)
             if df_s4 is not None and len(df_s4) > 10:
-                # setup หลุด: stoch กลับข้ามเส้นกลาง (K<50) ก่อนเทียนปิดใต้ EMA10 → เซตอัพตาย กลับไปสแกนใหม่
-                k5, _ = calculate_stochastic_rsi(df_s4)
-                if k5 is not None and float(k5.iloc[-1]) < 50:
-                    s["current_stage"] = 1
-                    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
-                    s["stage4_signal_sent"] = False
-                    s["s4_confirm_candle"] = None
-                    send_telegram_notification(f"🔄 *{name}*: เซตอัพหลุดจาก High Zone (K={float(k5.iloc[-1]):.1f}) — กลับไปเริ่มสแกน Stage 1 ใหม่")
-                    push_config_to_render(asset_key)
-                    return
                 df_s4['EMA10'] = df_s4['Close'].ewm(span=10, adjust=False).mean()
                 closed_close = float(df_s4['Close'].iloc[-2])
                 closed_ema10 = float(df_s4['EMA10'].iloc[-2])
