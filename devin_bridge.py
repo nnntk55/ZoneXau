@@ -16,7 +16,9 @@ CONTEXT = ("คุณคือ Devin พี่เดวิน ผู้พัฒ
 
 def tg(method, **kw):
     try:
-        return requests.post(f"https://api.telegram.org/bot{BOT}/{method}", json=kw, timeout=15).json()
+        # long-poll: ให้ requests รอนานกว่า timeout ที่ส่งไป เสมอ
+        wait = kw.get("timeout", 0) + 15
+        return requests.post(f"https://api.telegram.org/bot{BOT}/{method}", json=kw, timeout=max(wait, 20)).json()
     except Exception as e:
         print(f"tg {method} err: {e}")
         return {}
