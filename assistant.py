@@ -379,18 +379,73 @@ def tool_request_feature(text):
 DEVIN_API_KEY = os.getenv("DEVIN_API_KEY", "")
 DEVIN_CONTEXT = ("นี่คืองานจากระบบเทรด Zone Trigger ของพี่ณิณ repo: https://github.com/nnntk55/ZoneXau "
                  "(app.py=แดชบอร์ด Render, assistant.py=Midas Telegram AI, exness_zone_trigger_bot.py=บอทเทรด MT5) "
-                 "กฎ: แก้บั๊ก/feature ที่สเปกชัดได้เลย+push แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ และห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — งาน: ")
+                 "กฎ: แก้บั๊ก/feature ที่สเปกชัดได้เลย แล้ว push ตรงเข้า branch main เลย (ห้ามเปิด PR เพราะ Render auto-deploy จาก main) "
+                 "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ และห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — งาน: ")
+
+DEVIN_SESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_sessions.json")
+
+def devin_track(sid, task, url):
+    try:
+        sess = json.load(open(DEVIN_SESS_FILE, encoding="utf-8")) if os.path.exists(DEVIN_SESS_FILE) else []
+        sess.append({"id": sid, "task": task[:200], "url": url, "done": False, "at": time.time()})
+        json.dump(sess, open(DEVIN_SESS_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+def poll_devin_sessions(inbox_path):
+    """เช็คเซสชัน Devin ที่ค้าง — เสร็จแล้วดึงข้อความสุดท้ายมาเป็น [EVENT] ให้น้องรายงาน"""
+    if not DEVIN_API_KEY or not os.path.exists(DEVIN_SESS_FILE):
+        return
+    try:
+        sess = json.load(open(DEVIN_SESS_FILE, encoding="utf-8"))
+    except Exception:
+        return
+    dirty = False
+    for s in sess:
+        if s.get("done"):
+            continue
+        if time.time() - s.get("at", 0) > 60 * 60 * 6:  # เกิน 6 ชม. ถือว่าหลุด
+            s["done"] = True; dirty = True; continue
+        try:
+            st = requests.get(f"https://api.devin.ai/v1/sessions/{s['id']}",
+                              headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=10).json()
+            status = st.get("status_enum") or st.get("status", "")
+            if status.lower() in ("running", "working", "pending", "claimed"):
+                continue
+            s["done"] = True; dirty = True
+            summary = st.get("structured_output") or ""
+            if not summary:
+                evs = st.get("messages") or []
+                summary = next((m.get("message") or "" for m in reversed(evs)
+                                if m.get("type") == "devin_message"), "")
+            pr = (st.get("pull_request") or {}).get("url")
+            if pr:
+                summary = f"{summary}\nPR ที่เปิด: {pr} — แจ้งพี่ว่ามี PR รอกด merge ถ้าอยากให้ auto-deploy".strip()
+            ev_text = (f"[EVENT] พี่เดวินทำงานเสร็จแล้ว (สถานะ {status}) — งาน: {s['task'][:120]}\n"
+                       f"ผล: {str(summary)[:800]}\nลิงก์: {s['url']}\nสรุปรายงานพี่สั้นๆ เป็นภาษาตัวเอง")
+            with open(inbox_path, "a", encoding="utf-8") as f:
+                f.write(ev_text + "\n")
+        except Exception:
+            pass
+    if dirty:
+        try:
+            json.dump(sess, open(DEVIN_SESS_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        except Exception:
+            pass
 
 def tool_send_to_devin(task):
     """ส่งงานให้ Devin — ถ้ามี DEVIN_API_KEY เปิด Cloud session ตรง (ทำได้แม้พี่ปิดเครื่อง) ไม่งั้นตกลงคิว Render"""
     if DEVIN_API_KEY:
         try:
             res = requests.post("https://api.devin.ai/v1/sessions",
-                                json={"prompt": DEVIN_CONTEXT + task},
+                                json={"prompt": DEVIN_CONTEXT + task, "bypass_approval": True,
+                                      "tags": ["midas"]},
                                 headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=15)
             if res.status_code in (200, 201):
                 d = res.json()
-                url = d.get("url") or f"https://app.devin.ai/sessions/{d.get('session_id','')}"
+                sid = d.get("session_id", "")
+                url = d.get("url") or f"https://app.devin.ai/sessions/{sid}"
+                devin_track(sid, task, url)
                 return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url} — บอกลิงก์นี้พี่ด้วย"}
         except Exception:
             pass  # ตกลงคิว Render ต่อ
@@ -933,6 +988,7 @@ def main():
     last_weekly_report = None
     while True:
         try:
+            poll_devin_sessions(inbox_path)
             # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             now_th = datetime.now(timezone.utc) + timedelta(hours=7)
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
