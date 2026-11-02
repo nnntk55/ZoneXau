@@ -661,7 +661,7 @@ def tool_view_chart(asset, tf):
         time.sleep(1)
         if os.path.exists(img_path):
             img = open(img_path, "rb").read()
-            tg_send_photo(img, f"📊 {asset.upper()} {tf.upper()} | EMA10/50/100/200")
+            tg_send_photo(img, f"{asset.upper()} {tf.upper()} | EMA10/50/100/200")
             return {"ok": True, "image_b64": base64.b64encode(img).decode()}
         if os.path.exists(err_path):
             return {"error": f"บอทวาดกราฟไม่ได้: {open(err_path, encoding='utf-8').read()}"}
@@ -955,10 +955,10 @@ def run_agent(user_text, chat_id, image_bytes=None):
                 if data:
                     break
         if not data:
-            return "❌ AI ตอบไม่ได้ตอนนี้ (ดู console)"
+            return "AI ตอบไม่ได้ตอนนี้ (ดู console)"
         parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         if not parts:
-            return "❌ AI ตอบว่างเปล่า"
+            return "AI ตอบว่างเปล่า"
         chat_history.append({"role": "model", "parts": parts})
 
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
@@ -975,7 +975,7 @@ def run_agent(user_text, chat_id, image_bytes=None):
             # คำสั่งกระทบเงิน + เปิดโหมดถามก่อน → จัดคิวรอ y/n
             if REQUIRE_CONFIRM and name in MONEY_TOOLS and fn:
                 pending_confirm.update({"action": name, "args": args})
-                tg_send(f"⚠️ จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
+                tg_send(f"จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
                 responses.append({"functionResponse": {"name": name,
                                   "response": {"result": {"queued": "รอยืนยันจากพี่"}}}})
                 continue
@@ -996,7 +996,7 @@ def run_agent(user_text, chat_id, image_bytes=None):
                 {"inline_data": {"mime_type": "image/png", "data": img64}},
                 {"text": "นี่คือรูปกราฟที่ขอ วิเคราะห์ให้พี่หน่อย"}]})
 
-    return "⚠️ งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
+    return "งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
 
 # ==========================================
 # MAIN LOOP
@@ -1047,7 +1047,7 @@ def main():
         return
     load_memory()
     print("🤖 AI Assistant started — รอคำสั่งทาง Telegram ...")
-    tg_send("😈 Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
+    tg_send("Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
     offset = 0
     inbox_path = os.path.join(CHART_DIR, "midas_inbox.txt")
     last_weekly_report = None
@@ -1085,9 +1085,9 @@ def main():
                 if pending_confirm["action"] and text.lower() in ("y", "n"):
                     if text.lower() == "y":
                         out = TOOL_IMPL[pending_confirm["action"]](pending_confirm["args"])
-                        tg_send(f"✅ ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
+                        tg_send(f"ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
                     else:
-                        tg_send("❌ ยกเลิกคำสั่งนั้นแล้ว")
+                        tg_send("ยกเลิกคำสั่งนั้นแล้ว")
                     pending_confirm.update({"action": None, "args": None})
                     continue
                 photo = msg.get("photo")
