@@ -1,5 +1,5 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
-# พี่คุยกับพี่เดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
+# พี่คุยกับเดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
 import os, sys, json, time, requests
 
@@ -9,7 +9,7 @@ CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_bridge_state.json")
 API = "https://api.devin.ai/v1"
 
-CONTEXT = ("คุณคือ Devin พี่เดวิน ผู้พัฒนาระบบเทรด Zone Trigger ของพี่ณิณ "
+CONTEXT = ("คุณคือ Devin (เรียกตัวเองว่า เดวิน ไม่ใช่ พี่เดวิน) ผู้พัฒนาระบบเทรด Zone Trigger ของพี่ณิณ "
            "repo: https://github.com/nnntk55/ZoneXau (app.py=แดชบอร์ด Render, assistant.py=Midas AI, exness_zone_trigger_bot.py=บอท MT5) "
            "ตอบเป็นภาษาไทย กระชับ ทักพี่ว่า 'พี่' แก้บั๊ก/feature ที่สเปกชัดได้เลยแล้ว push ตรงเข้า main "
            "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ ห้ามลบข้อมูลโดยไม่ได้รับอนุญาต "
@@ -97,7 +97,7 @@ def main():
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
     st = load_state()
-    send("พี่เดวินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
+    send("เดวินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = 0
     while True:
         try:

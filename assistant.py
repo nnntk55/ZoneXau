@@ -663,10 +663,13 @@ def tool_get_news(asset=None):
     """ปฏิทินเศรษฐกิจสัปดาห์นี้ (ForexFactory feed) — กรองข่าวแรงของ USD/ทอง"""
     import xml.etree.ElementTree as ET
     try:
-        r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", timeout=20)
-        if r.status_code != 200:
-            return {"error": f"ดึงปฏิทินไม่ได้ HTTP {r.status_code}"}
-        root = ET.fromstring(r.content)
+        from news_feed import get_calendar_xml
+        feed = get_calendar_xml()
+        if not feed["xml"]:
+            wait = feed.get("retry_in")
+            return {"error": f"ดึงปฏิทินไม่ได้ ({feed['error']})"
+                             + (f" — ลองใหม่ได้ในอีก ~{max(1, wait // 60)} นาที" if wait else "")}
+        root = ET.fromstring(feed["xml"].encode("utf-8"))
         want = {"USD", "ALL"} if not asset else ({"USD", "ALL", "XAU"} if asset == "xau" else {"USD", "ALL"})
         today = time.strftime("%m-%d-%Y")
         evts = []
@@ -679,8 +682,12 @@ def tool_get_news(asset=None):
                          "ข่าว": e.findtext("title"), "สกุล": cur,
                          "forecast": e.findtext("forecast"), "previous": e.findtext("previous"),
                          "วันนี้": e.findtext("date") == today})
-        return {"ข่าวแรงสัปดาห์นี้": evts[:20],
-                "หมายเหตุ": "เวลาเป็น US Eastern — เลี่ยงเปิดออเดอร์ช่วงข่าวแรง"}
+        out = {"ข่าวแรงสัปดาห์นี้": evts[:20],
+               "หมายเหตุ": "เวลาเป็น US Eastern — เลี่ยงเปิดออเดอร์ช่วงข่าวแรง"}
+        if feed["stale"]:
+            age = int((time.time() - feed["fetched"]) // 60)
+            out["ข้อมูลจาก_cache"] = f"ดึงใหม่ไม่ได้ ({feed['error']}) — ใช้ข้อมูลเมื่อ {age} นาทีก่อน"
+        return out
     except Exception as e:
         return {"error": str(e)}
 
