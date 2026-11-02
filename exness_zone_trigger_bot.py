@@ -156,10 +156,6 @@ def init_mt5():
             print(f"❌ Failed to connect to Exness MT5: {mt5.last_error()}")
             return False
     print("✅ Connected to Exness MT5 successfully!")
-    problem = trade_permission_problem()
-    if problem:
-        print(f"⚠️ ยิงออเดอร์อัตโนมัติไม่ได้: {problem}")
-        send_telegram_notification(f"⚠️ *[MT5]* บอทจะยิงออเดอร์ไม่สำเร็จ: {problem}")
     return True
 
 SET_LABELS = {"long": "เทรดยาว", "short": "เทรดสั้น"}
@@ -712,108 +708,58 @@ def log_trade_to_dashboard(asset_key, action, price, lot, tp_pips, sl_pips, resu
     except Exception as e:
         print(f"Log Trade Error: {e}")
 
-FILLING_RETRY_RETCODE = 10030  # TRADE_RETCODE_INVALID_FILL — โบรกไม่รับ filling mode นี้
-
-def trade_permission_problem(symbol_info=None):
-    """เช็คสิทธิ์ยิงออเดอร์ฝั่ง MT5 — คืนข้อความเหตุผลถ้ายิงไม่ได้ / None ถ้าพร้อม"""
-    term = mt5.terminal_info()
-    if term is not None and not term.trade_allowed:
-        return "ปุ่ม Algo Trading (AutoTrading) ใน MT5 ปิดอยู่ — กดเปิดให้เป็นสีเขียว"
-    acc = mt5.account_info()
-    if acc is not None and not acc.trade_allowed:
-        return "บัญชีนี้ไม่อนุญาตให้เทรด (ล็อกอินด้วยรหัส investor/read-only หรือบัญชีถูกจำกัด)"
-    if acc is not None and hasattr(acc, "trade_expert") and not acc.trade_expert:
-        return "บัญชีนี้ไม่อนุญาตให้ EA/สคริปต์เทรดอัตโนมัติ"
-    if symbol_info is not None and getattr(symbol_info, "trade_mode", None) == getattr(mt5, "SYMBOL_TRADE_MODE_DISABLED", 0):
-        return f"สัญลักษณ์ {symbol_info.name} ปิดการเทรดอยู่ (ตลาดปิด/โบรกปิด)"
-    return None
-
-def filling_mode_candidates(symbol_info):
-    """เรียง filling mode ที่ symbol รองรับ (bit 1=FOK, bit 2=IOC) — Exness หลายบัญชีไม่รับ IOC"""
-    flags = int(getattr(symbol_info, "filling_mode", 0) or 0)
-    modes = []
-    if flags & 1:
-        modes.append(mt5.ORDER_FILLING_FOK)
-    if flags & 2:
-        modes.append(mt5.ORDER_FILLING_IOC)
-    for m in (mt5.ORDER_FILLING_RETURN, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_IOC):
-        if m not in modes:
-            modes.append(m)
-    return modes
-
 def execute_exness_order(symbol, action, lot, sl_pips, tp_pips, asset_key=None):
-    def fail(reason):
-        print(f"❌ Order failed ({symbol} {action}): {reason}")
-        send_telegram_notification(f"⚠️ *[EXECUTION FAILED]* {symbol} {action}: {reason}")
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        print(f"❌ Symbol {symbol} not found")
+        return False
+    if not symbol_info.visible:
+        mt5.symbol_select(symbol, True)
+
+    point = symbol_info.point
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
         return False
 
-    try:
-        symbol_info = mt5.symbol_info(symbol)
-        if symbol_info is None:
-            return fail(f"ไม่พบสัญลักษณ์ {symbol} ใน MT5 ({mt5.last_error()})")
-        if not symbol_info.visible:
-            if not mt5.symbol_select(symbol, True):
-                return fail(f"เพิ่ม {symbol} เข้า Market Watch ไม่ได้ ({mt5.last_error()})")
-            symbol_info = mt5.symbol_info(symbol) or symbol_info
+    price = tick.ask if action == "BUY" else tick.bid
+    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+    
+    pip_multiplier = 10 if "JPY" in symbol or symbol.startswith("XAU") else 1
+    sl_distance = sl_pips * point * pip_multiplier
+    tp_distance = tp_pips * point * pip_multiplier
 
-        problem = trade_permission_problem(symbol_info)
-        if problem:
-            return fail(problem)
+    sl_price = price - sl_distance if action == "BUY" else price + sl_distance
+    tp_price = price + tp_distance if action == "BUY" else price - tp_distance
 
-        point = symbol_info.point
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            return fail(f"ดึงราคา tick ไม่ได้ ({mt5.last_error()})")
+    request_payload = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": float(lot),
+        "type": order_type,
+        "price": price,
+        "sl": float(sl_price),
+        "tp": float(tp_price),
+        "deviation": 20,
+        "magic": 202610,
+        "comment": "Zone Trigger Exness Direct",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
 
-        price = tick.ask if action == "BUY" else tick.bid
-        order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+    result = mt5.order_send(request_payload)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"❌ Order failed: {result.comment}")
+        send_telegram_notification(f"⚠️ *[EXECUTION FAILED]* {symbol} {action}: {result.comment}")
+        return False
 
-        pip_multiplier = 10 if "JPY" in symbol or symbol.startswith("XAU") else 1
-        sl_distance = sl_pips * point * pip_multiplier
-        tp_distance = tp_pips * point * pip_multiplier
-
-        sl_price = price - sl_distance if action == "BUY" else price + sl_distance
-        tp_price = price + tp_distance if action == "BUY" else price - tp_distance
-
-        request_payload = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": float(lot),
-            "type": order_type,
-            "price": price,
-            "sl": float(sl_price),
-            "tp": float(tp_price),
-            "deviation": 20,
-            "magic": 202610,
-            "comment": "Zone Trigger Exness Direct",
-            "type_time": mt5.ORDER_TIME_GTC,
+    print(f"✅ Order executed: Ticket #{result.order} at {price} (Lot: {lot})")
+    if asset_key:
+        ASSETS[asset_key]["open_position"] = {
+            "action": action, "price": price, "lot": lot,
+            "sl": sl_price, "tp": tp_price, "opened": time.time()
         }
-
-        result = None
-        for filling in filling_mode_candidates(symbol_info):
-            request_payload["type_filling"] = filling
-            result = mt5.order_send(request_payload)
-            if result is None:
-                return fail(f"order_send ไม่ตอบกลับ — {mt5.last_error()}")
-            if result.retcode != FILLING_RETRY_RETCODE:
-                break
-            print(f"⚠️ {symbol}: filling mode {filling} ไม่รองรับ — ลองโหมดถัดไป")
-
-        if result.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL):
-            return fail(f"retcode {result.retcode} — {result.comment}")
-
-        price = result.price or price
-        lot = result.volume or lot
-        print(f"✅ Order executed: Ticket #{result.order} at {price} (Lot: {lot})")
-        if asset_key:
-            ASSETS[asset_key]["open_position"] = {
-                "action": action, "price": price, "lot": lot,
-                "sl": sl_price, "tp": tp_price, "opened": time.time()
-            }
-            log_trade_to_dashboard(asset_key, action, price, lot, tp_pips, sl_pips)
-        return True
-    except Exception as e:
-        return fail(f"exception: {e}")
+        log_trade_to_dashboard(asset_key, action, price, lot, tp_pips, sl_pips)
+    return True
 
 def check_open_position(asset_key):
     """ติดตาม position ที่เปิดอยู่ — เมื่อปิด (TP/SL/manual) แจ้งเตือนและบันทึกผล"""
@@ -879,14 +825,7 @@ def run_asset_radar(asset_key):
                 send_telegram_notification(f"⏰ *{name}*: คำถามยืนยันหมดเวลา (30 นาที) — ปล่อยผ่าน รอสัญญาณแท่งใหม่")
                 push_config_to_render(asset_key)
 
-            # หยุดทั้งคู่เงินก็ต่อเมื่อ "ทั้งสองชุด" ปิด/พัก — ชุดใดยัง ON อยู่ก็ให้ทำงานต่อ (เทรดสั้นไม่โดน OFF ของเทรดยาวกีดกัน)
-            s2_gate = st.get("set2") if isinstance(st.get("set2"), dict) else {}
-            long_can_run = st.get("is_active", True) and not st.get("auto_paused_today")
-            short_can_run = s2_gate.get("is_active", True) and not s2_gate.get("auto_paused_today")
-            if not (long_can_run or short_can_run):
-                print(f"⏸️ {name} is paused (both sets off/paused), waiting...")
-                time.sleep(10)
-                continue
+            # feed ราคา/alert/กราฟ ทำงานตลอดแม้ปิดเทรดทั้ง 2 ชุด — การล่าสัญญาณกั้นแยกชุดเองที่ process_stage_set
 
             # 📊 คำนวณค่า Stoch ทุก Timeframe และดึงราคาปัจจุบันเพื่อส่งขึ้น Render
             stoch_payload = {}
@@ -1406,6 +1345,13 @@ def process_stage_set(asset_key, s, set_key):
     # ข้าม stage ที่ถูกตั้งเป็น "off" ไปยังลำดับถัดไป
     while 1 <= s["current_stage"] <= 4 and stage_tfs[s["current_stage"] - 1] == "off":
         s["current_stage"] += 1
+
+    # ค้างที่ Stage 5 แต่ TF ปลายทางถูกปิดไปแล้ว → เซตอัพไม่มีทางยิง กลับไปสแกนใหม่
+    if s.get("current_stage") == 5 and tf_s4 == "off":
+        s["current_stage"] = 1
+        s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+        s["stage4_signal_sent"] = False
+        s["s4_confirm_candle"] = None
     
     # รีเซ็ตสถานะ Stage 4/5 เมื่อ stage ถูกเปลี่ยนหรือเริ่มรอบใหม่ (ต่ำกว่า 4 เท่านั้น — อย่าเคลียร์ตอนรอเข้าออเดอร์)
     if s.get("current_stage", 1) < 4:
@@ -1516,6 +1462,16 @@ def process_stage_set(asset_key, s, set_key):
             # Stage 5: Stoch จบแล้ว — รอแท่งเทียนของ TF Stage 4 ปิดเหนือ EMA10 → ถามยืนยัน BUY (ครั้งเดียวต่อแท่ง)
             df_s4 = fetch_mt5_candles(symbol, tf_s4)
             if df_s4 is not None and len(df_s4) > 10:
+                # setup หลุด: stoch กลับข้ามเส้นกลาง (K>50) ก่อนเทียนปิดเหนือ EMA10 → เซตอัพตาย กลับไปสแกนใหม่
+                k5, _ = calculate_stochastic_rsi(df_s4)
+                if k5 is not None and float(k5.iloc[-1]) > 50:
+                    s["current_stage"] = 1
+                    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+                    s["stage4_signal_sent"] = False
+                    s["s4_confirm_candle"] = None
+                    send_telegram_notification(f"🔄 *{name}*: เซตอัพหลุดจาก Low Zone (K={float(k5.iloc[-1]):.1f}) — กลับไปเริ่มสแกน Stage 1 ใหม่")
+                    push_config_to_render(asset_key)
+                    return
                 df_s4['EMA10'] = df_s4['Close'].ewm(span=10, adjust=False).mean()
                 closed_close = float(df_s4['Close'].iloc[-2])
                 closed_ema10 = float(df_s4['EMA10'].iloc[-2])
@@ -1655,6 +1611,16 @@ def process_stage_set(asset_key, s, set_key):
             # Stage 5: Stoch จบแล้ว — รอแท่งเทียนของ TF Stage 4 ปิดใต้ EMA10 → ถามยืนยัน SELL (ครั้งเดียวต่อแท่ง)
             df_s4 = fetch_mt5_candles(symbol, tf_s4)
             if df_s4 is not None and len(df_s4) > 10:
+                # setup หลุด: stoch กลับข้ามเส้นกลาง (K<50) ก่อนเทียนปิดใต้ EMA10 → เซตอัพตาย กลับไปสแกนใหม่
+                k5, _ = calculate_stochastic_rsi(df_s4)
+                if k5 is not None and float(k5.iloc[-1]) < 50:
+                    s["current_stage"] = 1
+                    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+                    s["stage4_signal_sent"] = False
+                    s["s4_confirm_candle"] = None
+                    send_telegram_notification(f"🔄 *{name}*: เซตอัพหลุดจาก High Zone (K={float(k5.iloc[-1]):.1f}) — กลับไปเริ่มสแกน Stage 1 ใหม่")
+                    push_config_to_render(asset_key)
+                    return
                 df_s4['EMA10'] = df_s4['Close'].ewm(span=10, adjust=False).mean()
                 closed_close = float(df_s4['Close'].iloc[-2])
                 closed_ema10 = float(df_s4['EMA10'].iloc[-2])
