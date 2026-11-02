@@ -389,8 +389,9 @@ def tool_send_to_devin(task):
                                 json={"prompt": DEVIN_CONTEXT + task},
                                 headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=15)
             if res.status_code in (200, 201):
-                url = res.json().get("url", "")
-                return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url}".strip()}
+                d = res.json()
+                url = d.get("url") or f"https://app.devin.ai/sessions/{d.get('session_id','')}"
+                return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url} — บอกลิงก์นี้พี่ด้วย"}
         except Exception:
             pass  # ตกลงคิว Render ต่อ
     try:
