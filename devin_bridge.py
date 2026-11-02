@@ -71,9 +71,6 @@ def _self_update_worker():
             if not sha:
                 continue
             old = open(SELF_UPDATE_SHA_FILE).read().strip() if os.path.exists(SELF_UPDATE_SHA_FILE) else ""
-            if not old:
-                open(SELF_UPDATE_SHA_FILE, "w").write(sha)
-                continue
             if sha == old:
                 continue
             z = requests.get(f"https://github.com/{SELF_UPDATE_REPO}/archive/refs/heads/main.zip", timeout=60)
