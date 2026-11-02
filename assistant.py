@@ -41,7 +41,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODELS = os.environ.get("OPENROUTER_MODELS",
-    "deepseek/deepseek-chat-v3.1:free,meta-llama/llama-3.3-70b-instruct:free,openai/gpt-oss-120b:free").split(",")
+    "deepseek/deepseek-chat-v3.1:free,meta-llama/llama-3.3-70b-instruct:free,openai/gpt-oss-120b:free,google/gemini-2.0-flash-exp:free,mistralai/mistral-small-3.1-24b-instruct:free,meta-llama/llama-4-maverick:free").split(",")
 POLL_TIMEOUT = 20
 MAX_HISTORY = 20          # จำบทสนทนาย้อนหลังกี่ข้อความ
 MAX_AGENT_STEPS = 6       # กัน loop tool call ไม่จบ
