@@ -983,7 +983,47 @@ def run_agent(user_text, chat_id, image_bytes=None):
 # ==========================================
 # MAIN LOOP
 # ==========================================
+SELF_UPDATE_REPO = "nnntk55/ZoneXau"
+SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
+
+def _self_update_worker():
+    """เช็ค commit ใหม่บน GitHub ทุก 10 นาที — เจอของใหม่โหลดไฟล์ทับแล้วออกตัวเอง ให้ .bat loop รันใหม่"""
+    import threading
+    while True:
+        time.sleep(600)
+        try:
+            sha = requests.get(f"https://api.github.com/repos/{SELF_UPDATE_REPO}/commits/main",
+                               timeout=15).json().get("sha")
+            if not sha:
+                continue
+            old = open(SELF_UPDATE_SHA_FILE).read().strip() if os.path.exists(SELF_UPDATE_SHA_FILE) else ""
+            if not old:
+                open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+                continue
+            if sha == old:
+                continue
+            z = requests.get(f"https://github.com/{SELF_UPDATE_REPO}/archive/refs/heads/main.zip", timeout=60)
+            import zipfile, tempfile
+            zp = os.path.join(tempfile.gettempdir(), "zx_upd.zip")
+            open(zp, "wb").write(z.content)
+            base = os.path.dirname(os.path.abspath(__file__))
+            with zipfile.ZipFile(zp) as zf:
+                for n in zf.namelist():
+                    fn = os.path.basename(n)
+                    if n.endswith("/") or not (fn.endswith(".py") or fn == "app.py" or fn.startswith("loop_")):
+                        continue
+                    open(os.path.join(base, fn), "wb").write(zf.read(n))
+            open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+            print(f"🔄 self-update: โค้ดใหม่ {sha[:8]} — รีสตาร์ทตัวเอง")
+            time.sleep(3)
+            os._exit(0)
+        except Exception as e:
+            print(f"self-update check error: {e}")
+
 def main():
+    import threading
+    threading.Thread(target=_self_update_worker, daemon=True).start()
     if not all([ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL]):
         print("❌ ตั้ง env ไม่ครบ: ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL")
         return
