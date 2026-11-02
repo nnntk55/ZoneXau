@@ -1291,7 +1291,7 @@ def update_order_config(asset_key):
 @app.route("/healthz")
 def healthz():
     """health check เบาๆ สำหรับ Render — ตอบทันทีไม่วาดกราฟ กัน health check timeout ตอน deploy"""
-    return "ok", 200
+    return "ok " + os.environ.get("RENDER_GIT_COMMIT", "")[:7], 200
 
 @app.route("/")
 def home():
