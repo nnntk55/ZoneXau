@@ -1,5 +1,6 @@
 import os
 import io
+import copy
 import json
 import time
 import threading
@@ -164,9 +165,25 @@ SET_LABELS = {"long": "เทรดยาว", "short": "เทรดสั้�
 ASSET_LOCKS = {k: threading.RLock() for k in ASSETS}
 
 # field ความคืบหน้าที่บอทเป็นเจ้าของ — ถ้า push ขึ้น Render ไม่สำเร็จ ห้ามให้ sync รอบถัดไปดึงค่าเก่ามาทับ
-PROGRESS_KEYS = ("current_stage", "active_direction", "is_active", "auto_paused_today",
+# (is_active ไม่อยู่ในนี้ — คำสั่ง OFF จากพี่/Midas ต้องชนะเสมอ)
+PROGRESS_KEYS = ("current_stage", "active_direction",
                  "stage1_notified", "stage2_notified", "stage3_notified",
                  "stage4_signal_sent", "s4_confirm_candle", "last_trade_date")
+
+def _progress_snapshot(s):
+    snap = {k: s[k] for k in PROGRESS_KEYS if k in s}
+    snap["_tfs"] = s.get("stage_tfs")
+    snap["_active"] = s.get("is_active", True)
+    snap["_paused"] = s.get("auto_paused_today", False)
+    return snap
+
+def _progress_restore(s, snap):
+    """คืนค่าความคืบหน้าของบอท — ยกเว้นพี่เพิ่งเปลี่ยน stage_tfs/เปิดชุดใหม่ (ตั้งใจให้รีเซ็ต)"""
+    if s.get("stage_tfs") != snap["_tfs"] or (not snap["_active"] and s.get("is_active", True)):
+        return
+    s.update({k: v for k, v in snap.items() if not k.startswith("_")})
+    if snap["_paused"]:
+        s["auto_paused_today"] = True  # บอทพักเอง (ครบโควต้า) แต่ push ไม่ถึง Render → ห้ามปลด pause เอง
 
 BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.json")
 
@@ -212,6 +229,15 @@ def dash_headers():
     """header สำหรับเรียก API ของ dashboard (ถ้าตั้ง DASH_API_KEY)"""
     return {"X-Api-Key": DASH_API_KEY} if DASH_API_KEY else {}
 
+def _reset_stage_progress(s):
+    """stage_tfs เปลี่ยน/เปิด-ปิด stage ไหนก็ตาม → เริ่มสแกนใหม่ที่ stage แรกที่เปิดอยู่"""
+    tfs = s.get("stage_tfs", ["4h", "1h", "15m", "5m"])
+    s["current_stage"] = next((i + 1 for i, t in enumerate(tfs) if t != "off"), 1)
+    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+    s["stage4_signal_sent"] = False
+    s["s4_confirm_candle"] = None
+    s["sr_alert_sent"] = False
+
 def sync_config_from_render(asset_key):
     """ดึงค่าคอนฟิกและสถานะล่าสุดจาก Render Dashboard มาอัปเดตใส่บอทแบบ Real-time"""
     try:
@@ -222,24 +248,50 @@ def sync_config_from_render(asset_key):
         if res.status_code == 200:
             data = res.json()
             st = ASSETS[asset_key]["state"]
-            keep_long = {k: st[k] for k in PROGRESS_KEYS if k in st} if dirty else None
-            keep_short = ({k: st["set2"][k] for k in PROGRESS_KEYS if k in st["set2"]}
-                          if dirty and isinstance(st.get("set2"), dict) else None)
+            # จำค่าที่เห็นบน Render รอบนี้ — push จะส่งกลับเฉพาะที่บอทเปลี่ยนเอง
+            ASSETS[asset_key]["synced"] = copy.deepcopy({
+                "is_active": data.get("is_active"), "auto_paused_today": data.get("auto_paused_today"),
+                "set2": data.get("set2") if isinstance(data.get("set2"), dict) else None,
+                "alerts": data.get("alerts") if isinstance(data.get("alerts"), list) else None})
+            keep_long = _progress_snapshot(st) if dirty else None
+            keep_short = _progress_snapshot(st["set2"]) if dirty and isinstance(st.get("set2"), dict) else None
             if "lot" in data: st["lot"] = float(data["lot"])
             if "tp_pips" in data: st["tp_pips"] = int(data["tp_pips"])
             if "sl_pips" in data: st["sl_pips"] = int(data["sl_pips"])
             if "current_stage" in data: st["current_stage"] = int(data["current_stage"])
-            if "is_active" in data: st["is_active"] = bool(data["is_active"])
+            if "is_active" in data:
+                if not st.get("is_active", True) and bool(data["is_active"]):
+                    _reset_stage_progress(st)
+                    print(f"🔄 {asset_key}: เทรดยาวเปิดใหม่ — รีเซ็ตไป Stage {st['current_stage']}")
+                st["is_active"] = bool(data["is_active"])
             if "active_direction" in data: st["active_direction"] = str(data["active_direction"])
             if "target_mode" in data: st["target_mode"] = str(data["target_mode"])
             if "custom_mode" in data: st["custom_mode"] = bool(data["custom_mode"])
             if "custom_tf" in data: st["custom_tf"] = data["custom_tf"]
             if "custom_dir" in data: st["custom_dir"] = data["custom_dir"]
-            if "stage_tfs" in data: st["stage_tfs"] = list(data["stage_tfs"])
+            if "stage_tfs" in data:
+                new_tfs = list(data["stage_tfs"])
+                if st.get("stage_tfs") != new_tfs:
+                    st["stage_tfs"] = new_tfs
+                    _reset_stage_progress(st)
+                    print(f"🔄 {asset_key}: stage_tfs เปลี่ยนเป็น {new_tfs} — รีเซ็ตไป Stage {st['current_stage']}")
+                    push_config_to_render(asset_key)
+                else:
+                    st["stage_tfs"] = new_tfs
             if "s5_enabled" in data: st["s5_enabled"] = bool(data["s5_enabled"])
             if "sr_enabled" in data: st["sr_enabled"] = bool(data["sr_enabled"])
             if "auto_order" in data: st["auto_order"] = bool(data["auto_order"])
-            if "set2" in data and isinstance(data["set2"], dict): st["set2"] = data["set2"]
+            if "set2" in data and isinstance(data["set2"], dict):
+                old_s2 = st.get("set2") or {}
+                st["set2"] = data["set2"]
+                s2_reactivated = not old_s2.get("is_active", True) and st["set2"].get("is_active", True)
+                if s2_reactivated:
+                    _reset_stage_progress(st["set2"])
+                    print(f"🔄 {asset_key} เทรดสั้นเปิดใหม่ — รีเซ็ตไป Stage {st['set2']['current_stage']}")
+                if s2_reactivated or old_s2.get("stage_tfs") != st["set2"].get("stage_tfs"):
+                    _reset_stage_progress(st["set2"])
+                    print(f"🔄 {asset_key} เทรดสั้น: stage_tfs เปลี่ยน — รีเซ็ตไป Stage {st['set2']['current_stage']}")
+                    push_config_to_render(asset_key)
             if "alerts" in data and isinstance(data["alerts"], list): st["alerts"] = data["alerts"]
             # sync flag การแจ้งเตือนด้วย — ป้องกัน flag เก่าค้างทำให้ข้าม stage เงียบๆ หลัง user รีเซ็ตค่า
             # auto_paused_today ต้อง sync ด้วย ไม่งั้นปลด pause บนเว็บแล้วบอทยังพักเงียบอยู่ดี
@@ -249,9 +301,9 @@ def sync_config_from_render(asset_key):
                 if flag in data: st[flag] = bool(data[flag])
             if "s4_confirm_candle" in data: st["s4_confirm_candle"] = data["s4_confirm_candle"]
             if dirty:
-                st.update(keep_long)
+                _progress_restore(st, keep_long)
                 if keep_short is not None and isinstance(st.get("set2"), dict):
-                    st["set2"].update(keep_short)
+                    _progress_restore(st["set2"], keep_short)
                 print(f"⚠️ {asset_key}: push ค้างอยู่ — คงค่า stage/flags ของบอทไว้ ไม่ใช้ค่าจาก Render รอบนี้")
             # ตรวจคำสั่ง yes/no ที่ผู้ใช้พิมพ์ผ่าน Telegram webhook ของ Dashboard
             cmd = data.get("user_command")
@@ -260,6 +312,7 @@ def sync_config_from_render(asset_key):
                 if pend:
                     handle_pending_reply(asset_key, cmd, pend.get("msg_id"))
                 clear_user_command(asset_key)
+            st["_synced_once"] = True  # ปลดล็อก push — กัน push ค่า default ทับค่าจริงก่อน sync รอบแรก
             print(f"✅ Synced config for {asset_key} from Render, is_active={st['is_active']}")
         else:
             print(f"⚠️ Config sync failed for {asset_key}: {res.status_code}")
@@ -283,7 +336,11 @@ def push_market_data_to_render(asset_key, price, stoch_data):
         print(f"❌ Push Market Data Error ({asset_key}): {e}")
 
 def push_config_to_render(asset_key):
-    """ส่งค่า config กลับไป Render Dashboard (หลังจากเทรดเสร็จหรือเปลี่ยนสถานะ)"""
+    """ส่งค่า config กลับไป Render Dashboard (หลังจากเทรดเสร็จหรือเปลี่ยนสถานะ)
+    ห้าม push ก่อน sync รอบแรกสำเร็จ — ไม่งั้นค่า default (is_active=True) จะทับค่า OFF ที่ผู้ใช้ตั้งไว้"""
+    st = ASSETS[asset_key]["state"]
+    if not st.get("_synced_once"):
+        return
     try:
         url = f"{RENDER_DASHBOARD_URL}/api/update_config/{asset_key}"
         st = ASSETS[asset_key]["state"]
@@ -306,8 +363,10 @@ def push_config_to_render(asset_key):
             "set2": st.get("set2"),
             "alerts": st.get("alerts")
         }
-        res = requests.post(url, json=payload, timeout=10, headers=dash_headers())
+        _drop_unchanged_user_fields(asset_key, payload)
+        res = requests.post(url, json=payload, timeout=15, headers=dash_headers())
         if res.status_code == 200:
+            _mark_pushed(asset_key, payload)
             ASSETS[asset_key]["config_dirty"] = False
             print(f"✅ Pushed config to Render for {asset_key}")
             return True
@@ -316,6 +375,39 @@ def push_config_to_render(asset_key):
         print(f"Push Config Error ({asset_key}): {e}")
     ASSETS[asset_key]["config_dirty"] = True
     return False
+
+_MISSING = object()
+
+def _drop_unchanged_user_fields(asset_key, payload):
+    """ตัดค่าที่บอทไม่ได้เปลี่ยนเองออกจาก payload — กันค่าเก่าในบอททับคำสั่งที่พี่/Midas
+    เพิ่งสั่งบน Render ระหว่างรอบ (เช่น ปิดเทรดสั้นแล้วบอท push is_active=True เก่ากลับไป)"""
+    syn = ASSETS[asset_key].get("synced")
+    if not syn:
+        return
+    for k in ("is_active", "auto_paused_today"):
+        if payload.get(k) == syn.get(k):
+            payload.pop(k, None)
+    s2, base = payload.get("set2"), syn.get("set2")
+    if isinstance(s2, dict) and isinstance(base, dict):
+        diff = {k: v for k, v in s2.items() if base.get(k, _MISSING) != v}
+        if diff:
+            payload["set2"] = diff
+        else:
+            payload.pop("set2", None)
+    if syn.get("alerts") is not None and payload.get("alerts") == syn.get("alerts"):
+        payload.pop("alerts", None)
+
+def _mark_pushed(asset_key, payload):
+    syn = ASSETS[asset_key].get("synced")
+    if not syn:
+        return
+    for k in ("is_active", "auto_paused_today"):
+        if k in payload:
+            syn[k] = payload[k]
+    if isinstance(payload.get("set2"), dict) and isinstance(syn.get("set2"), dict):
+        syn["set2"].update(copy.deepcopy(payload["set2"]))
+    if isinstance(payload.get("alerts"), list):
+        syn["alerts"] = copy.deepcopy(payload["alerts"])
 
 def current_trade_date():
     """วันเทรดของระบบ — วันใหม่เริ่มตอน 05:00 น. ตามเวลาไทย (ก่อนตี 5 ยังนับเป็นวันเดิม)"""
@@ -568,8 +660,16 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k_period=3, d_p
     d = k.rolling(window=d_period).mean()
     return k, d
 
+import re
+_EMOJI_RE = re.compile(r'[\U0001F300-\U0001FAFF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF\uFE0F\u2190-\u21FF\u2B05-\u2B55]')
+
+def _no_emoji(t):
+    """พี่สั่ง: ไม่เอาอีโมจิในข้อความ Telegram — strip ที่จุดส่งทีเดียวครอบทุกข้อความ"""
+    return _EMOJI_RE.sub('', str(t)).strip()
+
 def send_telegram_notification(message):
     try:
+        message = _no_emoji(message)
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         res = requests.post(url, json=payload, timeout=10)
@@ -619,7 +719,7 @@ def send_telegram_confirmation(asset_key, symbol, action, latest_k, latest_d, cl
 
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
+            "text": _no_emoji(message),
             "parse_mode": "Markdown"
         }
         res = requests.post(url, json=payload, timeout=10)
@@ -695,6 +795,7 @@ def clear_user_command(asset_key):
 def send_telegram_photo(photo_bytes, caption):
     if not photo_bytes:
         return send_telegram_notification(caption)
+    caption = _no_emoji(caption)
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("chart.png", photo_bytes, "image/png")}
@@ -905,14 +1006,7 @@ def run_asset_radar(asset_key):
                 send_telegram_notification(f"⏰ *{name}*: คำถามยืนยันหมดเวลา (30 นาที) — ปล่อยผ่าน รอสัญญาณแท่งใหม่")
                 push_config_to_render(asset_key)
 
-            # หยุดทั้งคู่เงินก็ต่อเมื่อ "ทั้งสองชุด" ปิด/พัก — ชุดใดยัง ON อยู่ก็ให้ทำงานต่อ (เทรดสั้นไม่โดน OFF ของเทรดยาวกีดกัน)
-            s2_gate = st.get("set2") if isinstance(st.get("set2"), dict) else {}
-            long_can_run = st.get("is_active", True) and not st.get("auto_paused_today")
-            short_can_run = s2_gate.get("is_active", True) and not s2_gate.get("auto_paused_today")
-            if not (long_can_run or short_can_run):
-                print(f"⏸️ {name} is paused (both sets off/paused), waiting...")
-                time.sleep(10)
-                continue
+            # feed ราคา/alert/กราฟ ทำงานตลอดแม้ปิดเทรดทั้ง 2 ชุด — การล่าสัญญาณกั้นแยกชุดเองที่ process_stage_set
 
             # 📊 คำนวณค่า Stoch ทุก Timeframe และดึงราคาปัจจุบันเพื่อส่งขึ้น Render
             stoch_payload = {}
@@ -1167,7 +1261,7 @@ def send_to_midas(text):
     if MIDAS_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             requests.post(f"https://api.telegram.org/bot{MIDAS_BOT_TOKEN}/sendMessage",
-                          json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+                          json={"chat_id": TELEGRAM_CHAT_ID, "text": _no_emoji(text)}, timeout=10)
         except Exception:
             pass
 
@@ -1434,6 +1528,13 @@ def process_stage_set(asset_key, s, set_key):
     # ข้าม stage ที่ถูกตั้งเป็น "off" ไปยังลำดับถัดไป
     while 1 <= s["current_stage"] <= 4 and stage_tfs[s["current_stage"] - 1] == "off":
         s["current_stage"] += 1
+
+    # ค้างที่ Stage 5 แต่ TF ปลายทางถูกปิดไปแล้ว → เซตอัพไม่มีทางยิง กลับไปสแกนใหม่
+    if s.get("current_stage") == 5 and tf_s4 == "off":
+        s["current_stage"] = 1
+        s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+        s["stage4_signal_sent"] = False
+        s["s4_confirm_candle"] = None
     
     # รีเซ็ตสถานะ Stage 4/5 เมื่อ stage ถูกเปลี่ยนหรือเริ่มรอบใหม่ (ต่ำกว่า 4 เท่านั้น — อย่าเคลียร์ตอนรอเข้าออเดอร์)
     if s.get("current_stage", 1) < 4:
@@ -1726,7 +1827,45 @@ def process_stage_set(asset_key, s, set_key):
                             s["s4_confirm_candle"] = None  # ส่งถามไม่ได้ → ให้ลองแท่งเดิมอีกรอบหน้า
 
 
+SELF_UPDATE_REPO = "nnntk55/ZoneXau"
+SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
+
+def _self_update_worker():
+    """เช็ค commit ใหม่บน GitHub ทุก 10 นาที — เจอของใหม่โหลดไฟล์ทับแล้วออกตัวเอง ให้ .bat loop รันใหม่"""
+    while True:
+        time.sleep(600)
+        try:
+            sha = requests.get(f"https://api.github.com/repos/{SELF_UPDATE_REPO}/commits/main",
+                               timeout=15).json().get("sha")
+            if not sha:
+                continue
+            old = open(SELF_UPDATE_SHA_FILE).read().strip() if os.path.exists(SELF_UPDATE_SHA_FILE) else ""
+            if not old:  # ครั้งแรก — จำ sha ปัจจุบันไว้เฉยๆ กันรีสตาร์ทมั่ว
+                open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+                continue
+            if sha == old:
+                continue
+            z = requests.get(f"https://github.com/{SELF_UPDATE_REPO}/archive/refs/heads/main.zip", timeout=60)
+            import zipfile, tempfile
+            zp = os.path.join(tempfile.gettempdir(), "zx_upd.zip")
+            open(zp, "wb").write(z.content)
+            base = os.path.dirname(os.path.abspath(__file__))
+            with zipfile.ZipFile(zp) as zf:
+                for n in zf.namelist():
+                    fn = os.path.basename(n)
+                    if n.endswith("/") or not (fn.endswith(".py") or fn == "app.py" or fn.startswith("loop_")):
+                        continue
+                    open(os.path.join(base, fn), "wb").write(zf.read(n))
+            open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+            print(f"🔄 self-update: โค้ดใหม่ {sha[:8]} — รีสตาร์ทตัวเอง")
+            time.sleep(3)
+            os._exit(0)  # loop .bat จะรันใหม่ด้วยโค้ดล่าสุด
+        except Exception as e:
+            print(f"self-update check error: {e}")
+
 if __name__ == "__main__":
+    threading.Thread(target=_self_update_worker, daemon=True).start()
     if init_mt5():
         # รีเซ็ต pending_confirmation ทุก asset เมื่อเริ่มรันใหม่
         for key in ASSETS.keys():

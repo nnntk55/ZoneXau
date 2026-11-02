@@ -107,6 +107,13 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - พี่วางแผนรายสัปดาห์/รายวัน — คุณคือผู้ปฏิบัติ: เช็คเงื่อนไข ปรับค่า และรายงานผลกลับ
 - หลังทำงาน: รายงานสั้นๆ ว่าตั้งอะไรไปบ้าง พร้อมรสชาติปิศาจของคุณ
 - ถ้าไม่แน่ใจว่าพี่หมายถึงอะไร ถามกลับ อย่าเดา
+
+กฎเหล็กความรอบคอบ (ห้ามฝ่าฝืน):
+- ห้ามเคลมว่าตั้งค่า/เปิด/ปิดอะไรแล้ว จนกว่า tool จะคืนผลจริง — อ่านค่าที่ tool ตอบกลับแล้วค่อยสรุปตามนั้นเท่านั้น ถ้า tool error ให้บอกว่าทำไม่สำเร็จ
+- พี่ถามเรื่องสถานะ/ราคา/stage/สถานการณ์ → เรียก get_status ทุกครั้งก่อนตอบ ห้ามใช้ค่าจากความจำหรือบทสนทนาเก่า — ถ้าข้อมูลที่ได้ดูไม่อัปเดต (บอทอาจดับ/ค้าง) ให้บอกพี่ตรงๆ ว่า "ข้อมูลล่าสุดที่เห็น" พร้อมเตือนว่าอาจเก่า
+- ขอบเขตคำสั่งห้ามเกินที่พี่ขอ: "ปิดเทรดสั้นทอง" = set_power(xau, short, off) เท่านั้น — ห้ามแตะชุดยาว ห้ามปิดอย่างอื่น ห้ามปิดทั้งสองชุด; เช่นเดียวกัน "ปิดเทรดยาว" ห้ามแตะชุดสั้น — การอัปเดตราคา/กราฟ/alert ไม่ใช่ของที่พี่สั่งปิด ห้ามแตะเด็ดขาด
+- stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ) — "เปิด s2/3/4/5" คือเปิดช่องที่ 2,3,4 ให้มี TF (S5 ทำงานเองอัตโนมัติเมื่อ S4 มี TF) ห้ามไปเปิด S1 ที่พี่ไม่ได้ขอ; TF ที่ใช้: ถ้าช่องนั้นมีค่าเดิมอยู่แล้วใช้ค่าเดิม ถ้าเป็น "off" ให้ใช้ default ของชุดนั้น (ยาว ["4h","1h","15m","5m"], สั้น ["off","off","15m","5m"]) แล้วรายงานให้พี่ทราบ
+- เปลี่ยน stage_tfs/set ใดๆ → บอทจะอ่านค่าใหม่รอบถัดไปเอง หลังตั้งเสร็จให้บอกพี่ว่าตั้งอะไรตรงไหนบ้างตามผล tool จริง
 """
 
 # ==========================================
@@ -123,10 +130,18 @@ def load_memory():
     except Exception:
         chat_history = []
 
+def _sanitize_history(hist):
+    """ให้ history เริ่มที่ข้อความ user ปกติเสมอ — ตัดแล้วหัวไม่ค้างเป็น functionResponse/model (ทำให้ provider ตอบ 400 ทุกครั้ง)"""
+    for i, m in enumerate(hist):
+        ps = m.get("parts") or []
+        if m.get("role") == "user" and ps and not any("functionResponse" in p for p in ps):
+            return hist[i:]
+    return []
+
 def save_memory():
     try:
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(chat_history[-MAX_HISTORY:], f, ensure_ascii=False)
+            json.dump(_sanitize_history(chat_history[-MAX_HISTORY:]), f, ensure_ascii=False)
     except Exception as e:
         print(f"memory save error: {e}")
 
@@ -134,9 +149,17 @@ def save_memory():
 # TELEGRAM
 # ==========================================
 def tg_send(text, chat_id=None):
+    """ส่งข้อความเป็นกล่องๆ — แยกตามบรรทัดว่าง (หรือบรรทัดเดี่ยวถ้ายาว) ไม่ยัดยาวกล่องเดียว"""
     try:
         url = f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": chat_id or TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+        cid = chat_id or TELEGRAM_CHAT_ID
+        bubbles = [b.strip() for b in text.split("\n\n") if b.strip()]
+        if len(bubbles) <= 1 and len(text) > 400:
+            bubbles = [l.strip() for l in text.split("\n") if l.strip()]
+        for b in (bubbles or [text])[:8]:
+            requests.post(url, json={"chat_id": cid, "text": b}, timeout=10)
+            if len(bubbles) > 1:
+                time.sleep(0.4)
     except Exception as e:
         print(f"Telegram send error: {e}")
 
@@ -157,9 +180,19 @@ def dash_auth():
     """basic auth เหมือนพี่ล็อกอินหน้าเว็บ — ใช้ทุก request (ฟอร์ม route ต้องการ)"""
     return (DASH_USER, DASH_PASS) if DASH_USER and DASH_PASS else None
 
+DASH_TIMEOUT = 30
+
 def dash_get_config(asset):
-    res = requests.get(f"{RENDER_DASHBOARD_URL}/api/config/{asset}", timeout=10, headers=dash_headers(), auth=dash_auth())
-    return res.json() if res.status_code == 200 else None
+    for i in range(3):
+        try:
+            res = requests.get(f"{RENDER_DASHBOARD_URL}/api/config/{asset}", timeout=DASH_TIMEOUT,
+                               headers=dash_headers(), auth=dash_auth())
+            if res.status_code == 200:
+                return res.json()
+        except requests.RequestException as e:
+            print(f"dash_get_config {asset} ครั้งที่ {i + 1}: {e}")
+        time.sleep(2)
+    return None
 
 def dash_get_market():
     try:
@@ -170,11 +203,19 @@ def dash_get_market():
 
 def dash_patch(asset, fields):
     """เขียน field ลง state ผ่าน /api/update_config"""
-    res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields, timeout=10, headers=dash_headers(), auth=dash_auth())
-    return res.status_code == 200
+    for i in range(2):
+        try:
+            res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields,
+                                timeout=DASH_TIMEOUT, headers=dash_headers(), auth=dash_auth())
+            if res.status_code == 200:
+                return True
+        except requests.RequestException as e:
+            print(f"dash_patch {asset} ครั้งที่ {i + 1}: {e}")
+        time.sleep(2)
+    return False
 
 def dash_post_form(path, form):
-    res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=10, headers=dash_headers(), auth=dash_auth())
+    res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=DASH_TIMEOUT, headers=dash_headers(), auth=dash_auth())
     return res.status_code in (200, 302)
 
 def get_set_obj(cfg, set_key):
@@ -272,8 +313,6 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             return {"error": "ดึง config ไม่ได้"}
         s2 = cfg.get("set2") or {}
         s2.update(fields)
-        s2["is_active"] = True
-        s2["auto_paused_today"] = False
         payload = {"set2": s2}
         if any(v is not None for v in plan_kw.values()):
             al = cfg.get("alerts") or []
@@ -281,8 +320,6 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             payload["alerts"] = al
         out["ok"] = dash_patch(asset, payload)
     else:
-        fields["is_active"] = True
-        fields["auto_paused_today"] = False
         if any(v is not None for v in plan_kw.values()):
             cfg = dash_get_config(asset)
             if not cfg:
@@ -324,20 +361,23 @@ def _upsert_quota(alerts_list, set_key, per_day=None, window=None, zone_low=None
                         "risk_pct": risk_pct or None})
 
 def tool_set_power(asset, set_key, on):
-    cfg = dash_get_config(asset)
-    if not cfg:
-        return {"error": "ดึง config ไม่ได้"}
-    if set_key == "short":
-        s2 = cfg.get("set2") or {}
-        s2["is_active"] = bool(on)
-        if on:
-            s2["auto_paused_today"] = False
-        return {"ok": dash_patch(asset, {"set2": s2}), "เทรดสั้น": "ON" if on else "OFF"}
+    """เขียนเฉพาะ is_active (+ปลด pause ตอนเปิด) — update_config merge set2 ให้เอง
+    แล้วอ่านกลับมายืนยันว่าบน Render เป็นค่าที่สั่งจริง"""
     fields = {"is_active": bool(on)}
     if on:
         # ปลด pause ด้วย — toggle endpoint จัดการให้ แต่ที่นี่เขียนตรง
         fields["auto_paused_today"] = False
-    return {"ok": dash_patch(asset, fields), "เทรดยาว": "ON" if on else "OFF"}
+    label = "เทรดสั้น" if set_key == "short" else "เทรดยาว"
+    payload = {"set2": fields} if set_key == "short" else fields
+    sent = dash_patch(asset, payload)
+    cfg = dash_get_config(asset)
+    actual = get_set_obj(cfg, set_key).get("is_active") if cfg else None
+    if actual is None:
+        return {"ok": False, "error": "อ่านสถานะกลับจาก dashboard ไม่ได้ — ยังยืนยันไม่ได้ว่า" + label + ("เปิด" if on else "ปิด") + "แล้ว",
+                "ส่งคำสั่ง": sent}
+    ok = bool(actual) == bool(on)
+    return {"ok": ok, label: "ON" if actual else "OFF",
+            **({} if ok else {"error": "สถานะบน dashboard ยังไม่ตรงกับที่สั่ง"})}
 
 def tool_set_note(asset, note):
     ok = dash_post_form(f"/update_note/{asset}", {"note": note})
@@ -379,18 +419,74 @@ def tool_request_feature(text):
 DEVIN_API_KEY = os.getenv("DEVIN_API_KEY", "")
 DEVIN_CONTEXT = ("นี่คืองานจากระบบเทรด Zone Trigger ของพี่ณิณ repo: https://github.com/nnntk55/ZoneXau "
                  "(app.py=แดชบอร์ด Render, assistant.py=Midas Telegram AI, exness_zone_trigger_bot.py=บอทเทรด MT5) "
-                 "กฎ: แก้บั๊ก/feature ที่สเปกชัดได้เลย+push แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ และห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — งาน: ")
+                 "กฎ: แก้บั๊ก/feature ที่สเปกชัดได้เลย แล้ว push ตรงเข้า branch main เลย (ห้ามเปิด PR เพราะ Render auto-deploy จาก main) "
+                 "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ และห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — งาน: ")
+
+DEVIN_SESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_sessions.json")
+
+def devin_track(sid, task, url):
+    try:
+        sess = json.load(open(DEVIN_SESS_FILE, encoding="utf-8")) if os.path.exists(DEVIN_SESS_FILE) else []
+        sess.append({"id": sid, "task": task[:200], "url": url, "done": False, "at": time.time()})
+        json.dump(sess, open(DEVIN_SESS_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+def poll_devin_sessions(inbox_path):
+    """เช็คเซสชัน Devin ที่ค้าง — เสร็จแล้วดึงข้อความสุดท้ายมาเป็น [EVENT] ให้น้องรายงาน"""
+    if not DEVIN_API_KEY or not os.path.exists(DEVIN_SESS_FILE):
+        return
+    try:
+        sess = json.load(open(DEVIN_SESS_FILE, encoding="utf-8"))
+    except Exception:
+        return
+    dirty = False
+    for s in sess:
+        if s.get("done"):
+            continue
+        if time.time() - s.get("at", 0) > 60 * 60 * 6:  # เกิน 6 ชม. ถือว่าหลุด
+            s["done"] = True; dirty = True; continue
+        try:
+            st = requests.get(f"https://api.devin.ai/v1/sessions/{s['id']}",
+                              headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=10).json()
+            status = st.get("status_enum") or st.get("status", "")
+            if status.lower() in ("running", "working", "pending", "claimed"):
+                continue
+            s["done"] = True; dirty = True
+            summary = st.get("structured_output") or ""
+            if not summary:
+                evs = st.get("messages") or []
+                summary = next((m.get("message") or "" for m in reversed(evs)
+                                if m.get("type") == "devin_message"), "")
+            pr = (st.get("pull_request") or {}).get("url")
+            if pr:
+                summary = f"{summary}\nPR ที่เปิด: {pr} — แจ้งพี่ว่ามี PR รอกด merge ถ้าอยากให้ auto-deploy".strip()
+            ev_text = (f"[EVENT] พี่เดวินทำงานเสร็จแล้ว (สถานะ {status}) — งาน: {s['task'][:120]}\n"
+                       f"ผล: {str(summary)[:800]}\nลิงก์: {s['url']}\nสรุปรายงานพี่สั้นๆ เป็นภาษาตัวเอง")
+            with open(inbox_path, "a", encoding="utf-8") as f:
+                f.write(ev_text + "\n")
+        except Exception:
+            pass
+    if dirty:
+        try:
+            json.dump(sess, open(DEVIN_SESS_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        except Exception:
+            pass
 
 def tool_send_to_devin(task):
     """ส่งงานให้ Devin — ถ้ามี DEVIN_API_KEY เปิด Cloud session ตรง (ทำได้แม้พี่ปิดเครื่อง) ไม่งั้นตกลงคิว Render"""
     if DEVIN_API_KEY:
         try:
             res = requests.post("https://api.devin.ai/v1/sessions",
-                                json={"prompt": DEVIN_CONTEXT + task},
+                                json={"prompt": DEVIN_CONTEXT + task, "bypass_approval": True,
+                                      "tags": ["midas"]},
                                 headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=15)
             if res.status_code in (200, 201):
-                url = res.json().get("url", "")
-                return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url}".strip()}
+                d = res.json()
+                sid = d.get("session_id", "")
+                url = d.get("url") or f"https://app.devin.ai/sessions/{sid}"
+                devin_track(sid, task, url)
+                return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url} — บอกลิงก์นี้พี่ด้วย"}
         except Exception:
             pass  # ตกลงคิว Render ต่อ
     try:
@@ -590,7 +686,7 @@ def tool_view_chart(asset, tf):
         time.sleep(1)
         if os.path.exists(img_path):
             img = open(img_path, "rb").read()
-            tg_send_photo(img, f"📊 {asset.upper()} {tf.upper()} | EMA10/50/100/200")
+            tg_send_photo(img, f"{asset.upper()} {tf.upper()} | EMA10/50/100/200")
             return {"ok": True, "image_b64": base64.b64encode(img).decode()}
         if os.path.exists(err_path):
             return {"error": f"บอทวาดกราฟไม่ได้: {open(err_path, encoding='utf-8').read()}"}
@@ -734,6 +830,8 @@ GEMINI_TOOLS = [{
 # ==========================================
 pending_confirm = {"action": None, "args": None, "desc": None}
 
+_ai_errors = []  # สาเหตุที่ provider ล้มในรอบล่าสุด (HTTP code หรือ "net")
+
 GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-2.5-flash-lite"]
 
 def gemini_call(contents):
@@ -751,6 +849,7 @@ def gemini_call(contents):
             res = requests.post(url, json=body, timeout=90)
         except Exception as e:
             last_err = e
+            _ai_errors.append("net")
             print(f"Gemini {model} exception: {e}")
             continue
         if res.status_code == 200:
@@ -759,7 +858,8 @@ def gemini_call(contents):
             return res.json()
         last_err = res.status_code
         print(f"Gemini {model} HTTP {res.status_code}: {res.text[:200]}")
-        if res.status_code not in (429, 500, 502, 503, 504):
+        _ai_errors.append(res.status_code)
+        if res.status_code not in (404, 429, 500, 502, 503, 504):
             break  # error แบบ key/สิทธิ์ผิด ลองโมเดลอื่นไม่ช่วย
     print(f"❌ ทุกโมเดลล้มเหลว (last={last_err})")
     return None
@@ -768,21 +868,49 @@ def gemini_call(contents):
 # GROQ — provider สำรอง (OpenAI-compatible)
 # ==========================================
 def _to_openai_messages():
+    """แปลง history แบบ Gemini -> OpenAI: tool_calls ของเทิร์นเดียวรวมใน assistant message เดียว
+    id ไม่ซ้ำ และทุก tool_call ต้องมี tool response ตามทันที (ไม่งั้น Groq/OpenRouter ตอบ 400)"""
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for m in chat_history:
-        role = "assistant" if m["role"] == "model" else "user"
-        for p in m.get("parts", []):
-            if "text" in p:
-                msgs.append({"role": role, "content": p["text"]})
-            elif "functionCall" in p:
-                fc = p["functionCall"]
-                msgs.append({"role": "assistant", "tool_calls": [{"id": "c_" + fc["name"],
-                    "type": "function", "function": {"name": fc["name"],
-                    "arguments": json.dumps(fc.get("args") or {})}}]})
-            elif "functionResponse" in p:
-                fr = p["functionResponse"]
-                msgs.append({"role": "tool", "tool_call_id": "c_" + fr["name"],
-                    "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
+    pending = []  # [(id, name)] tool_calls ที่ยังไม่ได้ผล
+    n = 0
+
+    def flush_pending():
+        for cid, _ in pending:
+            msgs.append({"role": "tool", "tool_call_id": cid, "content": json.dumps({"error": "no result"})})
+        pending.clear()
+
+    for m in _sanitize_history(chat_history):
+        parts = m.get("parts", [])
+        texts = "".join(p["text"] for p in parts if "text" in p)
+        if m["role"] == "model":
+            flush_pending()
+            calls = [p["functionCall"] for p in parts if "functionCall" in p]
+            msg = {"role": "assistant", "content": texts or None}
+            if calls:
+                msg["tool_calls"] = []
+                for fc in calls:
+                    n += 1
+                    cid = f"call_{n}"
+                    msg["tool_calls"].append({"id": cid, "type": "function", "function": {
+                        "name": fc["name"], "arguments": json.dumps(fc.get("args") or {}, ensure_ascii=False)}})
+                    pending.append((cid, fc["name"]))
+            if texts or calls:
+                msgs.append(msg)
+            continue
+        for p in parts:
+            if "functionResponse" not in p:
+                continue
+            fr = p["functionResponse"]
+            idx = next((i for i, (_, nm) in enumerate(pending) if nm == fr.get("name")), None)
+            if idx is None:
+                continue  # response ไม่มี call คู่ -> ทิ้ง
+            cid, _ = pending.pop(idx)
+            msgs.append({"role": "tool", "tool_call_id": cid,
+                         "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
+        if texts:
+            flush_pending()
+            msgs.append({"role": "user", "content": texts})
+    flush_pending()
     return msgs
 
 def groq_call():
@@ -798,6 +926,7 @@ def groq_call():
             json={"model": GROQ_MODEL, "messages": _to_openai_messages(),
                   "tools": tools, "temperature": 0.3}, timeout=60)
         if r.status_code != 200:
+            _ai_errors.append(r.status_code)
             print(f"Groq HTTP {r.status_code}: {r.text[:200]}")
             return None
         m = r.json()["choices"][0]["message"]
@@ -814,6 +943,7 @@ def groq_call():
         print("✅ ใช้สมองสำรอง Groq")
         return {"candidates": [{"content": {"parts": parts}}]}
     except Exception as e:
+        _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
         print(f"Groq error: {e}")
         return None
 
@@ -831,6 +961,7 @@ def openrouter_call():
                 json={"model": model, "messages": _to_openai_messages(),
                       "tools": tools, "temperature": 0.3}, timeout=60)
             if r.status_code != 200:
+                _ai_errors.append(r.status_code)
                 print(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
                 continue
             m = r.json()["choices"][0]["message"]
@@ -847,6 +978,7 @@ def openrouter_call():
             print(f"✅ ใช้สมองสำรอง OpenRouter ({model})")
             return {"candidates": [{"content": {"parts": parts}}]}
         except Exception as e:
+            _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
             print(f"OpenRouter {model} error: {e}")
             continue
     return None
@@ -858,8 +990,69 @@ def tg_download_photo(file_id):
         return None
     return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
 
-def run_agent(user_text, chat_id, image_bytes=None):
-    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า Gemini จะตอบข้อความ"""
+# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER (เช่น "groq,openrouter,gemini")
+MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "groq,openrouter,gemini").split(",") if m.strip()]
+PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call, "openrouter": openrouter_call}
+
+def _call_providers():
+    """ไล่ provider ตาม MODEL_ORDER — คืนคำตอบแรกที่มี parts จริง"""
+    for prov in MODEL_ORDER:
+        fn = PROVIDERS.get(prov)
+        if not fn:
+            continue
+        try:
+            data = fn()
+        except Exception as e:
+            print(f"{prov} error: {e}")
+            _ai_errors.append("err")
+            data = None
+        if data and (data.get("candidates") or [{}])[0].get("content", {}).get("parts"):
+            return data
+        if data:
+            print(f"{prov} ตอบว่างเปล่า — ลองตัวถัดไป")
+            _ai_errors.append("empty")
+    return None
+
+def _ai_fail_message():
+    """ข้อความแจ้งพี่ตามสาเหตุจริง แทน error ดิบ"""
+    errs = list(_ai_errors)
+    if not any(PROVIDERS.get(p) and (p != "groq" or GROQ_API_KEY) and (p != "openrouter" or OPENROUTER_API_KEY)
+               for p in MODEL_ORDER):
+        return "ตอนนี้ผมไม่มีสมอง AI ให้ใช้เลยคับพี่ — เช็ค MODEL_ORDER กับ key ของ Groq/OpenRouter/Gemini หน่อยน้า"
+    if errs and all(e in (401, 403) for e in errs):
+        return "key ของสมอง AI ใช้ไม่ได้คับพี่ (401/403) — ฝากพี่เช็ค key ใน loop_midas.bat หน่อยน้า"
+    if 429 in errs:
+        why = "สมอง AI ทุกตัวโดนจำกัดโควต้าชั่วคราวคับพี่"
+    elif errs and all(e == "net" for e in errs):
+        why = "เน็ตฝั่งผมต่อสมอง AI ไม่ติดคับพี่"
+    else:
+        why = "สมอง AI สะดุดชั่วคราวคับพี่"
+    return why
+
+AI_RETRY_DELAYS = [60, 180, 600]  # วินาที — คิวลองใหม่อัตโนมัติเมื่อสมองล่มทุกตัว
+retry_queue = []  # [{"text","chat_id","tries","at"}]
+
+def _queue_retry(user_text, chat_id, tries=0):
+    if tries >= len(AI_RETRY_DELAYS):
+        return False
+    retry_queue[:] = retry_queue[-4:]
+    retry_queue.append({"text": user_text, "chat_id": chat_id, "tries": tries,
+                        "at": time.time() + AI_RETRY_DELAYS[tries]})
+    return True
+
+def process_retry_queue():
+    """เรียกจาก main loop — ถึงเวลาแล้วลองส่งข้อความที่ค้างให้ AI ใหม่ ได้ผลค่อยตอบพี่"""
+    now = time.time()
+    for item in [q for q in retry_queue if q["at"] <= now]:
+        retry_queue.remove(item)
+        print(f"retry AI ({item['tries'] + 1}): {item['text'][:60]}")
+        reply = run_agent(item["text"], item["chat_id"], None, _retry_tries=item["tries"] + 1)
+        if reply:
+            tg_send(reply, item["chat_id"])
+
+def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
+    """ส่งข้อความเข้า agent loop — เรียก tools จนกว่า AI จะตอบข้อความ
+    สมองล่มทุกตัว: ลองซ้ำ -> ตัดบริบทเก่าที่อาจเสีย -> ถอยเทิร์นนี้ออกแล้วเข้าคิวลองใหม่อัตโนมัติ"""
     global chat_history
     import base64
     parts = []
@@ -868,16 +1061,53 @@ def run_agent(user_text, chat_id, image_bytes=None):
                      "data": base64.b64encode(image_bytes).decode()}})
     parts.append({"text": user_text or "วิเคราะห์กราฟนี้ให้หน่อย"})
     chat_history.append({"role": "user", "parts": parts})
-    chat_history = chat_history[-MAX_HISTORY:]
+    chat_history = _sanitize_history(chat_history[-MAX_HISTORY:])
+    turn_msg = chat_history[-1]
 
     for step in range(MAX_AGENT_STEPS):
         save_memory()
-        data = gemini_call(chat_history) or groq_call() or openrouter_call()
+        _ai_errors.clear()
+        data = _call_providers()
         if not data:
-            return "❌ AI ตอบไม่ได้ตอนนี้ (ดู console)"
+            time.sleep(3)
+            data = _call_providers()
+        if not data:
+            # บริบทเก่าอาจทำให้ provider ปฏิเสธ — ลองใหม่ด้วยเฉพาะเทิร์นนี้ (สำรอง history เดิมไว้)
+            turn_start = next(i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg)
+            if turn_start > 0:
+                old = chat_history
+                chat_history = old[turn_start:]
+                data = _call_providers()
+                if data:
+                    print("ตัดบริบทเก่าแล้วสมองกลับมาตอบ — สำรอง history เดิมไว้ที่ midas_memory.bak.json")
+                    try:
+                        with open(MEMORY_FILE.replace(".json", ".bak.json"), "w", encoding="utf-8") as f:
+                            json.dump(old, f, ensure_ascii=False)
+                    except Exception as e:
+                        print(f"memory backup error: {e}")
+                else:
+                    chat_history = old
+        if not data:
+            why = _ai_fail_message()
+            if step > 0:
+                # tool บางตัวรันไปแล้ว — ไม่ลองซ้ำเอง กันคำสั่งซ้ำ (เช่น add_alert ซ้ำ)
+                print(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
+                return f"{why} — คำสั่งบางส่วนอาจทำไปแล้ว เช็คสถานะก่อนสั่งซ้ำนะคับ"
+            # ถอยเทิร์นนี้ออก (กันข้อความซ้ำตอนลองใหม่) แล้วเข้าคิวลองใหม่เอง
+            turn_start = next((i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg), None)
+            if turn_start is not None:
+                del chat_history[turn_start:]
+            save_memory()
+            if image_bytes or not _queue_retry(user_text, chat_id, _retry_tries):
+                print(f"AI ล้มเหลว (errors={_ai_errors}) — ไม่เข้าคิวลองใหม่")
+                if _retry_tries:
+                    return f"{why} — ลองใหม่ให้หลายรอบแล้วยังไม่ติด พี่ส่งมาใหม่อีกทีตอนสะดวกนะคับ"
+                return f"{why} — พี่ส่งมาใหม่อีกสักครู่นะคับ"
+            print(f"AI ล้มเหลว (errors={_ai_errors}) — เข้าคิวลองใหม่ใน {AI_RETRY_DELAYS[_retry_tries]}s")
+            if _retry_tries:
+                return None  # แจ้งพี่ไปแล้วรอบแรก ไม่ต้องสแปม
+            return f"{why} — เดี๋ยวผมลองใหม่เองแล้วตอบกลับนะพี่"
         parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
-        if not parts:
-            return "❌ AI ตอบว่างเปล่า"
         chat_history.append({"role": "model", "parts": parts})
 
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
@@ -894,7 +1124,7 @@ def run_agent(user_text, chat_id, image_bytes=None):
             # คำสั่งกระทบเงิน + เปิดโหมดถามก่อน → จัดคิวรอ y/n
             if REQUIRE_CONFIRM and name in MONEY_TOOLS and fn:
                 pending_confirm.update({"action": name, "args": args})
-                tg_send(f"⚠️ จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
+                tg_send(f"จะทำ `{name} {json.dumps(args, ensure_ascii=False)}` ยืนยันไหม (y/n)")
                 responses.append({"functionResponse": {"name": name,
                                   "response": {"result": {"queued": "รอยืนยันจากพี่"}}}})
                 continue
@@ -915,23 +1145,65 @@ def run_agent(user_text, chat_id, image_bytes=None):
                 {"inline_data": {"mime_type": "image/png", "data": img64}},
                 {"text": "นี่คือรูปกราฟที่ขอ วิเคราะห์ให้พี่หน่อย"}]})
 
-    return "⚠️ งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
+    return "งานใหญ่เกิน — แตกเป็นคำสั่งย่อยให้ผมหน่อย"
 
 # ==========================================
 # MAIN LOOP
 # ==========================================
+SELF_UPDATE_REPO = "nnntk55/ZoneXau"
+SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
+
+def _self_update_worker():
+    """เช็ค commit ใหม่บน GitHub ทุก 10 นาที — เจอของใหม่โหลดไฟล์ทับแล้วออกตัวเอง ให้ .bat loop รันใหม่"""
+    import threading
+    while True:
+        time.sleep(600)
+        try:
+            sha = requests.get(f"https://api.github.com/repos/{SELF_UPDATE_REPO}/commits/main",
+                               timeout=15).json().get("sha")
+            if not sha:
+                continue
+            old = open(SELF_UPDATE_SHA_FILE).read().strip() if os.path.exists(SELF_UPDATE_SHA_FILE) else ""
+            if not old:
+                open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+                continue
+            if sha == old:
+                continue
+            z = requests.get(f"https://github.com/{SELF_UPDATE_REPO}/archive/refs/heads/main.zip", timeout=60)
+            import zipfile, tempfile
+            zp = os.path.join(tempfile.gettempdir(), "zx_upd.zip")
+            open(zp, "wb").write(z.content)
+            base = os.path.dirname(os.path.abspath(__file__))
+            with zipfile.ZipFile(zp) as zf:
+                for n in zf.namelist():
+                    fn = os.path.basename(n)
+                    if n.endswith("/") or not (fn.endswith(".py") or fn == "app.py" or fn.startswith("loop_")):
+                        continue
+                    open(os.path.join(base, fn), "wb").write(zf.read(n))
+            open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+            print(f"🔄 self-update: โค้ดใหม่ {sha[:8]} — รีสตาร์ทตัวเอง")
+            time.sleep(3)
+            os._exit(0)
+        except Exception as e:
+            print(f"self-update check error: {e}")
+
 def main():
+    import threading
+    threading.Thread(target=_self_update_worker, daemon=True).start()
     if not all([ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL]):
         print("❌ ตั้ง env ไม่ครบ: ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL")
         return
     load_memory()
     print("🤖 AI Assistant started — รอคำสั่งทาง Telegram ...")
-    tg_send("😈 Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
+    tg_send("Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
     offset = 0
     inbox_path = os.path.join(CHART_DIR, "midas_inbox.txt")
     last_weekly_report = None
     while True:
         try:
+            poll_devin_sessions(inbox_path)
+            process_retry_queue()
             # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             now_th = datetime.now(timezone.utc) + timedelta(hours=7)
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
@@ -963,9 +1235,9 @@ def main():
                 if pending_confirm["action"] and text.lower() in ("y", "n"):
                     if text.lower() == "y":
                         out = TOOL_IMPL[pending_confirm["action"]](pending_confirm["args"])
-                        tg_send(f"✅ ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
+                        tg_send(f"ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
                     else:
-                        tg_send("❌ ยกเลิกคำสั่งนั้นแล้ว")
+                        tg_send("ยกเลิกคำสั่งนั้นแล้ว")
                     pending_confirm.update({"action": None, "args": None})
                     continue
                 photo = msg.get("photo")
@@ -974,7 +1246,8 @@ def main():
                 print(f"📩 {text or '[รูป]'}")
                 img = tg_download_photo(photo[-1]["file_id"]) if photo else None
                 reply = run_agent(text, chat_id, img)
-                tg_send(reply)
+                if reply:
+                    tg_send(reply)
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(5)
