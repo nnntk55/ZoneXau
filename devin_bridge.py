@@ -1,5 +1,5 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
-# พี่คุยกับเดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
+# พี่คุยกับพี่เดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
 import os, sys, json, time, requests
 
@@ -9,11 +9,10 @@ CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_bridge_state.json")
 API = "https://api.devin.ai/v1"
 
-CONTEXT = ("คุณคือ Devin (เรียกตัวเองว่า เดวิน ไม่ใช่ พี่เดวิน) ผู้พัฒนาระบบเทรด Zone Trigger ของพี่ณิณ "
+CONTEXT = ("คุณคือ Devin พี่เดวิน ผู้พัฒนาระบบเทรด Zone Trigger ของพี่ณิณ "
            "repo: https://github.com/nnntk55/ZoneXau (app.py=แดชบอร์ด Render, assistant.py=Midas AI, exness_zone_trigger_bot.py=บอท MT5) "
            "ตอบเป็นภาษาไทย กระชับ ทักพี่ว่า 'พี่' แก้บั๊ก/feature ที่สเปกชัดได้เลยแล้ว push ตรงเข้า main "
-           "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ ห้ามลบข้อมูลโดยไม่ได้รับอนุญาต "
-           "ห้ามใช้อีโมจิ อ่าน AGENTS.md ใน repo ก่อนเริ่มงาน (บุคลิก+กฎทั้งหมดอยู่ในนั้น) — ข้อความแรกของพี่: ")
+           "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ ห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — ข้อความแรกของพี่: ")
 
 def tg(method, **kw):
     try:
@@ -23,6 +22,24 @@ def tg(method, **kw):
     except Exception as e:
         print(f"tg {method} err: {e}")
         return {}
+
+def tg_photo_url(msg):
+    """โหลดรูปจาก Telegram → อัปขึ้น telegra.ph → คืน URL สาธารณะให้ Devin เปิดดูได้"""
+    photos = msg.get("photo") or []
+    if not photos:
+        return None
+    try:
+        fid = photos[-1]["file_id"]  # ไซซ์ใหญ่สุดอยู่ท้ายลิสต์เสมอ
+        fp = tg("getFile", file_id=fid).get("result", {}).get("file_path")
+        if not fp:
+            return None
+        img = requests.get(f"https://api.telegram.org/file/bot{BOT}/{fp}", timeout=30).content
+        up = requests.post("https://telegra.ph/upload", files={"file": ("img.jpg", img, "image/jpeg")}, timeout=30).json()
+        src = (up[0] or {}).get("src") if isinstance(up, list) and up else None
+        return f"https://telegra.ph{src}" if src else None
+    except Exception as e:
+        print(f"photo upload err: {e}")
+        return None
 
 def send(text):
     for i in range(0, len(text), 4000):
@@ -71,6 +88,9 @@ def _self_update_worker():
             if not sha:
                 continue
             old = open(SELF_UPDATE_SHA_FILE).read().strip() if os.path.exists(SELF_UPDATE_SHA_FILE) else ""
+            if not old:
+                open(SELF_UPDATE_SHA_FILE, "w").write(sha)
+                continue
             if sha == old:
                 continue
             z = requests.get(f"https://github.com/{SELF_UPDATE_REPO}/archive/refs/heads/main.zip", timeout=60)
@@ -94,10 +114,10 @@ def main():
     import threading
     threading.Thread(target=_self_update_worker, daemon=True).start()
     if not all([BOT, KEY, CHAT]):
-        print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
+        print("❌ ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
     st = load_state()
-    send("เดวินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
+    send("😈 พี่เดวินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = 0
     while True:
         try:
@@ -108,12 +128,16 @@ def main():
                 msg = u.get("message") or {}
                 if str(msg.get("chat", {}).get("id")) != str(CHAT):
                     continue
-                text = (msg.get("text") or "").strip()
+                text = (msg.get("text") or msg.get("caption") or "").strip()
+                img_url = tg_photo_url(msg)
+                if img_url:
+                    text = (text + "\n" if text else "") + f"[พี่ส่งรูปมา — เปิดดูและวิเคราะห์ที่ {img_url}]"
+                    send("🖼 ได้รูปแล้ว กำลังส่งให้พี่เดวินดู")
                 if not text:
                     continue
                 if text == "/new":
                     st["session_id"] = None; st["seen"] = 0
-                    send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
+                    send("🔄 เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
                     continue
                 sid = st.get("session_id")
                 ok = False
@@ -125,10 +149,10 @@ def main():
                     sid, url = devin_create(text)
                     if sid:
                         st["session_id"] = sid; st["seen"] = 0
-                        send(f"เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n{url}")
+                        send(f"🤖 เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n{url}")
                         ok = True
                 if not ok and not st.get("session_id"):
-                    send("ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะพี่")
+                    send("⚠️ ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะพี่")
                 save_state(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
             if st.get("session_id") and time.time() - last_poll > 10:
@@ -138,7 +162,7 @@ def main():
                     msgs = [m for m in (s.get("messages") or []) if m.get("type") == "devin_message"]
                     if len(msgs) > st["seen"]:
                         for m in msgs[st["seen"]:]:
-                            send(m.get('message', ''))
+                            send(f"😈 {m.get('message','')}")
                         st["seen"] = len(msgs)
                         save_state(st)
                     # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
