@@ -109,7 +109,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ถ้าไม่แน่ใจว่าพี่หมายถึงอะไร ถามกลับ อย่าเดา
 
 กฎเหล็กความรอบคอบ (ห้ามฝ่าฝืน):
-- ห้ามเคลมว่าตั้งค่า/เปิด/ปิดอะไรแล้ว จนกว่า tool จะคืนผลจริง — อ่านค่าที่ tool ตอบกลับแล้วค่อยสรุปตามนั้นเท่านั้น ถ้า tool error ให้บอกว่าทำไม่สำเร็จ
+- ห้ามเคลมว่าตั้งค่า/เปิด/ปิดอะไรแล้ว จนกว่า tool จะคืนผลจริง — tool เขียนค่าจะคืน "ผลจริงบนแดชบอร์ด" ที่อ่านกลับยืนยันแล้ว ให้รายงานตามค่านั้นเท่านั้น ถ้ามี "ผิด" ให้บอกพี่ว่าไม่สำเร็จ ห้ามปกปิด
 - พี่ถามเรื่องสถานะ/ราคา/stage/สถานการณ์ → เรียก get_status ทุกครั้งก่อนตอบ ห้ามใช้ค่าจากความจำหรือบทสนทนาเก่า — ถ้าข้อมูลที่ได้ดูไม่อัปเดต (บอทอาจดับ/ค้าง) ให้บอกพี่ตรงๆ ว่า "ข้อมูลล่าสุดที่เห็น" พร้อมเตือนว่าอาจเก่า
 - ขอบเขตคำสั่งห้ามเกินที่พี่ขอ: "ปิดเทรดสั้นทอง" = set_power(xau, short, off) เท่านั้น — ห้ามแตะชุดยาว ห้ามปิดอย่างอื่น ห้ามปิดทั้งสองชุด; เช่นเดียวกัน "ปิดเทรดยาว" ห้ามแตะชุดสั้น — การอัปเดตราคา/กราฟ/alert ไม่ใช่ของที่พี่สั่งปิด ห้ามแตะเด็ดขาด
 - stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ) — "เปิด s2/3/4/5" คือเปิดช่องที่ 2,3,4 ให้มี TF (S5 ทำงานเองอัตโนมัติเมื่อ S4 มี TF) ห้ามไปเปิด S1 ที่พี่ไม่ได้ขอ; TF ที่ใช้: ถ้าช่องนั้นมีค่าเดิมอยู่แล้วใช้ค่าเดิม ถ้าเป็น "off" ให้ใช้ default ของชุดนั้น (ยาว ["4h","1h","15m","5m"], สั้น ["off","off","15m","5m"]) แล้วรายงานให้พี่ทราบ
@@ -195,6 +195,28 @@ def dash_patch(asset, fields):
     """เขียน field ลง state ผ่าน /api/update_config"""
     res = requests.post(f"{RENDER_DASHBOARD_URL}/api/update_config/{asset}", json=fields, timeout=10, headers=dash_headers(), auth=dash_auth())
     return res.status_code == 200
+
+def dash_patch_verified(asset, fields, set_key="long"):
+    """เขียนแล้วอ่านกลับยืนยัน — คืน {'ok', 'ผลจริง', 'ผิด'} จากค่าบน dashboard จริง ไม่ใช่สมมติว่าสำเร็จ"""
+    if not dash_patch(asset, fields):
+        return {"ok": False, "ผิด": "เขียนไม่สำเร็จ (API ไม่ตอบ)"}
+    time.sleep(1)
+    cfg = dash_get_config(asset)
+    if not cfg:
+        return {"ok": False, "ผิด": "เขียนแล้วแต่อ่านกลับยืนยันไม่ได้"}
+    tgt = cfg.get("set2") if set_key == "short" else cfg
+    tgt = tgt if isinstance(tgt, dict) else {}
+    want = {}
+    for k, v in fields.items():
+        if k == "set2" and isinstance(v, dict):
+            want.update(v)
+        else:
+            want[k] = v
+    applied = {k: tgt.get(k) for k in want if k in tgt}
+    mismatch = {k: {"ตั้ง": v, "ได้จริง": applied.get(k)} for k, v in want.items()
+                if k in applied and applied[k] != v and str(applied[k]).lower() != str(v).lower()}
+    return {"ok": not mismatch, "ผลจริงบนแดชบอร์ด": applied,
+            **({"ผิด": f"ค่าไม่ตรง: {mismatch}"} if mismatch else {})}
 
 def dash_post_form(path, form):
     res = requests.post(f"{RENDER_DASHBOARD_URL}{path}", data=form, timeout=10, headers=dash_headers(), auth=dash_auth())
@@ -300,7 +322,7 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             al = cfg.get("alerts") or []
             _upsert_quota(al, set_key, **plan_kw)
             payload["alerts"] = al
-        out["ok"] = dash_patch(asset, payload)
+        out.update(dash_patch_verified(asset, payload, "short"))
     else:
         if any(v is not None for v in plan_kw.values()):
             cfg = dash_get_config(asset)
@@ -309,7 +331,7 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             al = cfg.get("alerts") or []
             _upsert_quota(al, set_key, **plan_kw)
             fields["alerts"] = al
-        out["ok"] = dash_patch(asset, fields)
+        out.update(dash_patch_verified(asset, fields, "long"))
     for k, v in plan_kw.items():
         if v is not None:
             out[k] = v
@@ -351,12 +373,12 @@ def tool_set_power(asset, set_key, on):
         s2["is_active"] = bool(on)
         if on:
             s2["auto_paused_today"] = False
-        return {"ok": dash_patch(asset, {"set2": s2}), "เทรดสั้น": "ON" if on else "OFF"}
+        return {**dash_patch_verified(asset, {"set2": s2}, "short"), "เทรดสั้น": "ON" if on else "OFF"}
     fields = {"is_active": bool(on)}
     if on:
         # ปลด pause ด้วย — toggle endpoint จัดการให้ แต่ที่นี่เขียนตรง
         fields["auto_paused_today"] = False
-    return {"ok": dash_patch(asset, fields), "เทรดยาว": "ON" if on else "OFF"}
+    return {**dash_patch_verified(asset, fields, "long"), "เทรดยาว": "ON" if on else "OFF"}
 
 def tool_set_note(asset, note):
     ok = dash_post_form(f"/update_note/{asset}", {"note": note})
