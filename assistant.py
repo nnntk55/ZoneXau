@@ -376,8 +376,23 @@ def tool_request_feature(text):
     except Exception as e:
         return {"error": str(e)}
 
+DEVIN_API_KEY = os.getenv("DEVIN_API_KEY", "")
+DEVIN_CONTEXT = ("นี่คืองานจากระบบเทรด Zone Trigger ของพี่ณิณ repo: https://github.com/nnntk55/ZoneXau "
+                 "(app.py=แดชบอร์ด Render, assistant.py=Midas Telegram AI, exness_zone_trigger_bot.py=บอทเทรด MT5) "
+                 "กฎ: แก้บั๊ก/feature ที่สเปกชัดได้เลย+push แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ และห้ามลบข้อมูลโดยไม่ได้รับอนุญาต — งาน: ")
+
 def tool_send_to_devin(task):
-    """ส่งงานเข้าคิว Devin บน Render โดยตรง — พี่เดวินอ่านคิวเอง ไม่ต้องผ่านพี่"""
+    """ส่งงานให้ Devin — ถ้ามี DEVIN_API_KEY เปิด Cloud session ตรง (ทำได้แม้พี่ปิดเครื่อง) ไม่งั้นตกลงคิว Render"""
+    if DEVIN_API_KEY:
+        try:
+            res = requests.post("https://api.devin.ai/v1/sessions",
+                                json={"prompt": DEVIN_CONTEXT + task},
+                                headers={"Authorization": f"Bearer {DEVIN_API_KEY}"}, timeout=15)
+            if res.status_code in (200, 201):
+                url = res.json().get("url", "")
+                return {"ok": True, "แจ้ง": f"เปิดงานให้พี่เดวินบนคลาวด์แล้ว {url}".strip()}
+        except Exception:
+            pass  # ตกลงคิว Render ต่อ
     try:
         res = requests.post(f"{RENDER_DASHBOARD_URL}/api/devin_tasks",
                             json={"task": task}, timeout=10, headers=dash_headers(), auth=dash_auth())
