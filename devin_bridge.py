@@ -104,10 +104,7 @@ def main():
                             send(f"😈 {m.get('message','')}")
                         st["seen"] = len(msgs)
                         save_state(st)
-                    status = s.get("status_enum", "")
-                    if status == "blocked":
-                        send("🚧 พี่เดวินติดอนุมัติบางอย่างในเซสชัน — เข้าไปกดในแอปหรือบอกผมให้ข้ามนะพี่")
-                        st["seen"] = len(msgs)
+                    # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
             time.sleep(2)
         except Exception as e:
             print(f"loop err: {e}")
