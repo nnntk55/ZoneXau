@@ -200,17 +200,42 @@ def load_states_from_sheets():
         print(f"Load States from Sheets Error: {e}")
     return default_data
 
+_sheet_dirty = {}
+_sheet_cv = threading.Condition()
+
 def save_state_to_sheets(asset_key, state_dict):
+    """เรียงแนวรับ/ต้านทันที แล้วโยนการเขียนชีทให้ worker เบื้องหลัง — Apps Script ช้า 5-10 วิ
+    ถ้ารอใน request ฝั่ง Midas/บอทจะ timeout ทั้งที่ state ในหน่วยความจำเปลี่ยนแล้ว"""
     if not GOOGLE_SCRIPT_URL:
         return
+    # จัดเรียงแนวรับ/ต้านอัตโนมัติ: แนวต้านขึ้นก่อน แนวรับตามหลัง ในแต่ละกลุ่มเรียงราคามาก→น้อย
+    al = state_dict.get("alerts")
+    if isinstance(al, list):
+        srs = [a for a in al if isinstance(a, dict) and a.get("type") == "sr"]
+        if len(srs) > 1:
+            srs.sort(key=lambda a: (0 if a.get("side") == "r" else 1, -(a.get("price") or 0)))
+            state_dict["alerts"] = srs + [a for a in al if not (isinstance(a, dict) and a.get("type") == "sr")]
+    with _sheet_cv:
+        _sheet_dirty[asset_key] = state_dict
+        _sheet_cv.notify()
+
+def _sheet_writer_loop():
+    """เขียนชีททีละ asset — ถ้ามีหลายคำสั่งค้าง เขียนแค่ state ล่าสุดครั้งเดียว"""
+    while True:
+        with _sheet_cv:
+            while not _sheet_dirty:
+                _sheet_cv.wait()
+            jobs = list(_sheet_dirty.items())
+            _sheet_dirty.clear()
+        for asset_key, state_dict in jobs:
+            if not _write_state_to_sheets(asset_key, state_dict):
+                time.sleep(2)
+                _write_state_to_sheets(asset_key, state_dict)
+
+threading.Thread(target=_sheet_writer_loop, daemon=True).start()
+
+def _write_state_to_sheets(asset_key, state_dict):
     try:
-        # จัดเรียงแนวรับ/ต้านอัตโนมัติ: แนวต้านขึ้นก่อน แนวรับตามหลัง ในแต่ละกลุ่มเรียงราคามาก→น้อย
-        al = state_dict.get("alerts")
-        if isinstance(al, list):
-            srs = [a for a in al if isinstance(a, dict) and a.get("type") == "sr"]
-            if len(srs) > 1:
-                srs.sort(key=lambda a: (0 if a.get("side") == "r" else 1, -(a.get("price") or 0)))
-                state_dict["alerts"] = srs + [a for a in al if not (isinstance(a, dict) and a.get("type") == "sr")]
         payload = {
             "asset": asset_key,
             "note": state_dict.get("note"),
@@ -233,9 +258,11 @@ def save_state_to_sheets(asset_key, state_dict):
             "set2": json.dumps(state_dict.get("set2") or default_set2()),
             "alerts": json.dumps(state_dict.get("alerts") or [])
         }
-        requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
+        requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=30)
+        return True
     except Exception as e:
         print(f"Save State to Sheets Error: {e}")
+        return False
 
 saved_states = load_states_from_sheets()
 

@@ -1,5 +1,6 @@
 import os
 import io
+import copy
 import json
 import time
 import threading
@@ -200,6 +201,11 @@ def sync_config_from_render(asset_key):
         if res.status_code == 200:
             data = res.json()
             st = ASSETS[asset_key]["state"]
+            # จำค่าที่เห็นบน Render รอบนี้ — push จะส่งกลับเฉพาะที่บอทเปลี่ยนเอง
+            ASSETS[asset_key]["synced"] = copy.deepcopy({
+                "is_active": data.get("is_active"), "auto_paused_today": data.get("auto_paused_today"),
+                "set2": data.get("set2") if isinstance(data.get("set2"), dict) else None,
+                "alerts": data.get("alerts") if isinstance(data.get("alerts"), list) else None})
             if "lot" in data: st["lot"] = float(data["lot"])
             if "tp_pips" in data: st["tp_pips"] = int(data["tp_pips"])
             if "sl_pips" in data: st["sl_pips"] = int(data["sl_pips"])
@@ -303,10 +309,46 @@ def push_config_to_render(asset_key):
             "set2": st.get("set2"),
             "alerts": st.get("alerts")
         }
-        requests.post(url, json=payload, timeout=5, headers=dash_headers())
+        _drop_unchanged_user_fields(asset_key, payload)
+        res = requests.post(url, json=payload, timeout=15, headers=dash_headers())
+        if res.status_code == 200:
+            _mark_pushed(asset_key, payload)
         print(f"✅ Pushed config to Render for {asset_key}")
     except Exception as e:
         print(f"Push Config Error ({asset_key}): {e}")
+
+_MISSING = object()
+
+def _drop_unchanged_user_fields(asset_key, payload):
+    """ตัดค่าที่บอทไม่ได้เปลี่ยนเองออกจาก payload — กันค่าเก่าในบอททับคำสั่งที่พี่/Midas
+    เพิ่งสั่งบน Render ระหว่างรอบ (เช่น ปิดเทรดสั้นแล้วบอท push is_active=True เก่ากลับไป)"""
+    syn = ASSETS[asset_key].get("synced")
+    if not syn:
+        return
+    for k in ("is_active", "auto_paused_today"):
+        if payload.get(k) == syn.get(k):
+            payload.pop(k, None)
+    s2, base = payload.get("set2"), syn.get("set2")
+    if isinstance(s2, dict) and isinstance(base, dict):
+        diff = {k: v for k, v in s2.items() if base.get(k, _MISSING) != v}
+        if diff:
+            payload["set2"] = diff
+        else:
+            payload.pop("set2", None)
+    if syn.get("alerts") is not None and payload.get("alerts") == syn.get("alerts"):
+        payload.pop("alerts", None)
+
+def _mark_pushed(asset_key, payload):
+    syn = ASSETS[asset_key].get("synced")
+    if not syn:
+        return
+    for k in ("is_active", "auto_paused_today"):
+        if k in payload:
+            syn[k] = payload[k]
+    if isinstance(payload.get("set2"), dict) and isinstance(syn.get("set2"), dict):
+        syn["set2"].update(copy.deepcopy(payload["set2"]))
+    if isinstance(payload.get("alerts"), list):
+        syn["alerts"] = copy.deepcopy(payload["alerts"])
 
 def current_trade_date():
     """วันเทรดของระบบ — วันใหม่เริ่มตอน 05:00 น. ตามเวลาไทย (ก่อนตี 5 ยังนับเป็นวันเดิม)"""
