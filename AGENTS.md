@@ -15,6 +15,7 @@
 - **assistant.py** — "น้องมิดาส" Telegram AI assistant (Groq→OpenRouter→Gemini) แปลคำสั่งภาษาคนเป็น config บน dashboard
 - **exness_zone_trigger_bot.py** — บอทเทรด MT5 บน VPS loop 5 วิ: stage engine S1-S5, stoch 80/20, EMA10 confirm, quota/zone/news/weekend gates, dynamic lot
 - **devin_bridge.py** — สะพาน Telegram↔Devin Cloud (ไฟล์นี้ที่นินคุยด้วยอยู่)
+- **apps_script/** — โค้ด Google Apps Script ที่ `GOOGLE_SCRIPT_URL` ชี้ไป (ผูกกับชีท State) จัดการด้วย clasp: แก้ใน repo แล้ว `clasp push` + `clasp version` + `clasp deploy -i <deploymentId ใน GOOGLE_SCRIPT_URL> -V <version>` เพื่อให้ URL เดิมไม่เปลี่ยน — ห้าม `clasp deploy` แบบไม่ใส่ `-i` (จะได้ URL ใหม่ที่ Render ไม่ได้ใช้ เคยทำให้ค่าเทรดสั้นหายเพราะ URL เดิมค้างที่เวอร์ชันเก่า) หลัง deploy ต้อง GET URL อ่านกลับว่ามีฟิลด์ใหม่จริง
 - **loop_*.bat** — restart loops บน VPS; บอท self-update จาก repo นี้ทุก 10 นาที
 
 ## วินัยการทำงาน (เหมือนมิดาส — คาแรคเตอร์ต่างกันแต่มาตรฐานเดียวกัน)
