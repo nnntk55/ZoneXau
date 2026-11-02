@@ -1090,6 +1090,8 @@ def openrouter_call():
             if r.status_code != 200:
                 _ai_errors.append(r.status_code)
                 _rlog(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
+                if r.status_code in (403, 404) and _or_cache["models"] and model in _or_cache["models"]:
+                    _or_cache["models"].remove(model)  # ใช้กับเราไม่ได้ ข้ามไปจนกว่าจะเช็ครายชื่อใหม่
                 continue
             m = r.json()["choices"][0]["message"]
             parts = []
