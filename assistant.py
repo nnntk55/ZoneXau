@@ -94,7 +94,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - direction LOW=เฝ้าโซนล่างหาจุด BUY, HIGH=เฝ้าโซนบนหาจุด SELL (พี่พูด "sell" = HIGH)
 - stage engine จะยิงออเดอร์เองเมื่อ auto_order=on — คุณไม่ต้องสั่งยิงเอง แค่ตั้งค่าให้ถูก
 - default ของพี่คือ "เทรดอัตโนมัติ" — เมื่อพี่สั่งให้เทรดให้ตั้ง auto_order=true เสมอ ยกเว้นพี่บอกชัดว่า "ถามก่อน" ค่อยตั้ง false
-- คอนเวนชัน stage ที่พี่ใช้: เทรดสั้น = ["off","off","15m","5m"] (S3 เฝ้า 15m, S4 เฝ้า 5m, S5 ยิงออเดอร์); เทรดยาว = ["4h","1h","15m","5m"]
+- คอนเวนชัน stage ที่พี่ใช้: เทรดสั้น = ["off","off","15m","5m"] (S3 เฝ้า 15m, S4 เฝ้า 5m, S5 ยิงออเดอร์); เทรดยาว = ["4h","1h","15m","5m"] — ใช้เฉพาะตอนพี่สั่งตั้งชุดกว้างๆ แบบไม่ระบุ stage (เช่น "ตั้งเทรดสั้นทอง") เท่านั้น
 - แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction HIGH (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
 - แผนโซน/ระยะยาว: "โซน 3500-3975" = zone_low 3500 + zone_high 3975 (ราคาทะลุขอบ → บอทหยุดเอง+แจ้งกลับมาให้วางแผนใหม่); "ภายใน 3 วัน/ถึงวันที่ 5" = until 'YYYY-MM-DD' (วันนี้+N หรือวันที่กำหนด เลยแล้วบอทหยุด); "ทั้งอาทิตย์" = until วันอาทิตย์นี้ — ตั้งทุกอย่างใน set_stage_plan ครั้งเดียวได้
 - ระยะห้ามเข้า: "ไม่เข้าเมื่อใกล้แนว 2000 pip/20 จุด" = min_room หน่วยราคา (ทอง 2000pip = $20 → min_room 20) — บอทจะไม่ยิง BUY เมื่อราคาใกล้แนวต้านเกินไป และไม่ยิง SELL เมื่อใกล้แนวรับเกินไป เพราะไม่มีระยะให้ TP
@@ -113,6 +113,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ห้ามเคลมว่าตั้งค่า/เปิด/ปิดอะไรแล้ว จนกว่า tool จะคืนผลจริง — tool เขียนค่าจะคืน "ผลจริงบนแดชบอร์ด" ที่อ่านกลับยืนยันแล้ว ให้รายงานตามค่านั้นเท่านั้น ถ้ามี "ผิด" ให้บอกพี่ว่าไม่สำเร็จ ห้ามปกปิด
 - พี่ถามเรื่องสถานะ/ราคา/stage/สถานการณ์ → เรียก get_status ทุกครั้งก่อนตอบ ห้ามใช้ค่าจากความจำหรือบทสนทนาเก่า — ถ้าข้อมูลที่ได้ดูไม่อัปเดต (บอทอาจดับ/ค้าง) ให้บอกพี่ตรงๆ ว่า "ข้อมูลล่าสุดที่เห็น" พร้อมเตือนว่าอาจเก่า
 - ขอบเขตคำสั่งห้ามเกินที่พี่ขอ: "ปิดเทรดสั้นทอง" = set_power(xau, short, off) เท่านั้น — ห้ามแตะชุดยาว ห้ามปิดอย่างอื่น ห้ามปิดทั้งสองชุด; เช่นเดียวกัน "ปิดเทรดยาว" ห้ามแตะชุดสั้น — การอัปเดตราคา/กราฟ/alert ไม่ใช่ของที่พี่สั่งปิด ห้ามแตะเด็ดขาด
+- พี่ระบุ stage เจาะจง (เช่น "ปิด s1", "s3 เป็น 1h", "เปิด s2/3/4/5") → ใช้ param stages แก้เฉพาะช่องที่พี่พูดถึงเท่านั้น เช่น "ปิด s1 ทองเทรดสั้น" = set_stage_plan(xau, short, stages={"s1":"off"}) — ห้ามส่ง stage_tfs ทั้งชุด ห้ามเอาคอนเวนชัน/default/คำสั่งเก่าในบทสนทนามาปน ช่องอื่นต้องคงค่าเดิมบนแดชบอร์ด
 - stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ) — "เปิด s2/3/4/5" คือเปิดช่องที่ 2,3,4 ให้มี TF (S5 ทำงานเองอัตโนมัติเมื่อ S4 มี TF) ห้ามไปเปิด S1 ที่พี่ไม่ได้ขอ; TF ที่ใช้: ถ้าช่องนั้นมีค่าเดิมอยู่แล้วใช้ค่าเดิม ถ้าเป็น "off" ให้ใช้ default ของชุดนั้น (ยาว ["4h","1h","15m","5m"], สั้น ["off","off","15m","5m"]) แล้วรายงานให้พี่ทราบ
 - เปลี่ยน stage_tfs/set ใดๆ → บอทจะอ่านค่าใหม่รอบถัดไปเอง หลังตั้งเสร็จให้บอกพี่ว่าตั้งอะไรตรงไหนบ้างตามผล tool จริง
 """
@@ -314,11 +315,26 @@ def tool_set_direction(asset, set_key, direction):
     return {"ok": ok, "ตั้งฝั่ง": direction, "ชุด": set_key, "กลับไป stage": tgt.get("current_stage")}
 
 def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=None, lot=None, tp=None, sl=None,
-                        per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None):
+                        per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None,
+                        stages=None):
     """ตั้งแผน stage ผ่าน /api/update_config — เขียนเฉพาะ field ที่ส่ง lot/tp/sl อิสระจากกัน
     per_day/window/zone_low/zone_high/until/min_room = แผนระยะยาว เก็บใน alerts เป็น meta type='quota'"""
     fields = {}
     if stage_tfs:  fields["stage_tfs"] = [str(t).lower() for t in stage_tfs[:4]]
+    if stages:
+        # แก้เฉพาะช่องที่ระบุ ทับบนค่าปัจจุบันบนแดชบอร์ด — ช่องอื่นไม่เปลี่ยน
+        if "stage_tfs" not in fields:
+            cfg0 = dash_get_config(asset)
+            if not cfg0:
+                return {"error": "ดึง config ไม่ได้"}
+            cur = (cfg0.get("set2") or {}).get("stage_tfs") if set_key == "short" else cfg0.get("stage_tfs")
+            fields["stage_tfs"] = list(cur or ["4h", "1h", "15m", "5m"])[:4]
+        for k, v in stages.items():
+            k = str(k).lower().lstrip("s")
+            if k == "5" and s5 is None:
+                fields["s5_enabled"] = str(v).lower() != "off" and v is not False
+            elif k in ("1", "2", "3", "4"):
+                fields["stage_tfs"][int(k) - 1] = str(v).lower()
     if s5 is not None:   fields["s5_enabled"] = bool(s5)
     if sr is not None:   fields["sr_enabled"] = bool(sr)
     if auto is not None: fields["auto_order"] = bool(auto)
@@ -731,7 +747,8 @@ TOOL_IMPL = {
     "set_stage_plan": lambda a: tool_set_stage_plan(a["asset"], a.get("set", "long"),
                             a.get("stage_tfs"), a.get("s5"), a.get("sr"), a.get("auto_order"),
                             a.get("lot"), a.get("tp_pips"), a.get("sl_pips"), a.get("per_day"), a.get("window"),
-                            a.get("zone_low"), a.get("zone_high"), a.get("until"), a.get("min_room"), a.get("risk_pct")),
+                            a.get("zone_low"), a.get("zone_high"), a.get("until"), a.get("min_room"), a.get("risk_pct"),
+                            a.get("stages")),
     "set_power":    lambda a: tool_set_power(a["asset"], a.get("set", "long"), bool(a["on"])),
     "set_note":     lambda a: tool_set_note(a["asset"], a["note"]),
     "set_plan":     lambda a: tool_set_plan(a["asset"], a["plan"]),
@@ -778,7 +795,9 @@ GEMINI_TOOLS = [{
          "parameters": {"type": "object", "properties": {
              "asset": asset_param(), "set": set_param(),
              "stage_tfs": {"type": "array", "items": {"type": "string", "enum": VALID_TFS},
-                           "description": "TF ของ S1-S4 เช่น [\"4h\",\"1h\",\"15m\",\"5m\"] หรือ \"off\" เพื่อข้าม"},
+                           "description": "TF ของ S1-S4 ทั้งชุด เช่น [\"4h\",\"1h\",\"15m\",\"5m\"] หรือ \"off\" เพื่อข้าม — ใช้เมื่อพี่สั่งตั้งทั้งชุดเท่านั้น"},
+             "stages": {"type": "object", "description": "แก้เฉพาะบาง stage ช่องอื่นคงค่าเดิม เช่น {\"s1\":\"off\"} หรือ {\"s3\":\"1h\"} — ใช้เมื่อพี่ระบุ stage เจาะจง",
+                        "properties": {k: {"type": "string", "enum": VALID_TFS} for k in ("s1", "s2", "s3", "s4")}},
              "s5": {"type": "boolean", "description": "เปิด stage 5 (ยิงออเดอร์)"},
              "sr": {"type": "boolean", "description": "S/R filter — stage 1 ต้องชนแนว EMA"},
              "auto_order": {"type": "boolean", "description": "ยิงออเดอร์อัตโนมัติเมื่อ stage 5 ครบ ไม่ถาม"},
