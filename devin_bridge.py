@@ -1,5 +1,5 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
-# พี่คุยกับเดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
+# นินคุยกับเดวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
 import os, sys, json, time, requests
 
@@ -9,11 +9,11 @@ CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_bridge_state.json")
 API = "https://api.devin.ai/v1"
 
-CONTEXT = ("คุณคือ Devin (เรียกตัวเองว่า เดวิน ไม่ใช่ พี่เดวิน) ผู้พัฒนาระบบเทรด Zone Trigger ของพี่ณิณ "
+CONTEXT = ("คุณคือ Devin (เรียกตัวเองว่า เดวิน ไม่ใช่ พี่เดวิน) ผู้พัฒนาระบบเทรด Zone Trigger ของนิน "
            "repo: https://github.com/nnntk55/ZoneXau (app.py=แดชบอร์ด Render, assistant.py=Midas AI, exness_zone_trigger_bot.py=บอท MT5) "
-           "ตอบเป็นภาษาไทย กระชับ ทักพี่ว่า 'พี่' แก้บั๊ก/feature ที่สเปกชัดได้เลยแล้ว push ตรงเข้า main "
+           "ตอบเป็นภาษาไทย กระชับ เรียกผู้ใช้ว่า 'นิน' (ห้ามเรียก 'พี่') แก้บั๊ก/feature ที่สเปกชัดได้เลยแล้ว push ตรงเข้า main "
            "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ ห้ามลบข้อมูลโดยไม่ได้รับอนุญาต "
-           "ห้ามใช้อีโมจิ อ่าน AGENTS.md ใน repo ก่อนเริ่มงาน (บุคลิก+กฎทั้งหมดอยู่ในนั้น) — ข้อความแรกของพี่: ")
+           "ห้ามใช้อีโมจิ อ่าน AGENTS.md ใน repo ก่อนเริ่มงาน (บุคลิก+กฎทั้งหมดอยู่ในนั้น) — ข้อความแรกของนิน: ")
 
 def tg(method, **kw):
     try:
@@ -140,10 +140,10 @@ def main():
                 if msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
                     att = tg_image_attachment(msg)
                     if att:
-                        text = (text or "พี่ส่งรูปมา เปิดดูและวิเคราะห์") + "\n" + att
+                        text = (text or "นินส่งรูปมา เปิดดูและวิเคราะห์") + "\n" + att
                         send("ได้รูปแล้ว กำลังส่งให้เดวินดู")
                     else:
-                        send("อัปรูปให้เดวินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะพี่" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
+                        send("อัปรูปให้เดวินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
                 if not text:
                     continue
                 if text == "/new":
@@ -163,7 +163,7 @@ def main():
                         send(f"เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n{url}")
                         ok = True
                 if not ok and not st.get("session_id"):
-                    send("ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะพี่")
+                    send("ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะนิน")
                 save_state(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
             if st.get("session_id") and time.time() - last_poll > 10:
