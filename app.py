@@ -153,7 +153,7 @@ def load_states_from_sheets():
     if not GOOGLE_SCRIPT_URL:
         return default_data
     try:
-        res = requests.get(GOOGLE_SCRIPT_URL, timeout=10)
+        res = requests.get(GOOGLE_SCRIPT_URL, timeout=40)
         if res.status_code == 200:
             data = res.json()
             for k in default_data.keys():
@@ -438,6 +438,12 @@ ASSETS = {
         }
     }
 }
+
+# เทรดสั้น (set2) + แนวรับ/ต้าน (alerts) ต้องโหลดจากชีทด้วย ไม่งั้น restart แล้วกลับเป็นค่าเริ่มต้น
+for _k, _a in ASSETS.items():
+    _sv = saved_states.get(_k, {})
+    _a["state"]["set2"] = _sv["set2"] if isinstance(_sv.get("set2"), dict) else default_set2()
+    _a["state"]["alerts"] = _sv["alerts"] if isinstance(_sv.get("alerts"), list) else []
 global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
 app.before_request(check_access)
