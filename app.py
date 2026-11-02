@@ -1595,6 +1595,28 @@ def log_trade():
             print(f"Log Trade to Sheets Error: {e}")
     return jsonify({"status": "success"})
 
+REMOTE_LOGS = []  # log ล่าสุดจาก Midas/บอท (in-memory) — ส่งต่อไปแท็บ Logs ในชีทด้วย
+
+@app.route('/api/remote_log', methods=['GET', 'POST'])
+def remote_log():
+    """Midas/บอทส่ง error มาเก็บ ให้ Devin อ่านได้โดยไม่ต้องเห็นหน้าจอเครื่องนิน"""
+    if request.method == 'GET':
+        return jsonify(REMOTE_LOGS[-200:])
+    data = request.json or {}
+    src = str(data.get("source") or "")[:30]
+    lines = [l for l in (data.get("lines") or []) if isinstance(l, dict)][:50]
+    for l in lines:
+        REMOTE_LOGS.append({"time": l.get("time"), "source": src, "msg": str(l.get("msg", ""))[:1000]})
+    del REMOTE_LOGS[:-200]
+    if GOOGLE_SCRIPT_URL and lines:
+        def _fwd():
+            try:
+                requests.post(GOOGLE_SCRIPT_URL, json={"type": "log", "source": src, "lines": lines}, timeout=30)
+            except Exception as e:
+                print(f"remote log -> sheet error: {e}")
+        threading.Thread(target=_fwd, daemon=True).start()
+    return jsonify({"status": "success", "n": len(lines)})
+
 DEVIN_TASKS = []  # คิวงานที่ Midas ส่งให้ Devin — in-memory (หายถ้า Render restart)
 
 @app.route('/api/devin_tasks', methods=['GET', 'POST', 'DELETE'])

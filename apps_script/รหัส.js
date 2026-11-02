@@ -5,6 +5,8 @@ const HEADERS = ["asset","note","current_stage","target_mode","active_direction"
                  "auto_paused_today","stage_tfs","s5_enabled","lot","tp_pips","sl_pips","updated_at",
                  "sr_enabled","auto_order","set2","alerts"];
 const TRADE_HEADERS = ["time","asset","action","price","lot","tp_pips","sl_pips","result","profit"];
+const LOG_SHEET_NAME = "Logs";
+const LOG_HEADERS = ["time","source","msg"];
 
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -24,6 +26,16 @@ function getTradeSheet() {
   if (!sheet) sheet = ss.insertSheet(TRADE_SHEET_NAME);
   if (sheet.getLastRow() === 0 || sheet.getRange(1,1).getValue() !== "time") {
     sheet.getRange(1, 1, 1, TRADE_HEADERS.length).setValues([TRADE_HEADERS]);
+  }
+  return sheet;
+}
+
+function getLogSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(LOG_SHEET_NAME);
+  if (sheet.getLastRow() === 0 || sheet.getRange(1,1).getValue() !== "time") {
+    sheet.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]);
   }
   return sheet;
 }
@@ -59,6 +71,19 @@ function doPost(e) {
         data.profit != null ? data.profit : ""
       ]);
       return ContentService.createTextOutput(JSON.stringify({status:"success",type:"trade"}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // === log ของ Midas/บอท (ให้ Devin อ่านจากนอกเครื่องได้) ===
+    if (data && data.type === "log") {
+      const lines = Array.isArray(data.lines) ? data.lines : [data.msg || ""];
+      const ls = getLogSheet();
+      const now = new Date().toISOString();
+      const rows = lines.slice(0, 50).map(function (l) {
+        return [l && l.time ? l.time : now, data.source || "", String(l && l.msg !== undefined ? l.msg : l).slice(0, 1000)];
+      });
+      if (rows.length) ls.getRange(ls.getLastRow() + 1, 1, rows.length, LOG_HEADERS.length).setValues(rows);
+      return ContentService.createTextOutput(JSON.stringify({status:"success",type:"log",n:rows.length}))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -110,6 +135,16 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  if (e && e.parameter && e.parameter.logs) {
+    const ls = getLogSheet();
+    const n = Math.min(Number(e.parameter.logs) || 100, 500);
+    const last = ls.getLastRow();
+    const start = Math.max(2, last - n + 1);
+    const vals = last >= 2 ? ls.getRange(start, 1, last - start + 1, LOG_HEADERS.length).getValues() : [];
+    return ContentService.createTextOutput(JSON.stringify(vals.map(function (r) {
+      return {time: r[0], source: r[1], msg: r[2]};
+    }))).setMimeType(ContentService.MimeType.JSON);
+  }
   const sheet = getSheet();
   const values = sheet.getDataRange().getValues();
   const result = {};

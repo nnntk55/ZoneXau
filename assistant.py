@@ -862,6 +862,27 @@ pending_confirm = {"action": None, "args": None, "desc": None}
 
 _ai_errors = []  # สาเหตุที่ provider ล้มในรอบล่าสุด (HTTP code หรือ "net")
 
+_rlog_buf = []  # error สมอง AI รอส่งขึ้น dashboard (/api/remote_log) ให้ Devin อ่านจากนอกเครื่องได้
+
+def _rlog(msg):
+    print(msg)
+    _rlog_buf.append({"time": datetime.now(timezone.utc).isoformat(), "msg": str(msg)[:1000]})
+    del _rlog_buf[:-100]
+
+def _rlog_worker():
+    while True:
+        time.sleep(30)
+        if not _rlog_buf or not RENDER_DASHBOARD_URL:
+            continue
+        batch = _rlog_buf[:50]
+        try:
+            r = requests.post(f"{RENDER_DASHBOARD_URL}/api/remote_log", json={"source": "midas", "lines": batch},
+                              timeout=DASH_TIMEOUT, headers=dash_headers(), auth=dash_auth())
+            if r.status_code == 200:
+                del _rlog_buf[:len(batch)]
+        except Exception:
+            pass
+
 GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-2.5-flash-lite"]
 
 def gemini_call(contents):
@@ -880,18 +901,18 @@ def gemini_call(contents):
         except Exception as e:
             last_err = e
             _ai_errors.append("net")
-            print(f"Gemini {model} exception: {e}")
+            _rlog(f"Gemini {model} exception: {e}")
             continue
         if res.status_code == 200:
             if model != GEMINI_MODEL:
                 print(f"✅ fallback ไปโมเดล {model}")
             return res.json()
         last_err = res.status_code
-        print(f"Gemini {model} HTTP {res.status_code}: {res.text[:200]}")
+        _rlog(f"Gemini {model} HTTP {res.status_code}: {res.text[:200]}")
         _ai_errors.append(res.status_code)
         if res.status_code not in (404, 429, 500, 502, 503, 504):
             break  # error แบบ key/สิทธิ์ผิด ลองโมเดลอื่นไม่ช่วย
-    print(f"❌ ทุกโมเดลล้มเหลว (last={last_err})")
+    _rlog(f"❌ ทุกโมเดลล้มเหลว (last={last_err})")
     return None
 
 # ==========================================
@@ -974,11 +995,11 @@ def groq_call():
             wait = _short_retry_wait(r) if attempt == 0 else None
             if wait is None:
                 break
-            print(f"Groq 429 — รอ {wait:.1f}s แล้วลองใหม่")
+            _rlog(f"Groq 429 — รอ {wait:.1f}s แล้วลองใหม่")
             time.sleep(wait)
         if r.status_code != 200:
             _ai_errors.append(r.status_code)
-            print(f"Groq HTTP {r.status_code}: {r.text[:200]}")
+            _rlog(f"Groq HTTP {r.status_code}: {r.text[:200]}")
             return None
         m = r.json()["choices"][0]["message"]
         parts = []
@@ -995,7 +1016,7 @@ def groq_call():
         return {"candidates": [{"content": {"parts": parts}}]}
     except Exception as e:
         _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
-        print(f"Groq error: {e}")
+        _rlog(f"Groq error: {e}")
         return None
 
 def openrouter_call():
@@ -1013,7 +1034,7 @@ def openrouter_call():
                       "tools": tools, "temperature": 0.3}, timeout=60)
             if r.status_code != 200:
                 _ai_errors.append(r.status_code)
-                print(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
+                _rlog(f"OpenRouter {model} HTTP {r.status_code}: {r.text[:150]}")
                 continue
             m = r.json()["choices"][0]["message"]
             parts = []
@@ -1030,7 +1051,7 @@ def openrouter_call():
             return {"candidates": [{"content": {"parts": parts}}]}
         except Exception as e:
             _ai_errors.append("net" if isinstance(e, requests.RequestException) else "err")
-            print(f"OpenRouter {model} error: {e}")
+            _rlog(f"OpenRouter {model} error: {e}")
             continue
     return None
 
@@ -1054,7 +1075,7 @@ def _call_providers():
         try:
             data = fn()
         except Exception as e:
-            print(f"{prov} error: {e}")
+            _rlog(f"{prov} error: {e}")
             _ai_errors.append("err")
             data = None
         if data and (data.get("candidates") or [{}])[0].get("content", {}).get("parts"):
@@ -1156,7 +1177,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
             why = _ai_fail_message()
             if step > 0:
                 # tool บางตัวรันไปแล้ว — ไม่ลองซ้ำเอง กันคำสั่งซ้ำ (เช่น add_alert ซ้ำ)
-                print(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
+                _rlog(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
                 if turn_log:
                     return (f"{why} เลยสรุปให้เป็นภาษาคนไม่ได้ — แต่คำสั่งทำไปแล้ว ผลจริงตามนี้คับ:\n"
                             + _summarize_tool_log(turn_log) + "\nเช็คก่อนสั่งซ้ำนะคับ")
@@ -1167,11 +1188,11 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
                 del chat_history[turn_start:]
             save_memory()
             if image_bytes or not _queue_retry(user_text, chat_id, _retry_tries):
-                print(f"AI ล้มเหลว (errors={_ai_errors}) — ไม่เข้าคิวลองใหม่")
+                _rlog(f"AI ล้มเหลว (errors={_ai_errors}) — ไม่เข้าคิวลองใหม่")
                 if _retry_tries:
                     return f"{why} — ลองใหม่ให้หลายรอบแล้วยังไม่ติด พี่ส่งมาใหม่อีกทีตอนสะดวกนะคับ"
                 return f"{why} — พี่ส่งมาใหม่อีกสักครู่นะคับ"
-            print(f"AI ล้มเหลว (errors={_ai_errors}) — เข้าคิวลองใหม่ใน {AI_RETRY_DELAYS[_retry_tries]}s")
+            _rlog(f"AI ล้มเหลว (errors={_ai_errors}) — เข้าคิวลองใหม่ใน {AI_RETRY_DELAYS[_retry_tries]}s")
             if _retry_tries:
                 return None  # แจ้งพี่ไปแล้วรอบแรก ไม่ต้องสแปม
             return f"{why} — เดี๋ยวผมลองใหม่เองแล้วตอบกลับนะพี่"
@@ -1260,6 +1281,9 @@ def _self_update_worker():
 def main():
     import threading
     threading.Thread(target=_self_update_worker, daemon=True).start()
+    threading.Thread(target=_rlog_worker, daemon=True).start()
+    _rlog(f"start order={MODEL_ORDER} groq={'on' if GROQ_API_KEY else 'off'} openrouter={'on' if OPENROUTER_API_KEY else 'off'} "
+          f"gemini={'on' if GEMINI_API_KEY else 'off'} groq_model={GROQ_MODEL} gemini_model={GEMINI_MODEL}")
     if not all([ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL]):
         print("❌ ตั้ง env ไม่ครบ: ASSISTANT_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_CHAT_ID, RENDER_DASHBOARD_URL")
         return
