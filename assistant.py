@@ -885,9 +885,22 @@ def _rlog_worker():
 
 GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-2.5-flash-lite"]
 
+def _with_thought_signatures(contents):
+    """Gemini 3 บังคับให้ functionCall มี thoughtSignature — call ที่มาจาก Groq/OpenRouter ไม่มี
+    ใส่ค่า dummy ที่ Google อนุญาตให้ใช้กับ call ที่ไม่ได้มาจาก Gemini เอง"""
+    out = []
+    for m in contents:
+        ps = m.get("parts") or []
+        if m.get("role") == "model" and any("functionCall" in p and "thoughtSignature" not in p for p in ps):
+            ps = [dict(p, thoughtSignature="skip_thought_signature_validator")
+                  if "functionCall" in p and "thoughtSignature" not in p else p for p in ps]
+            m = dict(m, parts=ps)
+        out.append(m)
+    return out
+
 def gemini_call(contents):
     body = {
-        "contents": contents,
+        "contents": _with_thought_signatures(contents),
         "tools": GEMINI_TOOLS,
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "generationConfig": {"temperature": 0.3},
@@ -1019,6 +1032,29 @@ def groq_call():
         _rlog(f"Groq error: {e}")
         return None
 
+_or_cache = {"t": 0, "models": None}
+
+def _openrouter_models():
+    """โมเดลฟรีบน OpenRouter หายบ่อย — เช็ครายชื่อจริงชั่วโมงละครั้ง ใช้ตัวที่ตั้งไว้ที่ยังมีอยู่
+    แล้วเติมโมเดลฟรีที่รองรับ tools ให้ครบ 6 ตัว ถ้าเช็คไม่ได้ใช้รายชื่อที่ตั้งไว้ตามเดิม"""
+    if _or_cache["models"] and time.time() - _or_cache["t"] < 3600:
+        return _or_cache["models"]
+    try:
+        data = requests.get("https://openrouter.ai/api/v1/models", timeout=20).json()["data"]
+        free = [m["id"] for m in data if m["id"].endswith(":free")
+                and "tools" in (m.get("supported_parameters") or [])]
+        free.sort(key=lambda i: -next((m.get("context_length") or 0) for m in data if m["id"] == i))
+        models = [m.strip() for m in OPENROUTER_MODELS if m.strip() in free]
+        models += [m for m in free if m not in models][:max(0, 6 - len(models))]
+        if models:
+            if models != [m.strip() for m in OPENROUTER_MODELS]:
+                _rlog(f"OpenRouter models -> {models}")
+            _or_cache.update(t=time.time(), models=models)
+            return models
+    except Exception as e:
+        _rlog(f"OpenRouter list models error: {e}")
+    return [m.strip() for m in OPENROUTER_MODELS if m.strip()]
+
 def openrouter_call():
     """สมองสำรอง 3 — OpenRouter free models ลองทีละตัวจนเจอที่ตอบ"""
     if not OPENROUTER_API_KEY:
@@ -1026,7 +1062,7 @@ def openrouter_call():
     tools = [{"type": "function", "function": {"name": d["name"],
         "description": d.get("description", ""), "parameters": d.get("parameters", {})}}
         for d in GEMINI_TOOLS[0]["function_declarations"]]
-    for model in OPENROUTER_MODELS:
+    for model in _openrouter_models():
         try:
             r = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
