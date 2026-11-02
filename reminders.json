@@ -2,6 +2,6 @@
   {
     "id": "2026-11-03-render-openrouter-finance",
     "at": "2026-11-03T10:00:00+07:00",
-    "devin": "ถึงเวลาทักนิน (10:00) ตามที่นัดไว้: 1) ขอ Render API key ใหม่หรือให้นินกด Manual Deploy แล้วเช็ค /healthz + set2 ตรงกับชีท 2) เรื่องเติมเงิน OpenRouter เป็นสมองหลักมิดาส 3) เริ่มทำบอทการเงิน (ชื่อยังไม่เลือก: เสนอ Plutus) ถามรายการลูกค้าประจำกับค่าใช้จ่ายรายเดือน รายละเอียดอยู่ใน /home/ubuntu/reminder_prompt.txt และ memory finance-bot.md"
+    "devin": "ถึงเวลาทักนิน (10:00) ตามที่นัดไว้: 1) ขอ Render API key ใหม่หรือให้นินกด Manual Deploy แล้วเช็ค /healthz + set2 ตรงกับชีท 2) เรื่องเติมเงิน OpenRouter เป็นสมองหลักมิดาส 3) เริ่มทำบอทการเงิน (ชื่อ Plutus นินเลือกแล้ว) ถามรายการลูกค้าประจำกับค่าใช้จ่ายรายเดือน รายละเอียดอยู่ใน /home/ubuntu/reminder_prompt.txt และ memory finance-bot.md"
   }
 ]
