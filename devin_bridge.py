@@ -108,11 +108,26 @@ def devin_session(sid):
         return None
 
 def session_dead(s):
-    """session ที่รับข้อความได้แต่จะไม่ตอบ (หมดโควต้า/หมดอายุ/จบแล้ว) — ส่งเข้าไปก็เงียบ ต้องเปิดใหม่"""
+    """session ที่รับข้อความได้แต่จะไม่ตอบ (หมดโควต้า/หมดอายุ) — ส่งเข้าไปก็เงียบ ต้องเปิดใหม่ (session ที่หลับ/จบ ส่งข้อความแล้วตื่นเอง)"""
     if not s:
         return False
     st = " ".join(str(s.get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
-    return "quota" in st or (s.get("status_enum") or "").lower() in ("expired", "finished")
+    return "quota" in st or (s.get("status_enum") or "").lower() == "expired"
+
+AWAKE = ("working", "blocked", "resumed", "resume_requested", "resume_requested_frontend")
+
+def woke_up(sid, before, wait=60):
+    """session ที่หลับอยู่ ส่งข้อความแล้วต้องตื่น (status เปลี่ยน) ภายใน wait วิ ไม่งั้นถือว่าปลุกไม่ขึ้น"""
+    end = time.time() + wait
+    while time.time() < end:
+        time.sleep(5)
+        s = devin_session(sid)
+        if s and session_dead(s):
+            return False
+        now = ((s or {}).get("status_enum") or "").lower()
+        if now and now != before:
+            return True
+    return False
 
 def session_why(s):
     """เหตุผลที่ session เดิมใช้ต่อไม่ได้ แบบอ่านรู้เรื่อง"""
@@ -137,10 +152,14 @@ def deliver(st, text):
         st["session_id"] = None; st["seen"] = 0
         sid = None
     if sid:
+        before = ((info or {}).get("status_enum") or "").lower()
         if devin_message(sid, text):
-            return True, None, ""
+            if not info or before in AWAKE or woke_up(sid, before):
+                return True, None, ""
+            st["switch_why"] = "ปลุก session เดิมไม่ขึ้น"
+        else:
+            st["switch_why"] = "ส่งข้อความเข้า session เดิมไม่ได้"
         st["prev_session"] = sid
-        st["switch_why"] = "ส่งข้อความเข้า session เดิมไม่ได้"
         st["session_id"] = None; st["seen"] = 0
     nsid, url, err = devin_create(text, st.get("prev_session"))
     if nsid:
