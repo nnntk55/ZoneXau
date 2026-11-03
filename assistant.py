@@ -114,8 +114,10 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ห้ามเคลมว่าตั้งค่า/เปิด/ปิดอะไรแล้ว จนกว่า tool จะคืนผลจริง — tool เขียนค่าจะคืน "ผลจริงบนแดชบอร์ด" ที่อ่านกลับยืนยันแล้ว ให้รายงานตามค่านั้นเท่านั้น ถ้ามี "ผิด" ให้บอกพี่ว่าไม่สำเร็จ ห้ามปกปิด
 - พี่ถามเรื่องสถานะ/ราคา/stage/สถานการณ์ → เรียก get_status ทุกครั้งก่อนตอบ ห้ามใช้ค่าจากความจำหรือบทสนทนาเก่า — ถ้าข้อมูลที่ได้ดูไม่อัปเดต (บอทอาจดับ/ค้าง) ให้บอกพี่ตรงๆ ว่า "ข้อมูลล่าสุดที่เห็น" พร้อมเตือนว่าอาจเก่า
 - ขอบเขตคำสั่งห้ามเกินที่พี่ขอ: "ปิดเทรดสั้นทอง" = set_power(xau, short, off) เท่านั้น — ห้ามแตะชุดยาว ห้ามปิดอย่างอื่น ห้ามปิดทั้งสองชุด; เช่นเดียวกัน "ปิดเทรดยาว" ห้ามแตะชุดสั้น — การอัปเดตราคา/กราฟ/alert ไม่ใช่ของที่พี่สั่งปิด ห้ามแตะเด็ดขาด
-- พี่ระบุ stage เจาะจง (เช่น "ปิด s1", "s3 เป็น 1h", "เปิด s2/3/4/5") → ใช้ param stages แก้เฉพาะช่องที่พี่พูดถึงเท่านั้น เช่น "ปิด s1 ทองเทรดสั้น" = set_stage_plan(xau, short, stages={"s1":"off"}) — ห้ามส่ง stage_tfs ทั้งชุด ห้ามเอาคอนเวนชัน/default/คำสั่งเก่าในบทสนทนามาปน ช่องอื่นต้องคงค่าเดิมบนแดชบอร์ด
-- stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ) — "เปิด s2/3/4/5" คือเปิดช่องที่ 2,3,4 ให้มี TF (S5 ทำงานเองอัตโนมัติเมื่อ S4 มี TF) ห้ามไปเปิด S1 ที่พี่ไม่ได้ขอ; TF ที่ใช้: ถ้าช่องนั้นมีค่าเดิมอยู่แล้วใช้ค่าเดิม ถ้าเป็น "off" ให้ใช้ default ของชุดนั้น (ยาว ["4h","1h","15m","5m"], สั้น ["off","off","15m","5m"]) แล้วรายงานให้พี่ทราบ
+- พี่บอกรายการ stage ที่จะเปิด (เช่น "เปิด s2/3/4/5", "s3/4/5 on", "เปิดแค่ 15 นาทีกับ 5 นาที") = เปิดเฉพาะที่พูดถึง ที่เหลือปิด → ใช้ param only_stages เช่น "ฝั่งเทรดยาว เปิด S2/3/4/5" = set_stage_plan(xau, long, only_stages=["s2","s3","s4","s5"]) → S1 off, S2-S4 ใช้ TF เดิม (ถ้าเดิม off ใช้ default 4h/1h/15m/5m ตามช่อง), S5 on — ห้ามปล่อย S1 ค้างไว้
+- พี่แก้ stage เดี่ยวๆ (เช่น "ปิด s1", "s3 เป็น 1h") → ใช้ param stages แก้เฉพาะช่องที่พูดถึงเท่านั้น เช่น "ปิด s1 ทองเทรดสั้น" = set_stage_plan(xau, short, stages={"s1":"off"}) — ห้ามส่ง stage_tfs ทั้งชุด ห้ามเอาคอนเวนชัน/default/คำสั่งเก่าในบทสนทนามาปน ช่องอื่นต้องคงค่าเดิมบนแดชบอร์ด
+- stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ)
+- บอทไม่ได้ยิงออเดอร์เพราะราคาชนแนว — ยิงเมื่อ stage engine ครบ (Stoch ทุก stage ที่เปิด + S5 เทียนปิดยืนยัน EMA10) เท่านั้น แนวรับ/ต้านแค่แจ้งเตือน/กันระยะ min_room ห้ามบอกพี่ว่า "ยิงเมื่อราคาชนแนว"
 - เปลี่ยน stage_tfs/set ใดๆ → บอทจะอ่านค่าใหม่รอบถัดไปเอง หลังตั้งเสร็จให้บอกพี่ว่าตั้งอะไรตรงไหนบ้างตามผล tool จริง
 """
 
@@ -317,11 +319,24 @@ def tool_set_direction(asset, set_key, direction):
 
 def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=None, lot=None, tp=None, sl=None,
                         per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None,
-                        stages=None):
+                        stages=None, only_stages=None):
     """ตั้งแผน stage ผ่าน /api/update_config — เขียนเฉพาะ field ที่ส่ง lot/tp/sl อิสระจากกัน
     per_day/window/zone_low/zone_high/until/min_room = แผนระยะยาว เก็บใน alerts เป็น meta type='quota'"""
     fields = {}
     if stage_tfs:  fields["stage_tfs"] = [str(t).lower() for t in stage_tfs[:4]]
+    if only_stages and not stage_tfs:
+        # เปิดเฉพาะ stage ที่ระบุ ที่เหลือ off — ช่องที่เปิดใช้ TF เดิม ถ้าเดิม off ใช้ default ตามช่อง
+        cfg0 = dash_get_config(asset)
+        if not cfg0:
+            return {"error": "ดึง config ไม่ได้"}
+        cur = (cfg0.get("set2") or {}).get("stage_tfs") if set_key == "short" else cfg0.get("stage_tfs")
+        cur = list(cur or ["off"] * 4)[:4] + ["off"] * 4
+        want = {str(x).lower().lstrip("s") for x in only_stages}
+        dflt = ["4h", "1h", "15m", "5m"]
+        fields["stage_tfs"] = [(cur[i] if str(cur[i]).lower() != "off" else dflt[i]) if str(i + 1) in want else "off"
+                               for i in range(4)]
+        if "5" in want and s5 is None:
+            fields["s5_enabled"] = True
     if stages:
         # แก้เฉพาะช่องที่ระบุ ทับบนค่าปัจจุบันบนแดชบอร์ด — ช่องอื่นไม่เปลี่ยน
         if "stage_tfs" not in fields:
@@ -749,7 +764,7 @@ TOOL_IMPL = {
                             a.get("stage_tfs"), a.get("s5"), a.get("sr"), a.get("auto_order"),
                             a.get("lot"), a.get("tp_pips"), a.get("sl_pips"), a.get("per_day"), a.get("window"),
                             a.get("zone_low"), a.get("zone_high"), a.get("until"), a.get("min_room"), a.get("risk_pct"),
-                            a.get("stages")),
+                            a.get("stages"), a.get("only_stages")),
     "set_power":    lambda a: tool_set_power(a["asset"], a.get("set", "long"), bool(a["on"])),
     "set_note":     lambda a: tool_set_note(a["asset"], a["note"]),
     "set_plan":     lambda a: tool_set_plan(a["asset"], a["plan"]),
@@ -799,6 +814,8 @@ GEMINI_TOOLS = [{
                            "description": "TF ของ S1-S4 ทั้งชุด เช่น [\"4h\",\"1h\",\"15m\",\"5m\"] หรือ \"off\" เพื่อข้าม — ใช้เมื่อพี่สั่งตั้งทั้งชุดเท่านั้น"},
              "stages": {"type": "object", "description": "แก้เฉพาะบาง stage ช่องอื่นคงค่าเดิม เช่น {\"s1\":\"off\"} หรือ {\"s3\":\"1h\"} — ใช้เมื่อพี่ระบุ stage เจาะจง",
                         "properties": {k: {"type": "string", "enum": VALID_TFS} for k in ("s1", "s2", "s3", "s4")}},
+             "only_stages": {"type": "array", "items": {"type": "string", "enum": ["s1", "s2", "s3", "s4", "s5"]},
+                             "description": "เปิดเฉพาะ stage ที่ระบุ ที่เหลือใน S1-S4 ปิด เช่น [\"s2\",\"s3\",\"s4\",\"s5\"] — ใช้เมื่อพี่บอกรายการ stage ที่จะเปิด เช่น 'เปิด s2/3/4/5'"},
              "s5": {"type": "boolean", "description": "เปิด stage 5 (ยิงออเดอร์)"},
              "sr": {"type": "boolean", "description": "S/R filter — stage 1 ต้องชนแนว EMA"},
              "auto_order": {"type": "boolean", "description": "ยิงออเดอร์อัตโนมัติเมื่อ stage 5 ครบ ไม่ถาม"},
