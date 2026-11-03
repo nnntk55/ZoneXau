@@ -13,7 +13,8 @@ CONTEXT = ("คุณคือ Devin (เรียกตัวเองว่า
            "repo: https://github.com/nnntk55/ZoneXau (app.py=แดชบอร์ด Render, assistant.py=Midas AI, exness_zone_trigger_bot.py=บอท MT5) "
            "ตอบเป็นภาษาไทย กระชับ เรียกผู้ใช้ว่า 'นิน' (ห้ามเรียก 'พี่') แก้บั๊ก/feature ที่สเปกชัดได้เลยแล้ว push ตรงเข้า main "
            "แต่ห้ามแก้สูตร lot/risk/เงื่อนไขยิงออเดอร์/ค่าลับ ห้ามลบข้อมูลโดยไม่ได้รับอนุญาต "
-           "ห้ามใช้อีโมจิ อ่าน AGENTS.md ใน repo ก่อนเริ่มงาน (บุคลิก+กฎทั้งหมดอยู่ในนั้น) — ข้อความแรกของนิน: ")
+           "ห้ามใช้อีโมจิ อ่าน AGENTS.md ใน repo ก่อนเริ่มงาน (บุคลิก+กฎทั้งหมดอยู่ในนั้น) ")
+CONTEXT_TAIL = "— ข้อความแรกของนิน: "
 
 def tg(method, **kw):
     try:
@@ -72,23 +73,68 @@ def save_state(st):
     except Exception:
         pass
 
-def devin_create(text):
-    r = requests.post(f"{API}/sessions", json={"prompt": CONTEXT + text, "bypass_approval": True, "tags": ["telegram"]},
-                      headers={"Authorization": f"Bearer {KEY}"}, timeout=20)
+def devin_create(text, prev=None):
+    """คืน (session_id, url, error_text)"""
+    prompt = CONTEXT
+    if prev:
+        prompt += (f"(session ก่อนหน้าที่คุยกับนินค้างไว้: https://app.devin.ai/sessions/{prev.replace('devin-', '')} "
+                   "ถ้าเป็นเรื่องต่อเนื่อง อ่านข้อความล่าสุดจาก session นั้นก่อนตอบ) ")
+    try:
+        r = requests.post(f"{API}/sessions", json={"prompt": prompt + CONTEXT_TAIL + text, "bypass_approval": True,
+                                                   "tags": ["telegram"]},
+                          headers={"Authorization": f"Bearer {KEY}"}, timeout=20)
+    except Exception as e:
+        return None, None, str(e)
     if r.status_code in (200, 201):
         d = r.json()
-        return d.get("session_id"), d.get("url")
+        return d.get("session_id"), d.get("url"), ""
     print(f"create session fail {r.status_code}: {r.text[:200]}")
-    return None, None
+    return None, None, f"{r.status_code} {r.text[:200]}"
 
 def devin_message(sid, text):
-    r = requests.post(f"{API}/sessions/{sid}/message", json={"message": text},
-                      headers={"Authorization": f"Bearer {KEY}"}, timeout=20)
-    return r.status_code in (200, 201)
+    try:
+        r = requests.post(f"{API}/sessions/{sid}/message", json={"message": text},
+                          headers={"Authorization": f"Bearer {KEY}"}, timeout=20)
+        return r.status_code in (200, 201)
+    except Exception as e:
+        print(f"message err: {e}")
+        return False
 
 def devin_session(sid):
-    r = requests.get(f"{API}/sessions/{sid}", headers={"Authorization": f"Bearer {KEY}"}, timeout=15)
-    return r.json() if r.status_code == 200 else None
+    try:
+        r = requests.get(f"{API}/sessions/{sid}", headers={"Authorization": f"Bearer {KEY}"}, timeout=15)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def session_dead(s):
+    """session ที่รับข้อความได้แต่จะไม่ตอบ (หมดโควต้า/หมดอายุ/จบแล้ว) — ส่งเข้าไปก็เงียบ ต้องเปิดใหม่"""
+    if not s:
+        return False
+    st = " ".join(str(s.get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
+    return "quota" in st or (s.get("status_enum") or "").lower() in ("expired", "finished")
+
+def quota_err(err):
+    return "quota" in (err or "").lower() or "limit" in (err or "").lower()
+
+def deliver(st, text):
+    """ส่งข้อความถึงวิน: session เดิมถ้ายังใช้ได้ ไม่งั้นเปิดใหม่พร้อมลิงก์ session เก่า
+    คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่"""
+    sid = st.get("session_id")
+    if sid and session_dead(devin_session(sid)):
+        st["prev_session"] = sid
+        st["session_id"] = None; st["seen"] = 0
+        sid = None
+    if sid:
+        if devin_message(sid, text):
+            return True, None, ""
+        st["prev_session"] = sid
+        st["session_id"] = None; st["seen"] = 0
+    nsid, url, err = devin_create(text, st.get("prev_session"))
+    if nsid:
+        st["session_id"] = nsid; st["seen"] = 0
+        return True, url or f"https://app.devin.ai/sessions/{nsid}", ""
+    return False, None, err
 
 REMINDERS_URL = "https://raw.githubusercontent.com/nnntk55/ZoneXau/main/reminders.json"
 
@@ -110,14 +156,21 @@ def check_reminders(st):
             continue
         if rid in fired or at > now or now - at > timedelta(hours=12):
             continue
-        if it.get("text"):
-            send(it["text"])
+        notified = st.setdefault("rem_notified", [])
+        if rid not in notified:
+            send(it.get("text") or "ถึงเวลานัดของวินแล้ว กำลังปลุกวินมาทำต่อ")
+            notified.append(rid); del notified[:-50]
+            save_state(st)
         if it.get("devin"):
-            sid = st.get("session_id")
-            if not (sid and devin_message(sid, "[REMINDER] " + it["devin"])):
-                sid, _ = devin_create("[REMINDER] " + it["devin"])
-                if sid:
-                    st["session_id"] = sid; st["seen"] = 0
+            ok, _, err = deliver(st, "[REMINDER] " + it["devin"])
+            if not ok:
+                warned = st.setdefault("rem_warned", [])
+                if rid not in warned:
+                    why = "โควต้า Devin หมด" if quota_err(err) else "ติดต่อ Devin ไม่ได้"
+                    send(f"ปลุกวินไม่สำเร็จ ({why}) จะลองใหม่ทุก 1 นาทีจนกว่าจะเข้าได้ (ไม่เกิน 12 ชม.)")
+                    warned.append(rid); del warned[:-50]
+                save_state(st)
+                continue
         fired.append(rid)
         del fired[:-50]
         save_state(st)
@@ -189,20 +242,14 @@ def main():
                     st["session_id"] = None; st["seen"] = 0
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
                     continue
-                sid = st.get("session_id")
-                ok = False
-                if sid:
-                    ok = devin_message(sid, text)
-                    if not ok:  # เซสชันหมดอายุ → เปิดใหม่
-                        st["session_id"] = None; st["seen"] = 0
-                if not st.get("session_id"):
-                    sid, url = devin_create(text)
-                    if sid:
-                        st["session_id"] = sid; st["seen"] = 0
-                        send(f"เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n{url}")
-                        ok = True
-                if not ok and not st.get("session_id"):
-                    send("ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะนิน")
+                had = st.get("session_id")
+                ok, url, err = deliver(st, text)
+                if ok and url:
+                    send(("session เดิมใช้ต่อไม่ได้ (หมดโควต้า/หมดอายุ) เปิดใหม่แล้ว วินจะอ่านเรื่องเดิมต่อ\n" if had
+                          else "เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n") + url)
+                elif not ok:
+                    send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ลองใหม่ทีหลังนะนิน" if quota_err(err)
+                         else "ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะนิน")
                 save_state(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
             if st.get("session_id") and time.time() - last_poll > 10:
