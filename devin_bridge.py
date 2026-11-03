@@ -114,6 +114,15 @@ def session_dead(s):
     st = " ".join(str(s.get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
     return "quota" in st or (s.get("status_enum") or "").lower() in ("expired", "finished")
 
+def session_why(s):
+    """เหตุผลที่ session เดิมใช้ต่อไม่ได้ แบบอ่านรู้เรื่อง"""
+    st = " ".join(str((s or {}).get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
+    if "quota" in st:
+        return "โควต้า Devin หมด"
+    if "expired" in st:
+        return "session หมดอายุ"
+    return "session จบงาน/หลับไปแล้ว"
+
 def quota_err(err):
     return "quota" in (err or "").lower() or "limit" in (err or "").lower()
 
@@ -121,14 +130,17 @@ def deliver(st, text):
     """ส่งข้อความถึงวิน: session เดิมถ้ายังใช้ได้ ไม่งั้นเปิดใหม่พร้อมลิงก์ session เก่า
     คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่"""
     sid = st.get("session_id")
-    if sid and session_dead(devin_session(sid)):
+    info = devin_session(sid) if sid else None
+    if sid and session_dead(info):
         st["prev_session"] = sid
+        st["switch_why"] = session_why(info)
         st["session_id"] = None; st["seen"] = 0
         sid = None
     if sid:
         if devin_message(sid, text):
             return True, None, ""
         st["prev_session"] = sid
+        st["switch_why"] = "ส่งข้อความเข้า session เดิมไม่ได้"
         st["session_id"] = None; st["seen"] = 0
     nsid, url, err = devin_create(text, st.get("prev_session"))
     if nsid:
@@ -245,7 +257,7 @@ def main():
                 had = st.get("session_id")
                 ok, url, err = deliver(st, text)
                 if ok and url:
-                    send(("session เดิมใช้ต่อไม่ได้ (หมดโควต้า/หมดอายุ) เปิดใหม่แล้ว วินจะอ่านเรื่องเดิมต่อ\n" if had
+                    send((f"session เดิมใช้ต่อไม่ได้ ({st.pop('switch_why', 'session จบงาน/หลับไปแล้ว')}) เปิดใหม่แล้ว วินอ่านเรื่องเดิมต่อได้ ไม่หาย\n" if had
                           else "เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n") + url)
                 elif not ok:
                     send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ลองใหม่ทีหลังนะนิน" if quota_err(err)
