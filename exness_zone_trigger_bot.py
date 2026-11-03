@@ -997,6 +997,9 @@ def run_asset_radar(asset_key):
             # ส่งข้อมูลขึ้น Render Dashboard
             push_market_data_to_render(asset_key, current_price, stoch_payload)
 
+            if current_price:
+                sr_log_update(asset_key, name, current_price)
+
             # 🔔 Price alerts: เตือนเมื่อราคาเข้าย่าน (รีอาร์มเมื่อราคาออกจากย่าน)
             for i, al in enumerate(st.get("alerts", [])):
                 if al.get("type") == "sr":
@@ -1008,7 +1011,12 @@ def run_asset_radar(asset_key):
                             al["hit"] = True
                             side_txt = "แนวรับ 🟢" if al.get("side") == "s" else "แนวต้าน 🔴"
                             send_telegram_notification(f"📍 *{name}*: ราคา `{current_price:.2f}` เข้าใกล้{side_txt} `{px_lv:.2f}` (ห่าง {dist:.2f}%) — เตรียมดูกลับตัว/ทะลุ")
-                            send_to_midas(f"📍 {name}: ราคา {current_price:.2f} เข้าใกล้{side_txt} {px_lv:.2f} (ห่าง {dist:.2f}%)")
+                            ctx = {k: round(stoch_payload[k], 1) for k in ("k_4h", "k_1h", "k_15m", "k_5m") if k in stoch_payload}
+                            ctx.update(trend=stoch_payload.get("trend"), trend_tf=stoch_payload.get("trend_tf"))
+                            sr_log_open(asset_key, al, current_price, ctx)
+                            stoch_txt = " ".join(f"{k[2:]}={v}" for k, v in ctx.items() if k.startswith("k_"))
+                            midas_inbox(f"[EVENT] SR_NEAR {name} ({asset_key}): ราคา {current_price:.2f} เข้าใกล้{_no_emoji(side_txt).strip()} {px_lv:.2f} "
+                                        f"(ห่าง {dist:.2f}%) | เทรนด์ {ctx.get('trend_tf')} = {ctx.get('trend')} | stoch {stoch_txt}")
                             push_config_to_render(asset_key)
                         elif dist > SR_REARM_PCT and al.get("hit"):
                             al["hit"] = False
@@ -1217,6 +1225,72 @@ def midas_inbox(text):
 S3_EMA_DIST_PCT = float(os.environ.get("S3_EMA_DIST_PCT", "0.5"))   # ราคาถ่าง EMA100/200 เกินนี้% = ปลายแถว
 SR_PROX_PCT = float(os.environ.get("SR_PROX_PCT", "0.3"))           # เข้าใกล้แนว % นี้ = เตือน
 SR_REARM_PCT = float(os.environ.get("SR_REARM_PCT", "0.6"))         # ออกห่าง % นี้ = รีอาร์ม
+SR_BREAK_PCT = float(os.environ.get("SR_BREAK_PCT", "0.3"))         # ปิดเลยแนวไปอีกฝั่ง % นี้ = ทะลุ
+SR_OUTCOME_HOURS = float(os.environ.get("SR_OUTCOME_HOURS", "24"))  # ไม่เด้ง/ไม่ทะลุภายในเวลานี้ = ไม่ชัด
+SR_LOG_FILE = os.path.join(CHART_DIR, "sr_touches.json")             # บันทึกผลหลังเตือนแนว (Midas อ่านทำสถิติ)
+
+def _sr_log_load():
+    try:
+        with open(SR_LOG_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, list) else []
+    except Exception:
+        return []
+
+def _sr_log_save(rows):
+    try:
+        os.makedirs(CHART_DIR, exist_ok=True)
+        tmp = SR_LOG_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rows[-500:], f, ensure_ascii=False)
+        os.replace(tmp, SR_LOG_FILE)
+    except Exception as e:
+        print(f"sr log error: {e}")
+
+def sr_log_open(asset_key, al, px, ctx):
+    """จดการเตือนแนวไว้รอดูผล (เด้ง/ทะลุ) — ข้ามถ้าแนวนี้ยังมีรายการค้างผลอยู่"""
+    rows = _sr_log_load()
+    lv = float(al["price"])
+    if any(r.get("status") == "open" and r.get("asset") == asset_key and r.get("level") == lv for r in rows):
+        return
+    rows.append({"asset": asset_key, "side": al.get("side"), "level": lv, "px": round(px, 2),
+                 "from": "above" if px >= lv else "below", "t": int(time.time()),
+                 "status": "open", **ctx})
+    _sr_log_save(rows)
+
+def sr_log_update(asset_key, name, px):
+    """เช็ครายการที่รอผลของ asset นี้: ราคาเด้งออกจากแนวฝั่งเดิม >= SR_REARM_PCT = เด้ง,
+    เลยแนวไปอีกฝั่ง >= SR_BREAK_PCT = ทะลุ, เกิน SR_OUTCOME_HOURS = ไม่ชัด"""
+    rows = _sr_log_load()
+    changed = False
+    now = int(time.time())
+    for r in rows:
+        if r.get("status") != "open" or r.get("asset") != asset_key:
+            continue
+        lv = r["level"]
+        d = (px - lv) / lv * 100
+        away = d if r.get("from") == "above" else -d
+        r["max_away"] = round(max(r.get("max_away", 0), away), 3)
+        r["max_through"] = round(max(r.get("max_through", 0), -away), 3)
+        res = None
+        if away >= SR_REARM_PCT:
+            res = "bounce"
+        elif -away >= SR_BREAK_PCT:
+            res = "break"
+        elif now - r["t"] > SR_OUTCOME_HOURS * 3600:
+            res = "unclear"
+        if not res:
+            continue
+        r.update({"status": res, "t_end": now, "px_end": round(px, 2)})
+        changed = True
+        side_txt = "แนวรับ" if r.get("side") == "s" else "แนวต้าน"
+        res_txt = {"bounce": f"เด้งออกจากแนว {SR_REARM_PCT}%", "break": f"ทะลุแนว {SR_BREAK_PCT}%",
+                   "unclear": f"ไม่ชัดใน {SR_OUTCOME_HOURS:g} ชม."}[res]
+        hrs = (now - r["t"]) / 3600
+        send_telegram_notification(f"*{name}*: ผลหลังเตือน{side_txt} `{lv:.2f}` = {res_txt} "
+                                   f"(ราคา {px:.2f}, ผ่านไป {hrs:.1f} ชม.)")
+    if changed:
+        _sr_log_save(rows)
 
 def quota_get(st, set_key):
     """อ่านโควต้าออเดอร์/วัน ของชุด (เก็บใน alerts เป็น meta type='quota') — default 1 ไม้/วัน รีเซ็ตตี 5"""

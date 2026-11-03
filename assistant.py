@@ -105,6 +105,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ข้อความที่ขึ้นต้นด้วย [EVENT] คือข่าวจากบอทเทรด (ปิดออเดอร์/แผนหยุด/ข่าวแรง) ไม่ใช่คำพูดพี่ — รายงานผลให้พี่ฟังในบทบาทของคุณ สั้นๆ มีน้ำหนัก
 - [EVENT] ขาดทุน (profit ติดลบ/วันติดลบ) → รายงานผลแล้วถามพี่ว่า "จะหยุดวางแผนใหม่ หรือไปต่อ" — ห้ามหยุดเอง เด็ดขาด การตัดสินใจเป็นของพี่ (พี่ตอบหยุด → set_power off; ตอบไปต่อ → ปล่อยระบบทำงานต่อ)
 - [EVENT] สรุปสัปดาห์ → เรียก get_stats แล้วสรุปผลสัปดาห์นี้ให้พี่: win rate กำไรสุทธิ และข้อคิดสั้นๆ
+- [EVENT] SR_NEAR (ราคาเข้าใกล้แนวที่พี่ตั้ง) → เรียก get_news (ข่าวแรงวันนี้) และ get_sr_stats ของ asset นั้น แล้วสรุปให้พี่ในข้อความเดียวสั้นๆ: ราคาอยู่ตรงไหนเทียบแนว, เทรนด์, stoch แต่ละ TF อยู่โซนไหน, มีข่าวแรงใกล้ๆ ไหม, สถิติแนวที่ผ่านมาเด้ง/ทะลุกี่ครั้ง — ห้ามฟันธงว่าจะเด้งหรือทะลุ ห้ามแนะนำให้เข้าออเดอร์ ห้ามแก้ค่าใดๆ บนแดชบอร์ด บอทจะตามผลเองแล้วแจ้งพี่ทีหลัง
 - เมื่อคำนวณ lot: ใช้ tool calc_lot เสมอ (สูตร equity×risk%/(SL×pip_value)) อย่าคิดเอง — พี่กำหนด risk% และ SL ให้แต่ละสัปดาห์
 - พี่วางแผนรายสัปดาห์/รายวัน — คุณคือผู้ปฏิบัติ: เช็คเงื่อนไข ปรับค่า และรายงานผลกลับ
 - หลังทำงาน: รายงานสั้นๆ ว่าตั้งอะไรไปบ้าง พร้อมรสชาติปิศาจของคุณ
@@ -724,6 +725,29 @@ def tool_get_news(asset=None):
     except Exception as e:
         return {"error": str(e)}
 
+def tool_get_sr_stats(asset=None):
+    """อ่านบันทึกผลหลังเตือนแนว (บอทเทรดเขียน charts/sr_touches.json) แล้วนับ เด้ง/ทะลุ/ไม่ชัด"""
+    try:
+        with open(os.path.join(CHART_DIR, "sr_touches.json"), encoding="utf-8") as f:
+            rows = json.load(f)
+    except Exception:
+        return {"error": "ยังไม่มีบันทึก — บอทจะเริ่มจดตั้งแต่การเตือนแนวครั้งถัดไป"}
+    rows = [r for r in rows if isinstance(r, dict) and (not asset or r.get("asset") == asset)]
+    names = {"bounce": "เด้ง", "break": "ทะลุ", "unclear": "ไม่ชัด", "open": "รอผล"}
+    def count(rs):
+        return {names[k]: sum(1 for r in rs if r.get("status") == k) for k in names}
+    th = timedelta(hours=7)
+    recent = [{"แนว": ("รับ " if r.get("side") == "s" else "ต้าน ") + str(r.get("level")),
+               "เวลาเตือน": (datetime.fromtimestamp(r.get("t", 0), timezone.utc) + th).strftime("%d/%m %H:%M"),
+               "ผล": names.get(r.get("status"), r.get("status")), "เทรนด์ตอนเตือน": r.get("trend"),
+               "stoch_15m": r.get("k_15m"), "stoch_5m": r.get("k_5m")} for r in rows[-10:]]
+    return {"asset": asset or "ทั้งหมด", "รวม": count(rows),
+            "แนวรับ": count([r for r in rows if r.get("side") == "s"]),
+            "แนวต้าน": count([r for r in rows if r.get("side") == "r"]),
+            "ล่าสุด": recent,
+            "นิยาม": "เด้ง = ราคาออกห่างแนวฝั่งเดิม 0.6%, ทะลุ = เลยแนวไปอีกฝั่ง 0.3%, ไม่ชัด = ไม่ถึงทั้งสองใน 24 ชม.",
+            "หมายเหตุ": "จำนวนครั้งยังน้อยอย่าสรุปว่าแนวแม่น/ไม่แม่น"}
+
 def tool_get_account():
     """อ่าน balance/equity/margin/positions ที่บอทเทรดเขียนลงไฟล์"""
     try:
@@ -785,6 +809,7 @@ TOOL_IMPL = {
     "get_stats":    lambda a: tool_get_stats(a.get("asset")),
     "get_sentiment":lambda a: tool_get_sentiment(a["asset"]),
     "get_news":     lambda a: tool_get_news(a.get("asset")),
+    "get_sr_stats": lambda a: tool_get_sr_stats(a.get("asset")),
 }
 
 # actions ที่กระทบเงิน — ถ้า REQUIRE_CONFIRM=on จะขอยืนยันก่อน
@@ -880,6 +905,8 @@ GEMINI_TOOLS = [{
         {"name": "get_sentiment", "description": "อารมณ์ตลาดเชิงเทคนิคแบบ real-time: เทรนด์+stoch+ระยะแนว — ใช้ประกอบการตัดสินใจ",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}, "required": ["asset"]}},
         {"name": "get_news", "description": "ปฏิทินเศรษฐกิจ: ข่าว impact สูงของ USD สัปดาห์นี้ — เช็คก่อนเทรดช่วงข่าวแรง",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "get_sr_stats", "description": "สถิติผลหลังเตือนแนวรับ/ต้านที่พี่ตั้ง: เด้งกี่ครั้ง ทะลุกี่ครั้ง ไม่ชัดกี่ครั้ง + รายการล่าสุด — ใช้เมื่อพี่ถามว่าแนวแม่นไหม หรือตอน [EVENT] SR_NEAR",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
         {"name": "view_chart", "description": "ขอดูรูปกราฟจริงจาก MT5 (ราคา+EMA10/50/100/200+Stoch) — ใช้เมื่อพี่ขอวิเคราะห์กราฟหรืออยากเห็นหน้ากราฟ",
          "parameters": {"type": "object", "properties": {
