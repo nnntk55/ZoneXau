@@ -1144,6 +1144,7 @@ def run_asset_radar(asset_key):
                         }, af)
             except Exception as e:
                 print(f"account feed error: {e}")
+            write_trade_hours()
         # Midas chart request — วาดรูปกราฟตามไฟล์คำขอ
         try:
             req_file = os.path.join(CHART_DIR, f"request_{asset_key}.txt")
@@ -1291,6 +1292,52 @@ def sr_log_update(asset_key, name, px):
                                    f"(ราคา {px:.2f}, ผ่านไป {hrs:.1f} ชม.)")
     if changed:
         _sr_log_save(rows)
+
+TRADE_HOURS_FILE = os.path.join(CHART_DIR, "trade_hours.json")   # ไม้ที่ปิดแล้ว + เวลาเข้า (Midas ทำสถิติตามช่วงเวลา)
+TRADE_HOURS_DAYS = int(os.environ.get("TRADE_HOURS_DAYS", "60"))
+_trade_hours_last = 0
+
+def write_trade_hours():
+    """จับคู่ deal เข้า/ออกของบอท (magic 202610) ย้อนหลัง TRADE_HOURS_DAYS วัน ตาม position_id
+    เขียนเวลาเข้า (เวลาไทย) + กำไรสุทธิ ต่อไม้ — อัปเดตทุก 10 นาที
+    สมมติ server time ของ Exness = UTC (deal.time) → +7 เป็นเวลาไทย"""
+    global _trade_hours_last
+    if time.time() - _trade_hours_last < 600:
+        return
+    _trade_hours_last = time.time()
+    try:
+        now_utc = datetime.now(timezone.utc)
+        deals = mt5.history_deals_get(now_utc - timedelta(days=TRADE_HOURS_DAYS), now_utc) or []
+        sym2key = {a["symbol"]: k for k, a in ASSETS.items()}
+        pos = {}
+        for d in deals:
+            if d.magic != 202610:
+                continue
+            p = pos.setdefault(d.position_id, {"sym": d.symbol, "in": None, "out": None, "net": 0.0})
+            p["net"] += d.profit + d.swap + d.commission
+            if d.entry == mt5.DEAL_ENTRY_IN:
+                p["in"] = d.time
+                p["type"] = "BUY" if d.type == mt5.DEAL_TYPE_BUY else "SELL"
+            elif d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY):
+                p["out"] = d.time
+        th = timedelta(hours=7)
+        rows = []
+        for p in pos.values():
+            if not p["in"] or not p["out"]:
+                continue
+            t_in = datetime.fromtimestamp(p["in"], timezone.utc) + th
+            rows.append({"asset": sym2key.get(p["sym"], p["sym"]), "type": p.get("type"),
+                         "in_th": t_in.strftime("%Y-%m-%d %H:%M"), "hour": t_in.hour,
+                         "dow": t_in.weekday(), "hold_min": round((p["out"] - p["in"]) / 60),
+                         "net": round(p["net"], 2)})
+        rows.sort(key=lambda r: r["in_th"])
+        os.makedirs(CHART_DIR, exist_ok=True)
+        tmp = TRADE_HOURS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"days": TRADE_HOURS_DAYS, "updated": int(time.time()), "trades": rows}, f, ensure_ascii=False)
+        os.replace(tmp, TRADE_HOURS_FILE)
+    except Exception as e:
+        print(f"trade hours error: {e}")
 
 def quota_get(st, set_key):
     """อ่านโควต้าออเดอร์/วัน ของชุด (เก็บใน alerts เป็น meta type='quota') — default 1 ไม้/วัน รีเซ็ตตี 5"""

@@ -104,6 +104,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - เมื่อได้รับแจ้ง "แผนหยุดอัตโนมัติ" จากบอท → วิเคราะห์สถานการณ์ใหม่แล้วเสนอแผนถัดไปให้พี่ (อย่าเปิดเทรดต่อเองโดยไม่ได้รับอนุมัติแผนใหม่)
 - ข้อความที่ขึ้นต้นด้วย [EVENT] คือข่าวจากบอทเทรด (ปิดออเดอร์/แผนหยุด/ข่าวแรง) ไม่ใช่คำพูดพี่ — รายงานผลให้พี่ฟังในบทบาทของคุณ สั้นๆ มีน้ำหนัก
 - [EVENT] ขาดทุน (profit ติดลบ/วันติดลบ) → รายงานผลแล้วถามพี่ว่า "จะหยุดวางแผนใหม่ หรือไปต่อ" — ห้ามหยุดเอง เด็ดขาด การตัดสินใจเป็นของพี่ (พี่ตอบหยุด → set_power off; ตอบไปต่อ → ปล่อยระบบทำงานต่อ)
+- พี่ถามว่าเทรดช่วงไหนดี/จะตั้งเวลาเทรด → เรียก get_hour_stats ดูผลจริงแยกช่วงเวลาก่อน บอกจำนวนไม้ด้วย ถ้าไม้น้อยให้บอกตรงๆ ว่ายังสรุปไม่ได้ ห้ามตั้ง window เองถ้าพี่ไม่ได้สั่ง
 - [EVENT] สรุปสัปดาห์ → เรียก get_stats แล้วสรุปผลสัปดาห์นี้ให้พี่: win rate กำไรสุทธิ และข้อคิดสั้นๆ
 - [EVENT] SR_NEAR (ราคาเข้าใกล้แนวที่พี่ตั้ง) → เรียก get_news (ข่าวแรงวันนี้) และ get_sr_stats ของ asset นั้น แล้วสรุปให้พี่ในข้อความเดียวสั้นๆ: ราคาอยู่ตรงไหนเทียบแนว, เทรนด์, stoch แต่ละ TF อยู่โซนไหน, มีข่าวแรงใกล้ๆ ไหม, สถิติแนวที่ผ่านมาเด้ง/ทะลุกี่ครั้ง — ห้ามฟันธงว่าจะเด้งหรือทะลุ ห้ามแนะนำให้เข้าออเดอร์ ห้ามแก้ค่าใดๆ บนแดชบอร์ด บอทจะตามผลเองแล้วแจ้งพี่ทีหลัง
 - เมื่อคำนวณ lot: ใช้ tool calc_lot เสมอ (สูตร equity×risk%/(SL×pip_value)) อย่าคิดเอง — พี่กำหนด risk% และ SL ให้แต่ละสัปดาห์
@@ -748,6 +749,31 @@ def tool_get_sr_stats(asset=None):
             "นิยาม": "เด้ง = ราคาออกห่างแนวฝั่งเดิม 0.6%, ทะลุ = เลยแนวไปอีกฝั่ง 0.3%, ไม่ชัด = ไม่ถึงทั้งสองใน 24 ชม.",
             "หมายเหตุ": "จำนวนครั้งยังน้อยอย่าสรุปว่าแนวแม่น/ไม่แม่น"}
 
+def tool_get_hour_stats(asset=None):
+    """สถิติไม้ที่บอทปิดแล้ว แยกตามช่วงเวลาเข้า (เวลาไทย) — บอทเทรดเขียน charts/trade_hours.json"""
+    try:
+        with open(os.path.join(CHART_DIR, "trade_hours.json"), encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {"error": "ยังไม่มีข้อมูล — บอทเทรดจะเขียนให้ทุก 10 นาที (ต้องรันโค้ดเวอร์ชันใหม่)"}
+    rows = [r for r in data.get("trades", []) if not asset or r.get("asset") == asset]
+    def summ(rs):
+        n = len(rs)
+        w = sum(1 for r in rs if r.get("net", 0) > 0)
+        return {"ไม้": n, "ชนะ": w, "แพ้": n - w, "win_rate": f"{w / n * 100:.0f}%" if n else "-",
+                "กำไรสุทธิ_usd": round(sum(r.get("net", 0) for r in rs), 2),
+                "เฉลี่ยต่อไม้": round(sum(r.get("net", 0) for r in rs) / n, 2) if n else None}
+    buckets = [("เอเชีย 06:00-13:59", 6, 14), ("ลอนดอน 14:00-18:59", 14, 19),
+               ("นิวยอร์ก 19:00-23:59", 19, 24), ("ดึก 00:00-05:59", 0, 6)]
+    days = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"]
+    return {"asset": asset or "ทั้งหมด", "ย้อนหลัง_วัน": data.get("days"), "รวม": summ(rows),
+            "ตามช่วงตลาด": {lb: summ([r for r in rows if lo <= r.get("hour", -1) < hi]) for lb, lo, hi in buckets},
+            "ตามชั่วโมง": {f"{h:02d}": summ(rs) for h in range(24)
+                          if (rs := [r for r in rows if r.get("hour") == h])},
+            "ตามวัน": {days[d]: summ(rs) for d in range(7) if (rs := [r for r in rows if r.get("dow") == d])},
+            "ล่าสุด": rows[-10:],
+            "หมายเหตุ": "นับตามเวลาเข้าไม้ เฉพาะไม้ของบอท (magic 202610) ที่ปิดแล้ว; ช่วงไหนไม่ถึง ~10 ไม้ ยังสรุปไม่ได้ อย่าแนะนำตั้ง window จากข้อมูลน้อย"}
+
 def tool_get_account():
     """อ่าน balance/equity/margin/positions ที่บอทเทรดเขียนลงไฟล์"""
     try:
@@ -810,6 +836,7 @@ TOOL_IMPL = {
     "get_sentiment":lambda a: tool_get_sentiment(a["asset"]),
     "get_news":     lambda a: tool_get_news(a.get("asset")),
     "get_sr_stats": lambda a: tool_get_sr_stats(a.get("asset")),
+    "get_hour_stats": lambda a: tool_get_hour_stats(a.get("asset")),
 }
 
 # actions ที่กระทบเงิน — ถ้า REQUIRE_CONFIRM=on จะขอยืนยันก่อน
@@ -907,6 +934,8 @@ GEMINI_TOOLS = [{
         {"name": "get_news", "description": "ปฏิทินเศรษฐกิจ: ข่าว impact สูงของ USD สัปดาห์นี้ — เช็คก่อนเทรดช่วงข่าวแรง",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
         {"name": "get_sr_stats", "description": "สถิติผลหลังเตือนแนวรับ/ต้านที่พี่ตั้ง: เด้งกี่ครั้ง ทะลุกี่ครั้ง ไม่ชัดกี่ครั้ง + รายการล่าสุด — ใช้เมื่อพี่ถามว่าแนวแม่นไหม หรือตอน [EVENT] SR_NEAR",
+         "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "get_hour_stats", "description": "สถิติไม้ที่บอทปิดแล้ว แยกตามช่วงเวลาเข้า (เวลาไทย): ช่วงตลาด เอเชีย/ลอนดอน/นิวยอร์ก/ดึก, รายชั่วโมง, รายวัน — ใช้เมื่อพี่ถามว่าเทรดช่วงไหนดี หรือจะตั้ง/ปรับ window",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
         {"name": "view_chart", "description": "ขอดูรูปกราฟจริงจาก MT5 (ราคา+EMA10/50/100/200+Stoch) — ใช้เมื่อพี่ขอวิเคราะห์กราฟหรืออยากเห็นหน้ากราฟ",
          "parameters": {"type": "object", "properties": {
