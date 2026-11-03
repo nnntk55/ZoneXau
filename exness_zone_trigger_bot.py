@@ -574,6 +574,43 @@ def get_htf_trend(symbol, timeframe_str="4h"):
         trend = "MIXED"
     return trend, {"price": price, "ema50": ema50, "ema100": ema100}
 
+def stoch_zone_hit(k_val, tf, direction):
+    """Stoch RSI เข้าโซนหรือยัง — TF 1H ต้องแตะสุดขอบ 0/100 (นินสั่ง) TF อื่นใช้ 20/80 เหมือนเดิม"""
+    k_val = float(k_val)
+    if str(tf).lower() == "1h":
+        return k_val <= 0.5 if direction == "LOW" else k_val >= 99.5
+    return k_val < 20 if direction == "LOW" else k_val > 80
+
+def trend_gate_tf(asset_key):
+    """TF ที่ใช้ตัดสินเทรนด์ตอน S5 — ตัวเดียวกับที่นินเลือกบนเว็บ (set2.trend_tf)"""
+    return (ASSETS[asset_key]["state"].get("set2") or {}).get("trend_tf") or "4h"
+
+def send_counter_trend_alert(asset_key, s, name, symbol, action, trend, trend_tf, close_price, ema10, tf_s4, df_s4):
+    """สัญญาณครบแต่ไม่ตามเทรนด์ → บอทไม่ยิงเอง แจ้งนินให้จับจังหวะเข้าเอง แล้วกลับไปสแกนอีกฝั่ง"""
+    side = "เหนือ" if action == "BUY" else "ใต้"
+    nxt = "SELL" if action == "BUY" else "BUY"
+    lv = find_sr_levels(symbol, tf_s4)
+    msg = (
+        f"*{name} — สัญญาณ {action} พร้อมแล้ว ({'เทรนด์ไม่ชัด' if trend == 'MIXED' else 'สวนเทรนด์'})*\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"• Stage 1-4 ครบ + เทียน {tf_s4.upper()} ปิด{side} EMA10: `{close_price:.2f}` (EMA10: `{ema10:.2f}`)\n"
+        f"• เทรนด์ {trend_tf.upper()}: {trend}\n"
+        + (f"• {sr_format_levels(lv)}\n" if lv else "")
+        + f"━━━━━━━━━━━━━━━━━━━\n"
+        f"บอทไม่ยิงเองเพราะไม่ตามเทรนด์ — นินจับจังหวะเข้าเองใน MT5 (ตั้ง SL/TP ก่อนกด)\n"
+        f"ระบบกลับไปสแกนฝั่ง {nxt} รอบใหม่"
+    )
+    if not send_telegram_notification(msg):
+        return False
+    img = generate_stoch_chart(df_s4, f"Stoch RSI - {tf_s4.upper()} ({name}) [{action} COUNTER-TREND]")
+    if img:
+        send_telegram_photo(img, f"กราฟ Stage 5 - {name}")
+    s["active_direction"] = "HIGH" if action == "BUY" else "LOW"
+    s["current_stage"] = 1
+    s["stage1_notified"] = s["stage2_notified"] = s["stage3_notified"] = False
+    s["stage4_signal_sent"] = False
+    return True
+
 def sr_proximity(price):
     """ระยะที่ถือว่า 'ชนแนว' — ~0.15% ของราคา (ทอง ~6 จุด)"""
     return price * 0.0015
@@ -1474,7 +1511,7 @@ def process_stage_set(asset_key, s, set_key):
                             s["sr_alert_sent"] = True
                     elif not near_ok and s.get("sr_alert_sent"):
                         s["sr_alert_sent"] = False
-                if k.iloc[-1] < 20:
+                if stoch_zone_hit(k.iloc[-1], tf_s1, "LOW"):
                     if not s["stage1_notified"]:
                         if not near_ok:
                             print(f"[{name}] S1 LOW: ในโซนแต่ยังไม่ใกล้แนวรับ EMA ({near_level}) — รอชนแนวก่อน")
@@ -1498,7 +1535,7 @@ def process_stage_set(asset_key, s, set_key):
         elif s["current_stage"] == 2:
             df = fetch_mt5_candles(symbol, tf_s2)
             k, _ = calculate_stochastic_rsi(df)
-            if k is not None and k.iloc[-1] < 20:
+            if k is not None and stoch_zone_hit(k.iloc[-1], tf_s2, "LOW"):
                 if not s["stage2_notified"]:
                     img = generate_stoch_chart(df, f"Stoch RSI - {tf_s2.upper()} ({name})")
                     msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ LOW ZONE แล้ว! (K = {k.iloc[-1]:.2f})"
@@ -1511,7 +1548,7 @@ def process_stage_set(asset_key, s, set_key):
         elif s["current_stage"] == 3:
             df = fetch_mt5_candles(symbol, tf_s3)
             k, _ = calculate_stochastic_rsi(df)
-            if k is not None and k.iloc[-1] < 20:
+            if k is not None and stoch_zone_hit(k.iloc[-1], tf_s3, "LOW"):
                 if not s["stage3_notified"]:
                     img = generate_stoch_chart(df, f"Stoch RSI - {tf_s3.upper()} ({name})")
                     msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ LOW ZONE ลึกพิเศษแล้ว! (K = {k.iloc[-1]:.2f})"
@@ -1530,7 +1567,7 @@ def process_stage_set(asset_key, s, set_key):
                     latest_k, latest_d = float(k.iloc[-1]), float(d.iloc[-1])
                     latest_close = float(df_s4['Close'].iloc[-1])
 
-                    in_zone = latest_k < 20  # เหลือแค่อยู่ในโซน — การกลับตัวยืนยันด้วยเทียนปิดเหนือ/ใต้ EMA10 ใน S5 อยู่แล้ว
+                    in_zone = stoch_zone_hit(latest_k, tf_s4, "LOW")  # เหลือแค่อยู่ในโซน — การกลับตัวยืนยันด้วยเทียนปิดเหนือ/ใต้ EMA10 ใน S5 อยู่แล้ว
 
                     # อยู่ใน Low Zone และ K เหนือ D → รายงาน Stage 4 แล้วเลื่อนไป Stage 5 (รอเข้าออเดอร์)
                     if in_zone and not s.get("stage4_signal_sent"):
@@ -1570,8 +1607,16 @@ def process_stage_set(asset_key, s, set_key):
                     cur_k = float(k.iloc[-1]) if k is not None else 0.0
                     cur_d = float(d.iloc[-1]) if d is not None else 0.0
                     s["s4_confirm_candle"] = closed_time  # กันยิงซ้ำแท่งเดิมทั้งโหมด auto/manual
-                    if s.get("auto_order"):
-                        print(f"[{name}] S5 trigger fired — AUTO order BUY")
+                    trend_tf = trend_gate_tf(asset_key)
+                    trend = get_htf_trend(symbol, trend_tf)[0] if s.get("auto_order") else None
+                    if s.get("auto_order") and trend != "UP":
+                        print(f"[{name}] S5 BUY ไม่ตามเทรนด์ {trend_tf} ({trend}) — แจ้งเตือนให้นินเข้าเอง ไม่ยิงอัตโนมัติ")
+                        if send_counter_trend_alert(asset_key, s, name, symbol, "BUY", trend, trend_tf, closed_close, closed_ema10, tf_s4, df_s4):
+                            push_config_to_render(asset_key)
+                        else:
+                            s["s4_confirm_candle"] = None
+                    elif s.get("auto_order"):
+                        print(f"[{name}] S5 trigger fired — AUTO order BUY (ตามเทรนด์ {trend_tf} {trend})")
                         ok = execute_exness_order(symbol, "BUY", dynamic_lot(ASSETS[asset_key]["state"], s, set_key, asset_key), s.get('sl_pips', 200), s.get('tp_pips', 300), asset_key=asset_key)
                         if ok:
                             s["active_direction"] = "HIGH"
@@ -1613,7 +1658,7 @@ def process_stage_set(asset_key, s, set_key):
                             s["sr_alert_sent"] = True
                     elif not near_ok and s.get("sr_alert_sent"):
                         s["sr_alert_sent"] = False
-                if k.iloc[-1] > 80:
+                if stoch_zone_hit(k.iloc[-1], tf_s1, "HIGH"):
                     if not s["stage1_notified"]:
                         if not near_ok:
                             print(f"[{name}] S1 HIGH: ในโซนแต่ยังไม่ใกล้แนวต้าน EMA ({near_level}) — รอชนแนวก่อน")
@@ -1637,7 +1682,7 @@ def process_stage_set(asset_key, s, set_key):
         elif s["current_stage"] == 2:
             df = fetch_mt5_candles(symbol, tf_s2)
             k, _ = calculate_stochastic_rsi(df)
-            if k is not None and k.iloc[-1] > 80:
+            if k is not None and stoch_zone_hit(k.iloc[-1], tf_s2, "HIGH"):
                 if not s["stage2_notified"]:
                     img = generate_stoch_chart(df, f"Stoch RSI - {tf_s2.upper()} ({name})")
                     msg = f"📢 *{name} Stage 2* ({tf_s2.upper()}): เข้าสู่ HIGH ZONE แล้ว! (K = {k.iloc[-1]:.2f})"
@@ -1650,7 +1695,7 @@ def process_stage_set(asset_key, s, set_key):
         elif s["current_stage"] == 3:
             df = fetch_mt5_candles(symbol, tf_s3)
             k, _ = calculate_stochastic_rsi(df)
-            if k is not None and k.iloc[-1] > 80:
+            if k is not None and stoch_zone_hit(k.iloc[-1], tf_s3, "HIGH"):
                 if not s["stage3_notified"]:
                     img = generate_stoch_chart(df, f"Stoch RSI - {tf_s3.upper()} ({name})")
                     msg = f"📢 *{name} Stage 3* ({tf_s3.upper()}): เข้าสู่ HIGH ZONE ลึกพิเศษแล้ว! (K = {k.iloc[-1]:.2f})"
@@ -1669,7 +1714,7 @@ def process_stage_set(asset_key, s, set_key):
                     latest_k, latest_d = float(k.iloc[-1]), float(d.iloc[-1])
                     latest_close = float(df_s4['Close'].iloc[-1])
 
-                    in_zone = latest_k > 80  # เหลือแค่อยู่ในโซน — การกลับตัวยืนยันด้วยเทียนปิดเหนือ/ใต้ EMA10 ใน S5 อยู่แล้ว
+                    in_zone = stoch_zone_hit(latest_k, tf_s4, "HIGH")  # เหลือแค่อยู่ในโซน — การกลับตัวยืนยันด้วยเทียนปิดเหนือ/ใต้ EMA10 ใน S5 อยู่แล้ว
 
                     # อยู่ใน High Zone และ K ใต้ D → รายงาน Stage 4 แล้วเลื่อนไป Stage 5 (รอเข้าออเดอร์)
                     if in_zone and not s.get("stage4_signal_sent"):
@@ -1709,8 +1754,16 @@ def process_stage_set(asset_key, s, set_key):
                     cur_k = float(k.iloc[-1]) if k is not None else 0.0
                     cur_d = float(d.iloc[-1]) if d is not None else 0.0
                     s["s4_confirm_candle"] = closed_time  # กันยิงซ้ำแท่งเดิมทั้งโหมด auto/manual
-                    if s.get("auto_order"):
-                        print(f"[{name}] S5 trigger fired — AUTO order SELL")
+                    trend_tf = trend_gate_tf(asset_key)
+                    trend = get_htf_trend(symbol, trend_tf)[0] if s.get("auto_order") else None
+                    if s.get("auto_order") and trend != "DOWN":
+                        print(f"[{name}] S5 SELL ไม่ตามเทรนด์ {trend_tf} ({trend}) — แจ้งเตือนให้นินเข้าเอง ไม่ยิงอัตโนมัติ")
+                        if send_counter_trend_alert(asset_key, s, name, symbol, "SELL", trend, trend_tf, closed_close, closed_ema10, tf_s4, df_s4):
+                            push_config_to_render(asset_key)
+                        else:
+                            s["s4_confirm_candle"] = None
+                    elif s.get("auto_order"):
+                        print(f"[{name}] S5 trigger fired — AUTO order SELL (ตามเทรนด์ {trend_tf} {trend})")
                         ok = execute_exness_order(symbol, "SELL", dynamic_lot(ASSETS[asset_key]["state"], s, set_key, asset_key), s.get('sl_pips', 200), s.get('tp_pips', 300), asset_key=asset_key)
                         if ok:
                             s["active_direction"] = "LOW"
