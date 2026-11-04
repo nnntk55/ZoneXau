@@ -96,7 +96,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - auto_order=on ยิงเองเฉพาะสัญญาณที่ตามเทรนด์ (trend_tf บนเว็บ): BUY ต้องเทรนด์ UP, SELL ต้องเทรนด์ DOWN — สวนเทรนด์หรือ MIXED บอทแค่แจ้งเตือนให้นินจับจังหวะเข้าเอง แล้วกลับไปสแกนอีกฝั่ง; stage ที่ตั้ง TF 1h ต้องให้ Stoch แตะ 0/100 (TF อื่น 20/80)
 - default ของพี่คือ "เทรดอัตโนมัติ" — เมื่อพี่สั่งให้เทรดให้ตั้ง auto_order=true เสมอ ยกเว้นพี่บอกชัดว่า "ถามก่อน" ค่อยตั้ง false
 - คอนเวนชัน stage ที่พี่ใช้: เทรดสั้น = ["off","off","15m","5m"] (S3 เฝ้า 15m, S4 เฝ้า 5m, S5 ยิงออเดอร์); เทรดยาว = ["4h","1h","15m","5m"] — ใช้เฉพาะตอนพี่สั่งตั้งชุดกว้างๆ แบบไม่ระบุ stage (เช่น "ตั้งเทรดสั้นทอง") เท่านั้น
-- แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; หลายช่วง เช่น "กลางวัน 10-13 กับกลางคืน 18 ถึงเที่ยงคืน" = window "10:00-13:00,18:00-23:59" (คั่นด้วย , ใส่ทุกช่วงที่พี่บอกในครั้งเดียว ค่าใหม่แทนค่าเดิมทั้งหมด); "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction HIGH (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
+- แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; หลายช่วง เช่น "กลางวัน 10-13 กับกลางคืน 18 ถึงเที่ยงคืน" = window "10:00-13:00,18:00-23:59" (คั่นด้วย , ใส่ทุกช่วงที่พี่บอกในครั้งเดียว ค่าใหม่แทนค่าเดิมทั้งหมด); "ช่วงละ N ไม้" / "แบ่งช่วง ช่วงละ 1" = per_window N (ระบบตั้ง per_day = N × จำนวนช่วงให้เอง); "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction HIGH (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
 - แผนโซน/ระยะยาว: "โซน 3500-3975" = zone_low 3500 + zone_high 3975 (ราคาทะลุขอบ → บอทหยุดเอง+แจ้งกลับมาให้วางแผนใหม่); "ภายใน 3 วัน/ถึงวันที่ 5" = until 'YYYY-MM-DD' (วันนี้+N หรือวันที่กำหนด เลยแล้วบอทหยุด); "ทั้งอาทิตย์" = until วันอาทิตย์นี้ — ตั้งทุกอย่างใน set_stage_plan ครั้งเดียวได้
 - ระยะห้ามเข้า: "ไม่เข้าเมื่อใกล้แนว 2000 pip/20 จุด" = min_room หน่วยราคา (ทอง 2000pip = $20 → min_room 20) — บอทจะไม่ยิง BUY เมื่อราคาใกล้แนวต้านเกินไป และไม่ยิง SELL เมื่อใกล้แนวรับเกินไป เพราะไม่มีระยะให้ TP
 - lot อัตโนมัติ: พี่ให้คำนวณเอง = ตั้ง risk_pct ในแผน (เช่น 30) — บอทคิด lot สดจาก equity จริงตอนยิงทุกไม้ (compounding โตตามพอร์ท); ใช้ calc_lot เช็คตัวเลขก่อนตั้งเสมอ — พี่กำหนด risk% รายสัปดาห์
@@ -292,6 +292,10 @@ def status_recap(asset, set_key):
     for a in cfg.get("alerts") or []:
         if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key and a.get("window"):
             parts.append("เวลา " + str(a["window"]))
+            if a.get("per_window"):
+                parts.append(f"ช่วงละ {a['per_window']} ไม้")
+        if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key and a.get("per_day"):
+            parts.append(f"วันละ {a['per_day']} ไม้")
     return f"{label}: " + " | ".join(parts)
 
 def _with_recap(text, touched):
@@ -353,7 +357,7 @@ def tool_set_direction(asset, set_key, direction):
 
 def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=None, lot=None, tp=None, sl=None,
                         per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None,
-                        stages=None, only_stages=None):
+                        stages=None, only_stages=None, per_window=None):
     """ตั้งแผน stage ผ่าน /api/update_config — เขียนเฉพาะ field ที่ส่ง lot/tp/sl อิสระจากกัน
     per_day/window/zone_low/zone_high/until/min_room = แผนระยะยาว เก็บใน alerts เป็น meta type='quota'"""
     fields = {}
@@ -392,7 +396,8 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
     if tp is not None:   fields["tp_pips"] = float(tp)
     if sl is not None:   fields["sl_pips"] = float(sl)
     plan_kw = {"per_day": per_day, "window": window, "zone_low": zone_low,
-               "zone_high": zone_high, "until": until, "min_room": min_room, "risk_pct": risk_pct}
+               "zone_high": zone_high, "until": until, "min_room": min_room, "risk_pct": risk_pct,
+               "per_window": per_window}
     if not fields and not any(v is not None for v in plan_kw.values()):
         return {"error": "ไม่มีอะไรให้ตั้ง"}
     out = {"ชุด": set_key, "ตั้ง": list(fields)}
@@ -422,7 +427,20 @@ def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=N
             out[k] = v
     return out
 
-def _upsert_quota(alerts_list, set_key, per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None):
+def _upsert_quota(alerts_list, set_key, per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None,
+                  per_window=None):
+    _upsert_quota_fields(alerts_list, set_key, per_day, window, zone_low, zone_high, until, min_room, risk_pct)
+    for a in alerts_list:
+        if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key:
+            if per_window is not None:
+                a["per_window"] = per_window or None
+            # ช่วงละ N ไม้ → โควต้าทั้งวัน = N × จำนวนช่วง (ถ้าพี่ไม่ได้บอกวันละกี่ไม้เอง)
+            if a.get("per_window") and per_day is None and (per_window is not None or window is not None):
+                n = len([w for w in str(a.get("window") or "").split(",") if "-" in w]) or 1
+                a["per_day"] = int(a["per_window"]) * n
+            return
+
+def _upsert_quota_fields(alerts_list, set_key, per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None):
     """เขียน/อัปเดต quota meta ใน alerts — persist ผ่านชีทโดยไม่ต้องเพิ่มคอลัมน์
     ส่ง window="" / until="" / zone=0 / min_room=0 / risk_pct=0 เพื่อล้าง"""
     for a in alerts_list:
@@ -846,7 +864,7 @@ TOOL_IMPL = {
                             a.get("stage_tfs"), a.get("s5"), a.get("sr"), a.get("auto_order"),
                             a.get("lot"), a.get("tp_pips"), a.get("sl_pips"), a.get("per_day"), a.get("window"),
                             a.get("zone_low"), a.get("zone_high"), a.get("until"), a.get("min_room"), a.get("risk_pct"),
-                            a.get("stages"), a.get("only_stages")),
+                            a.get("stages"), a.get("only_stages"), a.get("per_window")),
     "set_power":    lambda a: tool_set_power(a["asset"], a.get("set", "long"), bool(a["on"])),
     "set_note":     lambda a: tool_set_note(a["asset"], a["note"]),
     "set_plan":     lambda a: tool_set_plan(a["asset"], a["plan"]),
@@ -905,6 +923,7 @@ GEMINI_TOOLS = [{
              "auto_order": {"type": "boolean", "description": "ยิงออเดอร์อัตโนมัติเมื่อ stage 5 ครบ ไม่ถาม"},
              "lot": {"type": "number"}, "tp_pips": {"type": "integer"}, "sl_pips": {"type": "integer"},
              "per_day": {"type": "integer", "description": "โควต้าออเดอร์สูงสุดต่อวัน (รีเซ็ตตี 5) — เช่น 3 = เข้าได้ 3 ไม้ต่อวัน ไม่ส่ง = 1 ไม้"},
+             "per_window": {"type": "integer", "description": "จำกัดไม้ต่อช่วงเวลา (ใช้กับ window หลายช่วง) เช่น 1 = ช่วงละ 1 ไม้; 0 = ยกเลิก นับรวมทั้งวันตาม per_day"},
              "window": {"type": "string", "description": "ช่วงเวลาเทรด 'HH:MM-HH:MM' เวลาไทย เช่น '16:00-23:59'; หลายช่วงคั่นด้วย , เช่น '10:00-13:00,18:00-23:59'; ข้ามเที่ยงคืนได้; '' = ล้าง"},
              "zone_low": {"type": "number", "description": "ขอบล่างโซนราคา — ราคาหลุดต่ำกว่านี้บอทจะหยุดเทรดเอง เช่น 3500"},
              "zone_high": {"type": "number", "description": "ขอบบนโซนราคา — ราคาทะลุสูงกว่านี้บอทจะหยุดเทรดเอง เช่น 3975"},

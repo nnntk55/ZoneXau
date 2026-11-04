@@ -1355,6 +1355,10 @@ def quota_bump(st, set_key):
         if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key:
             a["today"] = int(a.get("today", 0) or 0) + 1
             a["date"] = current_trade_date()
+            ranges = _parse_windows(a.get("window")) if a.get("per_window") and a.get("window") else []
+            slot = _window_slot(a, ranges) if ranges else None
+            if slot is not None:
+                a.setdefault("win_today", {})[str(slot)] = int(a["win_today"].get(str(slot), 0) or 0) + 1
             return
     st.setdefault("alerts", []).append(
         {"type": "quota", "set": set_key, "per_day": 1, "today": 1,
@@ -1518,20 +1522,37 @@ def _parse_windows(w):
             continue
     return out
 
-def quota_in_window(st, set_key):
-    """เช็คช่วงเวลาเทรด (เวลาไทย UTC+7) จาก quota meta 'window' เช่น '16:00-23:59' หรือหลายช่วง
-    '10:00-13:00,18:00-23:59' — ไม่ตั้ง/อ่านไม่ออก = เทรดได้ตลอด"""
+def _in_range(cur, lo, hi):
+    return lo <= cur <= hi if lo <= hi else (cur >= lo or cur <= hi)  # รองรับข้ามเที่ยงคืน
+
+def _quota_meta(st, set_key):
     for a in st.get("alerts") or []:
         if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key:
-            w = a.get("window")
-            ranges = _parse_windows(w) if w else []
-            if not ranges:
-                return True
-            now = datetime.now(timezone.utc) + timedelta(hours=7)
-            cur = now.hour * 60 + now.minute
-            return any(lo <= cur <= hi if lo <= hi else (cur >= lo or cur <= hi)  # รองรับข้ามเที่ยงคืน
-                       for lo, hi in ranges)
-    return True
+            return a
+    return None
+
+def _window_slot(a, ranges):
+    """index ช่วงเวลาที่ตอนนี้อยู่ และยังเหลือโควต้าช่วง (per_window) — None = นอกช่วง/ช่วงนี้ครบแล้ว"""
+    now = datetime.now(timezone.utc) + timedelta(hours=7)
+    cur = now.hour * 60 + now.minute
+    per_win = int(a.get("per_window") or 0)
+    if a.get("win_date") != current_trade_date():
+        a["win_today"] = {}
+        a["win_date"] = current_trade_date()
+    used = a.get("win_today") or {}
+    for i, (lo, hi) in enumerate(ranges):
+        if _in_range(cur, lo, hi) and (not per_win or int(used.get(str(i), 0) or 0) < per_win):
+            return i
+    return None
+
+def quota_in_window(st, set_key):
+    """เช็คช่วงเวลาเทรด (เวลาไทย UTC+7) จาก quota meta 'window' เช่น '16:00-23:59' หรือหลายช่วง
+    '08:00-16:00,16:00-23:59' + per_window = จำกัดไม้ต่อช่วง — ไม่ตั้ง/อ่านไม่ออก = เทรดได้ตลอด"""
+    a = _quota_meta(st, set_key)
+    ranges = _parse_windows(a.get("window")) if a and a.get("window") else []
+    if not ranges:
+        return True
+    return _window_slot(a, ranges) is not None
 
 def quota_pause_check(st, s, set_key, name=""):
     """เรียกหลังยิงออเดอร์สำเร็จ — นับ+เช็คโควต้า: ครบ → พักถึงตี 5 (เดิม); ยังเหลือ → ล่าไม้ต่อ — คืนข้อความสถานะ"""
@@ -1543,6 +1564,9 @@ def quota_pause_check(st, s, set_key, name=""):
         s["last_trade_date"] = current_trade_date()
         midas_inbox(f"[EVENT] {name}: ยิงครบโควต้า {per_day} ไม้ของวันนี้แล้ว พักรอรอบใหม่ตี 5 — สรุปผลวันนี้ให้พี่ด้วย")
         return f"ครบโควต้า {per_day} ไม้แล้ว พักรอรอบใหม่ตี 5"
+    a = _quota_meta(st, set_key)
+    if a and a.get("per_window") and not quota_in_window(st, set_key):
+        return f"ยิงไม้ที่ {today_n}/{per_day} — ครบ {a['per_window']} ไม้ของช่วงเวลานี้แล้ว รอช่วงถัดไป"
     return f"ยิงไม้ที่ {today_n}/{per_day} — เหลืออีก {per_day - today_n} ไม้ รอสัญญาณใหม่"
 
 
