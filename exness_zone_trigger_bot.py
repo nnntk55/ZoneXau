@@ -1505,23 +1505,32 @@ def tp_room_ok(st, set_key, symbol, is_buy):
     tgt = max((p for p in levels if p < px), default=None)
     return not (tgt and (px - tgt) < float(min_room))
 
+def _parse_windows(w):
+    """'10:00-13:00,18:00-23:59' -> [(lo, hi)] นาทีของวัน — ช่วงที่อ่านไม่ออกข้ามไป"""
+    out = []
+    for part in str(w).replace("|", ",").split(","):
+        try:
+            lo_s, hi_s = part.split("-")
+            lh, lm = map(int, lo_s.strip().split(":"))
+            hh, hm = map(int, hi_s.strip().split(":"))
+            out.append((lh * 60 + lm, hh * 60 + hm))
+        except Exception:
+            continue
+    return out
+
 def quota_in_window(st, set_key):
-    """เช็คช่วงเวลาเทรด (เวลาไทย UTC+7) จาก quota meta 'window' เช่น '16:00-23:59' — ไม่ตั้ง = เทรดได้ตลอด"""
+    """เช็คช่วงเวลาเทรด (เวลาไทย UTC+7) จาก quota meta 'window' เช่น '16:00-23:59' หรือหลายช่วง
+    '10:00-13:00,18:00-23:59' — ไม่ตั้ง/อ่านไม่ออก = เทรดได้ตลอด"""
     for a in st.get("alerts") or []:
         if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key:
             w = a.get("window")
-            if not w:
+            ranges = _parse_windows(w) if w else []
+            if not ranges:
                 return True
-            try:
-                lo_s, hi_s = w.split("-")
-                lh, lm = map(int, lo_s.strip().split(":"))
-                hh, hm = map(int, hi_s.strip().split(":"))
-                now = datetime.now(timezone.utc) + timedelta(hours=7)
-                cur = now.hour * 60 + now.minute
-                lo, hi = lh * 60 + lm, hh * 60 + hm
-                return lo <= cur <= hi if lo <= hi else (cur >= lo or cur <= hi)  # รองรับข้ามเที่ยงคืน
-            except Exception:
-                return True
+            now = datetime.now(timezone.utc) + timedelta(hours=7)
+            cur = now.hour * 60 + now.minute
+            return any(lo <= cur <= hi if lo <= hi else (cur >= lo or cur <= hi)  # รองรับข้ามเที่ยงคืน
+                       for lo, hi in ranges)
     return True
 
 def quota_pause_check(st, s, set_key, name=""):
