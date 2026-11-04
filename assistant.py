@@ -121,6 +121,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - stage_tfs มี 4 ช่อง = [S1, S2, S3, S4] ตำแหน่งที่ 1-4; S5 ไม่มี TF ของตัวเอง (เป็นตัวยิงที่ทำงานบน TF ของ S4 เสมอ)
 - บอทไม่ได้ยิงออเดอร์เพราะราคาชนแนว — ยิงเมื่อ stage engine ครบ (Stoch ทุก stage ที่เปิด + S5 เทียนปิดยืนยัน EMA10) เท่านั้น แนวรับ/ต้านแค่แจ้งเตือน/กันระยะ min_room ห้ามบอกพี่ว่า "ยิงเมื่อราคาชนแนว"
 - เปลี่ยน stage_tfs/set ใดๆ → บอทจะอ่านค่าใหม่รอบถัดไปเอง หลังตั้งเสร็จให้บอกพี่ว่าตั้งอะไรตรงไหนบ้างตามผล tool จริง
+- หลัง set_direction/set_stage_plan/set_power ระบบจะต่อท้ายบรรทัดสถานะจริงจากแดชบอร์ดให้เอง (ON/OFF, ทิศ, stage ที่เปิด, ออโต้/ถามก่อน, เวลา) — ไม่ต้องทวนสถานะซ้ำเอง ตอบสั้นๆ พอ
 """
 
 # ==========================================
@@ -267,6 +268,37 @@ def summarize_set(s, set_key):
         "auto_order": s.get("auto_order", False),
         "lot": s.get("lot"), "tp": s.get("tp_pips"), "sl": s.get("sl_pips"),
     }
+
+STATE_TOOLS = {"set_direction", "set_stage_plan", "set_power"}
+ASSET_LABEL = {"xau": "ทอง", "us": "US30", "oil": "น้ำมัน", "btc": "บิทคอยน์"}
+
+def status_recap(asset, set_key):
+    """บรรทัดทวนสถานะจริงของชุด อ่านจากแดชบอร์ด — ต่อท้ายทุกคำสั่งตั้งค่า"""
+    label = ASSET_LABEL.get(asset, asset) + ("เทรดสั้น" if set_key == "short" else "เทรดยาว")
+    cfg = dash_get_config(asset)
+    if not cfg:
+        return f"{label}: อ่านสถานะจากแดชบอร์ดไม่ได้ เช็คหน้าเว็บอีกทีนะคับ"
+    s = get_set_obj(cfg, set_key)
+    on = "ON" if s.get("is_active", True) else "OFF"
+    if s.get("auto_paused_today"):
+        on += " (พักวันนี้)"
+    tfs = list(s.get("stage_tfs") or ["4h", "1h", "15m", "5m"])[:4]
+    opened = [f"S{i + 1}" for i, tf in enumerate(tfs) if str(tf).lower() != "off"]
+    if s.get("s5_enabled", True):
+        opened.append("S5")
+    parts = [on, str(s.get("active_direction", "LOW")),
+             "เปิด " + "/".join(opened) if opened else "ไม่ได้เปิด stage",
+             "ออโต้" if s.get("auto_order") else "ถามก่อน"]
+    for a in cfg.get("alerts") or []:
+        if isinstance(a, dict) and a.get("type") == "quota" and a.get("set") == set_key and a.get("window"):
+            parts.append("เวลา " + str(a["window"]))
+    return f"{label}: " + " | ".join(parts)
+
+def _with_recap(text, touched):
+    if not touched:
+        return text
+    lines = [status_recap(a, k) for a, k in dict.fromkeys(touched)]
+    return (text or "").rstrip() + "\n\n" + "\n".join(lines)
 
 # ==========================================
 # TOOLS — สิ่งที่ AI ทำได้จริง
@@ -1280,6 +1312,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
     chat_history = _sanitize_history(chat_history[-MAX_HISTORY:])
     turn_msg = chat_history[-1]
     turn_log = []  # (tool, ผล) ที่รันไปแล้วในเทิร์นนี้
+    touched = []   # (asset, set) ที่ถูกตั้งค่าในเทิร์นนี้ — ทวนสถานะจริงท้ายคำตอบ
 
     for step in range(MAX_AGENT_STEPS):
         save_memory()
@@ -1310,8 +1343,8 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
                 # tool บางตัวรันไปแล้ว — ไม่ลองซ้ำเอง กันคำสั่งซ้ำ (เช่น add_alert ซ้ำ)
                 _rlog(f"AI ล้มเหลวกลาง tool loop (errors={_ai_errors})")
                 if turn_log:
-                    return (f"{why} เลยสรุปให้เป็นภาษาคนไม่ได้ — แต่คำสั่งทำไปแล้ว ผลจริงตามนี้คับ:\n"
-                            + _summarize_tool_log(turn_log) + "\nเช็คก่อนสั่งซ้ำนะคับ")
+                    return _with_recap(f"{why} เลยสรุปให้เป็นภาษาคนไม่ได้ — แต่คำสั่งทำไปแล้ว ผลจริงตามนี้คับ:\n"
+                            + _summarize_tool_log(turn_log) + "\nเช็คก่อนสั่งซ้ำนะคับ", touched)
                 return f"{why} — คำสั่งบางส่วนอาจทำไปแล้ว เช็คสถานะก่อนสั่งซ้ำนะคับ"
             # ถอยเทิร์นนี้ออก (กันข้อความซ้ำตอนลองใหม่) แล้วเข้าคิวลองใหม่เอง
             turn_start = next((i for i in range(len(chat_history) - 1, -1, -1) if chat_history[i] is turn_msg), None)
@@ -1333,7 +1366,7 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
         if not calls:
             # ตอบข้อความปกติ → จบ
-            return "".join(p.get("text", "") for p in parts) or "…"
+            return _with_recap("".join(p.get("text", "") for p in parts) or "…", touched)
 
         # รัน tool ทุกตัวที่ขอ แล้วส่งผลกลับให้ AI คิดต่อ
         responses = []
@@ -1353,6 +1386,8 @@ def run_agent(user_text, chat_id, image_bytes=None, _retry_tries=0):
             except Exception as e:
                 out = {"error": str(e)}
             print(f"🔧 {name}({args}) -> {str(out)[:200]}")
+            if name in STATE_TOOLS and args.get("asset"):
+                touched.append((args["asset"], args.get("set", "long")))
             if isinstance(out, dict) and out.get("image_b64"):
                 # เก็บรูปไว้ส่งให้โมเดลดูรอบถัดไป (อย่าใส่ไว้ใน functionResponse เพราะใหญ่เกิน)
                 pending_images.append(out["image_b64"])
@@ -1459,7 +1494,11 @@ def main():
                 if pending_confirm["action"] and text.lower() in ("y", "n"):
                     if text.lower() == "y":
                         out = TOOL_IMPL[pending_confirm["action"]](pending_confirm["args"])
-                        tg_send(f"ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}")
+                        a = pending_confirm["args"] or {}
+                        msg_done = f"ทำแล้ว: {json.dumps(out, ensure_ascii=False)[:300]}"
+                        if a.get("asset"):
+                            msg_done = _with_recap(msg_done, [(a["asset"], a.get("set", "long"))])
+                        tg_send(msg_done)
                     else:
                         tg_send("ยกเลิกคำสั่งนั้นแล้ว")
                     pending_confirm.update({"action": None, "args": None})
