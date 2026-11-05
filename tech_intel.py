@@ -188,7 +188,7 @@ def _zones(frames, price):
     """Zone Engine: Supply/Demand (base ก่อน impulse + แท่งสุดขั้วของสวิงตามวิธีนิน), FVG, Liquidity Sweep
     โซนซ้อน/ติดกันถูกรวมเป็นกล่องเดียว (sideway ในกรอบเดิม = โซนเดิมยังใช้ได้) นับ touches ทุกโซน"""
     zones = []
-    for tfkey, tail_n in (("1d", 80), ("4h", 100), ("1h", 120)):
+    for tfkey, tail_n in (("1w", 160), ("1d", 80), ("4h", 100), ("1h", 120)):
         df = frames.get(tfkey)
         if df is None or len(df) < 30:
             continue
@@ -291,7 +291,7 @@ def _zones(frames, price):
         else:
             z["status"] = "ใช้ได้อยู่"
         score = (2 if z.get("impulse", 0) >= 2 else 1) + (2 if z["dist_pct"] < 0.5 else 1 if z["dist_pct"] < 1 else 0)
-        score += {"D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
+        score += {"W1": 3, "D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
         score += 1 if z.get("touches", 0) >= 3 else 0.5 if z.get("touches", 0) >= 2 else 0
         score += 0.5 if z.get("flipped") else 0
         z["strength"] = score
