@@ -1124,6 +1124,17 @@ NEWS_TEMPLATE = """
         </div>
     </div>
 
+    {% if d.regime or d.alerts %}
+    <div class="card">
+        <h2>สภาวะตลาด / จุดผิดปกติ</h2>
+        <div class="sigsum">{{ (d.regime.tags or [])|join(' · ') }}</div>
+        {% for w in d.regime.why %}<div class="layer">· {{ w }}</div>{% endfor %}
+        {% for a in d.alerts %}<div class="qrow"><div class="dot {{ 'warn' if a.level=='critical' else 'bear' if a.level=='high' else 'mid' }}"></div><div class="q">{{ a.msg }}</div><div class="a">{{ a.level }}</div></div>{% endfor %}
+        {% for v in d.divergences %}<div class="layer" style="color:#b0563f">· {{ v }}</div>{% endfor %}
+        {% if d.thesis %}<div class="layer" style="margin-top:8px"><b>Thesis วันนี้:</b> {{ d.thesis }}</div>{% endif %}
+    </div>
+    {% endif %}
+
     <div class="card">
         <h2>ตอบ 5 คำถามก่อนตีความราคาทอง</h2>
         <div class="sigsum">{{ d.signal_summary }}</div>

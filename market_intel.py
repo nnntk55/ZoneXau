@@ -287,6 +287,131 @@ NEWS_GUIDE = {"how": "ตลาดเทรดจากความคาดห�
 SYMBOL_NAMES = {"xauusd": "ทอง (GC=F)", "dxy": "DXY", "us10y": "US10Y Yield", "oil": "น้ำมัน WTI (CL=F)"}
 
 
+# ---------- วิเคราะห์: regime / divergence / change / thesis / alerts ----------
+def _chg(p, k):
+    v = ((p or {}).get(k) or {}).get("chg_pct")
+    return v if isinstance(v, (int, float)) else None
+
+
+def _regime(prices, fred):
+    """จำแนกสภาวะตลาดจากข้อมูลจริง: Risk-off/Risk-on/Monetary Easing/Tightening/Mixed"""
+    g, d, y = _chg(prices, "xauusd"), _chg(prices, "dxy"), _chg(prices, "us10y")
+    ry = ((fred or {}).get("real_yield") or {}).get("chg_5d")
+    tags, note = [], []
+    if d is not None and y is not None:
+        if d < -0.1 and y < -0.5:
+            tags.append("Monetary Easing")
+            note.append("ดอลลาร์+ยีลด์ลดพร้อมกัน ตลาดคาดผ่อนคลาย")
+        elif d > 0.1 and y > 0.5:
+            tags.append("Monetary Tightening")
+            note.append("ดอลลาร์+ยีลด์ขึ้นพร้อมกัน แรงกดสินทรัพย์เสี่ยง")
+    if g is not None and g > 0.4:
+        tags.append("Risk-off" if (d or 0) < 0.1 else "Risk-off (หนีภัยทั้งคู่)")
+    elif g is not None and g < -0.4:
+        tags.append("Risk-on / ลดการหนีภัย")
+    if ry is not None and abs(ry) >= 0.05:
+        tags.append("Real Yield " + ("ขึ้น" if ry > 0 else "ลง"))
+    return {"tags": tags or ["ไม่ชัด / Mixed"], "why": note,
+            "หมายเหตุ": "จำแนกจากการเคลื่อนไหวจริงวันนี้ ไม่ใช่คำทำนาย"}
+
+
+def _divergences(prices):
+    """ตรวจจับเมื่อปัจจัยขัดแย้งกัน (ทองกับ DXY/ยีลด์เคลื่อนทิศเดียวกัน = ผิดปกติ)"""
+    g, d, y = _chg(prices, "xauusd"), _chg(prices, "dxy"), _chg(prices, "us10y")
+    out = []
+    if g is not None and d is not None and g * d > 0 and abs(g) > 0.2 and abs(d) > 0.05:
+        out.append("ทองและ DXY เคลื่อนไปทิศเดียวกัน (ทอง %+.1f%%, DXY %+.1f%%) — ผิดปกติ อาจเป็นแรงหนีภัยเหนือค่าเงิน" % (g, d))
+    if g is not None and y is not None and g * y > 0 and abs(g) > 0.4 and abs(y) > 0.8:
+        out.append("ทองกับ US10Y เคลื่อนทิศเดียวกัน (ทอง %+.1f%%, ยีลด์ %+.1f%%) — เช็คว่าขับด้วยอะไรอื่น" % (g, y))
+    return out
+
+
+def _snap_and_change(prices, fred):
+    """เก็บ snapshot รายวันลง cache แล้วเทียบ เมื่อวาน/7วัน/30วัน (Macro Change Detection)"""
+    today = datetime.now(_TH).strftime("%Y-%m-%d")
+    snap = {"gold": (prices.get("xauusd") or {}).get("price"),
+            "dxy": (prices.get("dxy") or {}).get("price"),
+            "us10y": (prices.get("us10y") or {}).get("price"),
+            "real_yield": ((fred or {}).get("real_yield") or {}).get("value"),
+            "t": time.time()}
+    if not any(v is not None for v in snap.values() if isinstance(v, (int, float)) or v):
+        return {}, []
+    c = _load()
+    snaps = c.setdefault("snapshots", {})
+    snaps[today] = snap
+    for dt in (sorted(snaps)[:-95] if len(snaps) > 95 else []):
+        del snaps[dt]
+    _save(c)
+    from datetime import date as _d
+    def back(days):
+        for dt in sorted(snaps, reverse=True):
+            if dt != today:
+                try:
+                    if (datetime.now(_TH).date() - _d.fromisoformat(dt)).days >= days:
+                        return dt, snaps[dt]
+                except ValueError:
+                    continue
+        return None, None
+    chg = {}
+    for label, days in (("เมื่อวาน", 1), ("7 วัน", 6), ("30 วัน", 28)):
+        dt, old = back(days)
+        if old:
+            chg[label] = {"since": dt, "fields": {
+                k: (round((snap[k] - old[k]) / old[k] * 100, 2) if k != "us10y" and old.get(k) and snap.get(k)
+                    else round(snap[k] - old[k], 2) if old.get(k) and snap.get(k) else None)
+                for k in ("gold", "dxy", "us10y", "real_yield") if k in snap}}
+    return snap, chg
+
+
+def _alerts(prices, qs):
+    """เกณฑ์ความผิดปกติ -> list {level, msg} (Critical/High/Medium ตามน้ำหนักต่อทอง)"""
+    out = []
+    g, d, y = _chg(prices, "xauusd"), _chg(prices, "dxy"), _chg(prices, "us10y")
+    if d is not None and abs(d) >= 0.5:
+        out.append({"level": "high", "msg": f"DXY เคลื่อนผิดปกติ {d:+.2f}% วันนี้"})
+    if y is not None and abs(y) >= 1.5:
+        out.append({"level": "high", "msg": f"US10Y เปลี่ยนเร็ว {y:+.2f}% (~{abs(y)*4.9:.0f}bp) วันนี้"})
+    if g is not None and abs(g) >= 1.5:
+        out.append({"level": "critical" if abs(g) >= 2.5 else "high",
+                    "msg": f"ทองแกว่ง {g:+.1f}% วันนี้ — เช็คว่า technical ที่คำนวณยัง valid"})
+    if g is not None and d is not None and g * d > 0 and abs(g) > 0.5:
+        out.append({"level": "medium", "msg": "ทองกับ DXY ไปทางเดียวกัน (divergence) — macro view อาจเปลี่ยน"})
+    return out
+
+
+def _thesis(qs, chg):
+    """สมมติฐานตลาดวันนี้จากข้อมูลจริง + เก็บลง cache (Thesis Tracker)"""
+    bull = [q["a"] for q in qs if q["sig"] == "bull"]
+    bear = [q["a"] for q in qs if q["sig"] == "bear"]
+    today = datetime.now(_TH).strftime("%Y-%m-%d")
+    if bull and not bear:
+        t = "ทองมีแรงหนุนจาก " + ", ".join(bull[:2])
+    elif bear and not bull:
+        t = "ทองโดนกดจาก " + ", ".join(bear[:2])
+    elif bull and bear:
+        t = "แรงสองฝั่งขัดกัน: หนุนจาก " + bull[0] + " แต่กดด้วย " + bear[0]
+    else:
+        t = "ยังไม่มีแรงขับชัด ตลาดรอตัวกระตุ้น"
+    if chg.get("7 วัน"):
+        f = chg["7 วัน"]["fields"]
+        drift = []
+        if f.get("gold") is not None:
+            drift.append(f"ทอง {f['gold']:+.1f}%/wk")
+        if f.get("real_yield") is not None:
+            drift.append(f"real yield {f['real_yield']:+.2f}/wk")
+        if drift:
+            t += " | เปลี่ยนแปลงสัปดาห์: " + ", ".join(drift)
+    c = _load()
+    log = c.setdefault("thesis_log", {})
+    if log.get(today) != t:
+        log[today] = t
+        for dt in (sorted(log)[:-30] if len(log) > 30 else []):
+            del log[dt]
+        _save(c)
+    recent = [{"date": dt, "thesis": log[dt]} for dt in sorted(log, reverse=True)[:5]]
+    return t, recent
+
+
 def get_market_intel():
     """คืน dict ข้อมูลตลาดทั้งหมด — ค่า None/field error หมายถึงแหล่งนั้นดึงไม่ได้ ห้ามเดาแทน"""
     errors = []
@@ -299,6 +424,8 @@ def get_market_intel():
     if isinstance(heads, list):  # cache รูปแบบเก่า (list เดี่ยว) -> โครงใหม่
         heads = {"gold": heads, "geo": []}
     qs, summary = _five(prices, fred, cal)
+    snap, changes = _snap_and_change(prices or {}, fred or {})
+    thesis, thesis_log = _thesis(qs, changes)
     return {"fetched_thai": _thai(time.time()),
             "prices": prices or {},
             "symbol_names": SYMBOL_NAMES,
@@ -308,6 +435,12 @@ def get_market_intel():
             "calendar": cal or {"today": [], "upcoming": []},
             "headlines": heads or {"gold": [], "geo": []},
             "news_guide": NEWS_GUIDE,
+            "regime": _regime(prices or {}, fred or {}),
+            "divergences": _divergences(prices or {}),
+            "change_detection": changes,
+            "alerts": _alerts(prices or {}, qs),
+            "thesis": thesis,
+            "thesis_log": thesis_log,
             "watchlist": WATCHLIST, "layers": LAYERS, "links": LINKS,
             "errors": errors,
             "note": "ข้อมูลอ้างอิงจากแหล่งจริง ประกอบการตัดสินใจเท่านั้น ไม่ใช่สัญญาณเทรดของบอท"}

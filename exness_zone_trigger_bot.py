@@ -941,6 +941,7 @@ def run_asset_radar(asset_key):
             ensure_sets(st)
             check_open_position(asset_key)
             announce_today_news()
+            announce_morning_intel()
 
             # คำถามยืนยันค้างเกิน 30 นาที → หมดอายุอัตโนมัติ ปล่อยให้สัญญาณแท่งใหม่เข้าได้
             pend = ASSETS[asset_key].get("pending_confirmation")
@@ -1469,6 +1470,19 @@ def announce_today_news():
         NEWS_CACHE["announced"].add(today)
         txt = "\n".join(f"• {e['thai'].strftime('%H:%M')} {e['title']}" for e in todays)
         midas_inbox(f"[EVENT] วันนี้มีข่าวแรง USD:\n{txt}\nบอทจะไม่เปิดออเดอร์ช่วงข่าวแรง ±15 นาที — บอกพี่ด้วย")
+
+def announce_morning_intel():
+    """07:50 ไทย วันละครั้ง — สั่ง Midas ทำรายงาน Market Intelligence เช้า (ดึง get_market_intel/get_news เอง)"""
+    now = (datetime.now(timezone.utc) + timedelta(hours=7))
+    if not (now.hour == 7 and now.minute >= 50) and not (now.hour == 8 and now.minute < 10):
+        return
+    today = now.strftime("%Y-%m-%d")
+    if today in NEWS_CACHE["announced"]:
+        return
+    NEWS_CACHE["announced"].add(today)
+    midas_inbox("[EVENT] MORNING_INTEL: สรุป Market Intelligence เช้าให้พี่ — เรียก get_market_intel + get_news แล้วรายงานตามโครง: "
+                "1) ภาพรวมตลาด (ทอง/DXY/ยีลด์/real yield ขยับยังไง) 2) ข่าววันนี้ 3) headline ทอง+ภูมิรัฐศาสตร์ "
+                "4) เช็คลิสต์ 5 คำถาม+สรุปสัญญาณ 5) regime/divergence/alerts ที่ระบบตรวจเจอ 6) thesis วันนี้เทียบวันก่อน 7) มุมมองล่วงหน้า 1-7 วัน — ห้ามเดาข่าวเอง")
 
 def is_weekend_thai():
     """เสาร์–อาทิตย์เวลาไทย = ห้ามเปิดออเดอร์ใหม่ (หลังเที่ยงคืนวันศุกร์เป็นต้นไป)"""
