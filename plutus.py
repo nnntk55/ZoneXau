@@ -110,10 +110,12 @@ def _sheet_sync(d):
 POCKETS = {"ฝาก": "เงินฝาก", "เข้า": "แหล่งเงินเข้า", "พอร์ท": "พอร์ทเทรด",
            "ธนาคาร": "ธนาคารค่าใช้จ่าย", "เก็บ": "เงินเก็บ", "สำรอง": "เงินสำรอง"}
 
-def log_tx(kind, amount, cat, note="", pocket="ธนาคาร"):
+def log_tx(kind, amount, cat, note="", pocket="ธนาคาร", date=None):
     """kind: in(รับ) / out(จ่าย) / save(เงินเก็บ) / reserve(เงินสำรอง)"""
     d = _load()
-    d["tx"].append({"t": time.time(), "date": datetime.now(TH).strftime("%Y-%m-%d"),
+    if not (isinstance(date, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", date)):
+        date = datetime.now(TH).strftime("%Y-%m-%d")
+    d["tx"].append({"t": time.time(), "date": date,
                     "kind": kind, "amount": float(amount), "cat": cat or "ทั่วไป",
                     "note": note, "pocket": pocket})
     d["tx"] = d["tx"][-2000:]
@@ -194,8 +196,8 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 ตอบเป็น JSON เดียวเสมอ {"action": "...", "say": "...", ...}
 - "say" = ประโยคสั้นๆ สไตล์ CFO พูดกับนิน (ทักท้วง/เสนอ/ถามได้ตามกฎ) ใส่ทุก action ยกเว้น chat ที่ใช้ "reply" แทน
 เลือก action:
-- log_in: เงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร","say":"..."}
-- log_out: เงินจ่าย (default pocket ธนาคาร)
+- log_in: เงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร","date":"YYYY-MM-DD หรือละไว้ถ้าวันนี้","say":"..."}
+- log_out: เงินจ่าย (default pocket ธนาคาร, ใส่ date เหมือนกันถ้าเป็นย้อนหลัง)
 - save: โยนเข้าเงินเก็บ {"action":"save","amount":ตัวเลข,"note":"","say":"..."}
 - reserve: โยนเข้าเงินสำรอง เหมือนกัน
 - add_payable: ใครค้างจ่าย {"action":"add_payable","who":"ชื่อ","amount":ตัวเลข,"due":"YYYY-MM-DD","note":""}
@@ -211,6 +213,8 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
 - chat: คุยทั่วไป {"action":"chat","reply":"..."}
 ตัวอย่าง: "จดค่ากิน 350" -> {"action":"log_out","amount":350,"cat":"อาหาร","pocket":"ธนาคาร","say":"จดให้แล้วครับ"}
+"จ่ายค่าน้ำเมื่อวาน 200" -> {"action":"log_out","amount":200,"cat":"อาหาร","date":"(วันที่ของเมื่อวาน)","say":"..."}
+กฎเหล็ก: ถ้าเป็น "คำถาม" เกี่ยวกับรายการที่จดไปแล้ว (เช่น "เมื่อกี้จดอะไรไป" "ทำไม 2676") ให้ตอบ chat/ask เท่านั้น ห้ามสร้างรายการใหม่ซ้ำเด็ดขาด — สร้างรายการเฉพาะเมื่อนินสั่งจดชัดเจน
 ถ้าไม่บอกวัน due เดาวันเดียวกันเดือนถัดไป; ตอบเฉพาะ JSON ห้ามมีข้อความอื่น"""
 
 def _call_llm(prompt):
@@ -258,9 +262,9 @@ def handle(text):
     if a in ("log_in", "log_out", "save", "reserve"):
         kind = {"log_in": "in", "log_out": "out", "save": "save", "reserve": "reserve"}[a]
         pocket = {"save": "เก็บ", "reserve": "สำรอง"}.get(a, cmd.get("pocket", "ธนาคาร"))
-        t = log_tx(kind, cmd.get("amount", 0), cmd.get("cat"), cmd.get("note", ""), pocket)
+        t = log_tx(kind, cmd.get("amount", 0), cmd.get("cat"), cmd.get("note", ""), pocket, cmd.get("date"))
         label = {"in": "รับ", "out": "จ่าย", "save": "เก็บ", "reserve": "สำรอง"}[kind]
-        reply = f"จด{label} {t['amount']:,.0f} ({t['cat']}) กระเป๋า {POCKETS.get(t['pocket'], t['pocket'])}"
+        reply = f"จด{label} {t['amount']:,.0f} ({t['cat']}) วันที่ {t['date']} กระเป๋า {POCKETS.get(t['pocket'], t['pocket'])}"
     elif a == "add_payable":
         d = _load()
         d["payables"].append({"who": cmd.get("who", "-"), "amount": float(cmd.get("amount", 0)),
