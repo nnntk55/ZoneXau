@@ -139,12 +139,15 @@ ASSETS = {
 }
 
 TIMEFRAME_MAP = {
+    "1mo": mt5.TIMEFRAME_MN1,
     "1w": mt5.TIMEFRAME_W1,
     "1d": mt5.TIMEFRAME_D1,
     "4h": mt5.TIMEFRAME_H4,
     "1h": mt5.TIMEFRAME_H1,
+    "30m": mt5.TIMEFRAME_M30,
     "15m": mt5.TIMEFRAME_M15,
-    "5m": mt5.TIMEFRAME_M5
+    "5m": mt5.TIMEFRAME_M5,
+    "1m": mt5.TIMEFRAME_M1
 }
 
 def init_mt5():
@@ -996,6 +999,11 @@ def run_asset_radar(asset_key):
             stoch_payload["trend"] = trend_v
             stoch_payload["trend_tf"] = trend_tf
 
+            # 🧠 Technical Intelligence (multi-TF bias/setup/zones) — คำนวณทุก 5 นาที แนบขึ้น dashboard
+            _tech = tech_refresh(symbol)
+            if _tech:
+                stoch_payload["tech"] = _tech
+
             # ส่งข้อมูลขึ้น Render Dashboard
             push_market_data_to_render(asset_key, current_price, stoch_payload)
 
@@ -1484,12 +1492,38 @@ def announce_morning_intel():
     NEWS_CACHE["announced"].add(today)
     midas_inbox("[EVENT] MORNING_INTEL: ทำ GOLD INTELLIGENCE REPORT ให้พี่ — เรียก get_market_intel + get_news แล้วรายงานตามโครง: "
                 "1) สรุปผู้บริหาร 2) ทำไมทองขยับข้ามคืน (ใช้ why_moved: timeline/ตัวขับ/สิ่งที่ยืนยันไม่ได้) 3) ภาพรวม macro "
-                "4) ดอลลาร์+ยีลด์+real yield 5) โครงสร้างเทคนิค (เทรนด์/stoch/แนว) 6) macro เทียบ technical (confluence หรือขัดกัน) "
+                "4) ดอลลาร์+ยีลด์+real yield 5) โครงสร้างเทคนิค (ใช้ tech: daily bias/ตารางเทรนด์ทุก TF/แนวสำคัญ/setup จากแท่ง MT5) 6) macro เทียบ technical (confluence หรือขัดกัน) "
                 "7) มุมมองระยะสั้น 8) มุมมอง swing 1-3 สัปดาห์ 9) มุมมองระยะยาว 10) ความเสี่ยงทะลุ/กลับตัว (alerts/divergence) "
                 "11) ข่าววันนี้+ล่วงหน้า 12) thesis วันนี้เทียบวันก่อน 13) อะไรเปลี่ยนมุมมองได้ 14) ข้อมูลที่ขาด/ยืนยันไม่ได้ "
                 "— ใช้เฉพาะข้อมูล tool คืนจริง ห้ามเดา ลงท้ายบอกว่าไม่ใช่คำสั่งเทรด")
 
 MI_WATCH = {"t": 0, "sent": {}}
+TECH_WATCH = {"t": 0, "data": None}
+
+def tech_refresh(symbol):
+    """สมองเทคนิค multi-TF (tech_intel.py) คำนวณจากแท่ง MT5 จริงทุก ~5 นาที — แนบขึ้น dashboard
+    นี่คือชั้น Technical Intelligence ของ Midas: read-only ไม่ยิงออเดอร์ ไม่แตะกฎเทรด"""
+    if time.time() - TECH_WATCH["t"] < 300:
+        return TECH_WATCH["data"]
+    TECH_WATCH["t"] = time.time()
+    try:
+        import tech_intel
+        frames = {}
+        for tf in ("1mo", "1w", "1d", "4h", "1h", "30m", "15m", "5m", "1m"):
+            df = fetch_mt5_candles(symbol, tf, count=260)
+            if df is not None and not df.empty:
+                frames[tf] = df
+        if not frames:
+            return TECH_WATCH["data"]
+        try:
+            import market_intel
+            mi = market_intel.get_market_intel()
+        except Exception:
+            mi = None
+        TECH_WATCH["data"] = tech_intel.analyze(frames, mi)
+    except Exception as e:
+        print(f"tech intel error: {e}")
+    return TECH_WATCH["data"]
 
 def macro_confluence_note(side):
     """P4/P5: macro หนุนทิศทะลุแนวไหม — side 'r'=ต้าน(ทะลุขึ้นต้องการแรงซื้อ) / 's'=รับ(ทะลุลงต้องการแรงขาย)

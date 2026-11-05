@@ -1247,6 +1247,43 @@ ANALYST_BODY = """
     </div>
     {% endif %}
 
+    {% set tech = d.tech or {} %}
+    {% if tech.get('tfs') %}
+    <div class="card">
+        <h2>TECHNICAL INTELLIGENCE — Multi-TF (คำนวณบน VPS จากแท่ง MT5 จริง · {{ tech.fetched_thai }})</h2>
+        <div class="sigsum">Daily Bias: {{ (tech.daily_bias or {}).get('label') }} (score {{ (tech.daily_bias or {}).get('score') }})</div>
+        <table><tr><th>TF</th><th>เทรนด์</th><th>EMA</th><th>โครงสร้าง</th><th>Stoch K/D</th><th>เหตุผล</th></tr>
+        {% for tf, v in tech.tfs.items() %}
+        <tr><td>{{ tf.upper() }}</td><td>{{ v.trend }}</td><td>{{ v.ema_align }}</td>
+            <td>{{ (v.structure or {}).get('dir') }}</td>
+            <td>{{ v.stoch_k }}/{{ v.stoch_d }} {{ v.stoch_zone }}</td>
+            <td>{{ v.trend_why }}</td></tr>
+        {% endfor %}</table>
+        {% if tech.missing_tfs %}<div class="err" style="color:#b0563f">TF ที่ขาดข้อมูล: {{ tech.missing_tfs|join(', ') }}</div>{% endif %}
+        {% for r in (tech.daily_bias or {}).get('reasons') or [] %}<div class="err" style="color:#9b8477">· {{ r }}</div>{% endfor %}
+    </div>
+
+    {% if tech.get('setups') %}
+    <div class="card">
+        <h2>Entry Setups (แผน — ไม่ใช่คำสั่งเทรด)</h2>
+        {% for s in tech.setups %}
+        <div class="layer"><b>{{ s.สถานะ }}</b> — {{ s.direction }} {{ s.type }}
+            <div class="err" style="color:#9b8477">zone: {{ s.entry_zone }} | ยืนยัน: {{ s.confirmation }} | หักล้าง: {{ s.invalidation }} | T1: {{ s.target1 }} | macro {{ s.macro }}</div></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if tech.get('levels') %}
+    <div class="card">
+        <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>
+        <table><tr><th>แนว</th><th>ราคา</th><th>TF</th><th>ชนิด</th><th>ห่าง</th></tr>
+        {% for l in tech.levels %}
+        <tr><td>{{ l.name }}</td><td>{{ '{:,.2f}'.format(l.price) }}</td><td>{{ l.tf }}</td><td>{{ l.kind }}</td><td>{{ l.dist_pct }}%</td></tr>
+        {% endfor %}</table>
+    </div>
+    {% endif %}
+    {% endif %}
+
     {% if d.alerts or d.divergences or d.thesis_invalidated %}
     <div class="card">
         <h2>จุดผิดปกติ / เตือน</h2>
@@ -1637,13 +1674,19 @@ def healthz():
     """health check เบาๆ สำหรับ Render — ตอบทันทีไม่วาดกราฟ กัน health check timeout ตอน deploy"""
     return "ok " + os.environ.get("RENDER_GIT_COMMIT", "")[:7], 200
 
+def _tech_state():
+    """ผลวิเคราะห์ multi-TF ที่บอท push ขึ้นมา (tech_intel บน VPS) — None ถ้าบอทยังไม่ส่ง"""
+    return (ASSETS.get("xau") or {}).get("state", {}).get("tech")
+
 @app.route('/api/market', methods=['GET'])
 def api_market():
     """ข้อมูล macro/ข่าวทองจากแหล่งจริง — Midas อ่านผ่าน tool get_market_intel (ชุดเดียวกับหน้า /news)"""
     if market_intel is None:
         return jsonify({"status": "error", "message": "market_intel module not loaded"}), 500
     try:
-        return jsonify(market_intel.get_market_intel())
+        d = market_intel.get_market_intel()
+        d["tech"] = _tech_state()
+        return jsonify(d)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)[:300]}), 500
 
@@ -1667,6 +1710,7 @@ def analyst_page():
     else:
         try:
             d = market_intel.get_market_intel()
+            d["tech"] = _tech_state()
         except Exception as e:
             err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
     return render_template_string(ANALYST_TEMPLATE, d=d, err=err)
@@ -1905,6 +1949,8 @@ def process_market_data(data):
                 st["trend"] = payload["trend"]
             if "trend_tf" in payload:
                 st["trend_tf"] = payload["trend_tf"]
+            if "tech" in payload:  # tech_intel multi-TF จากบอท (วิเคราะห์บน VPS ทุก 5 นาที)
+                st["tech"] = payload["tech"]
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
