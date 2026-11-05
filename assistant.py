@@ -105,6 +105,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ข้อความที่ขึ้นต้นด้วย [EVENT] คือข่าวจากบอทเทรด (ปิดออเดอร์/แผนหยุด/ข่าวแรง) ไม่ใช่คำพูดพี่ — รายงานผลให้พี่ฟังในบทบาทของคุณ สั้นๆ มีน้ำหนัก
 - [EVENT] ขาดทุน (profit ติดลบ/วันติดลบ) → รายงานผลแล้วถามพี่ว่า "จะหยุดวางแผนใหม่ หรือไปต่อ" — ห้ามหยุดเอง เด็ดขาด การตัดสินใจเป็นของพี่ (พี่ตอบหยุด → set_power off; ตอบไปต่อ → ปล่อยระบบทำงานต่อ)
 - พี่ถามว่าเทรดช่วงไหนดี/จะตั้งเวลาเทรด → เรียก get_hour_stats ดูผลจริงแยกช่วงเวลาก่อน บอกจำนวนไม้ด้วย ถ้าไม้น้อยให้บอกตรงๆ ว่ายังสรุปไม่ได้ ห้ามตั้ง window เองถ้าพี่ไม่ได้สั่ง
+- พี่ถามเรื่องข่าว/ทำไมทองขึ้นลง/DXY/ยีลด์/Fed/macro → เรียก get_market_intel ทุกครั้งก่อนตอบ แล้วตอบจากข้อมูลจริงที่ tool คืนเท่านั้น — ห้ามเดาข่าว ห้ามจำตัวเลขจากบทสนทนาเก่า ถ้า tool error ให้บอกพี่ว่าดึงข้อมูลไม่ได้ (get_news = เฉพาะปฏิทินข่าว ไม่ใช่ภาพรวมตลาด)
 - [EVENT] สรุปสัปดาห์ → เรียก get_stats แล้วสรุปผลสัปดาห์นี้ให้พี่: win rate กำไรสุทธิ และข้อคิดสั้นๆ
 - [EVENT] SR_NEAR (ราคาเข้าใกล้แนวที่พี่ตั้ง) → เรียก get_news (ข่าวแรงวันนี้) และ get_sr_stats ของ asset นั้น แล้วสรุปให้พี่ในข้อความเดียวสั้นๆ: ราคาอยู่ตรงไหนเทียบแนว, เทรนด์, stoch แต่ละ TF อยู่โซนไหน, มีข่าวแรงใกล้ๆ ไหม, สถิติแนวที่ผ่านมาเด้ง/ทะลุกี่ครั้ง — ห้ามฟันธงว่าจะเด้งหรือทะลุ ห้ามแนะนำให้เข้าออเดอร์ ห้ามแก้ค่าใดๆ บนแดชบอร์ด บอทจะตามผลเองแล้วแจ้งพี่ทีหลัง
 - เมื่อคำนวณ lot: ใช้ tool calc_lot เสมอ (สูตร equity×risk%/(SL×pip_value)) อย่าคิดเอง — พี่กำหนด risk% และ SL ให้แต่ละสัปดาห์
@@ -776,6 +777,30 @@ def tool_get_news(asset=None):
     except Exception as e:
         return {"error": str(e)}
 
+def tool_get_market_intel():
+    """ภาพรวม macro/ข่าวทองจากแหล่งจริง — DXY/ยีลด์/real yield/ปฏิทิน/พาดหัวข่าว + เช็คลิสต์ 5 คำถาม
+    (ข้อมูลชุดเดียวกับหน้า /news บน dashboard — ใช้ตอบเรื่อง 'ทำไมทองขึ้นลง' แทนการเดาข่าว)"""
+    err = None
+    try:
+        res = requests.get(f"{RENDER_DASHBOARD_URL}/api/market", timeout=DASH_TIMEOUT,
+                           headers=dash_headers(), auth=dash_auth())
+        if res.status_code == 200:
+            d = res.json()
+            if "status" not in d or d.get("status") != "error":
+                return d
+            err = d.get("message") or "api error"
+        else:
+            err = f"dashboard HTTP {res.status_code}"
+    except Exception as e:
+        err = str(e)[:150]
+    try:
+        import market_intel  # fallback: ดึงเองจากเครื่องนี้ถ้า dashboard ไม่ตอบ
+        d = market_intel.get_market_intel()
+        d["_แหล่งข้อมูล"] = f"ดึงเองจากเครื่อง (dashboard ไม่ตอบ: {err})"
+        return d
+    except Exception as e2:
+        return {"error": f"ดึงข้อมูลตลาดไม่ได้ — dashboard: {err}, local: {str(e2)[:150]}"}
+
 def tool_get_sr_stats(asset=None):
     """อ่านบันทึกผลหลังเตือนแนว (บอทเทรดเขียน charts/sr_touches.json) แล้วนับ เด้ง/ทะลุ/ไม่ชัด"""
     try:
@@ -885,6 +910,7 @@ TOOL_IMPL = {
     "get_stats":    lambda a: tool_get_stats(a.get("asset")),
     "get_sentiment":lambda a: tool_get_sentiment(a["asset"]),
     "get_news":     lambda a: tool_get_news(a.get("asset")),
+    "get_market_intel": lambda a: tool_get_market_intel(),
     "get_sr_stats": lambda a: tool_get_sr_stats(a.get("asset")),
     "get_hour_stats": lambda a: tool_get_hour_stats(a.get("asset")),
 }
@@ -984,6 +1010,8 @@ GEMINI_TOOLS = [{
          "parameters": {"type": "object", "properties": {"asset": asset_param()}, "required": ["asset"]}},
         {"name": "get_news", "description": "ปฏิทินเศรษฐกิจ: ข่าว impact สูงของ USD สัปดาห์นี้ — เช็คก่อนเทรดช่วงข่าวแรง",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "get_market_intel", "description": "ข้อมูลตลาดทอง/macro จากแหล่งจริง: ราคาทอง, DXY, US10Y nominal+real yield, ปฏิทินข่าว, พาดหัวข่าว, เช็คลิสต์ 5 คำถามอ่านแรงหนุน/กดทอง — ใช้ทุกครั้งที่พี่ถามเรื่องข่าว ทำไมทองขึ้นลง DXY ยีลด์ Fed หรือภาพรวมตลาด ห้ามเดาข่าวเอง",
+         "parameters": {"type": "object", "properties": {}}},
         {"name": "get_sr_stats", "description": "สถิติผลหลังเตือนแนวรับ/ต้านที่พี่ตั้ง: เด้งกี่ครั้ง ทะลุกี่ครั้ง ไม่ชัดกี่ครั้ง + รายการล่าสุด — ใช้เมื่อพี่ถามว่าแนวแม่นไหม หรือตอน [EVENT] SR_NEAR",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
         {"name": "get_hour_stats", "description": "สถิติไม้ที่บอทปิดแล้ว แยกตามช่วงเวลาเข้า (เวลาไทย): ช่วงตลาด เอเชีย/ลอนดอน/นิวยอร์ก/ดึก, รายชั่วโมง, รายวัน — ใช้เมื่อพี่ถามว่าเทรดช่วงไหนดี หรือจะตั้ง/ปรับ window",

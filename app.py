@@ -16,6 +16,11 @@ import yfinance as yf
 
 matplotlib.use("Agg")
 
+try:
+    import market_intel
+except Exception:
+    market_intel = None
+
 # ==========================================
 # CONFIGURATION & ASSETS DEFINITION
 # ==========================================
@@ -962,6 +967,7 @@ HTML_TEMPLATE = """
         <div class="card">
             <div class="btn-container">
                 <a href="{{ url_for('send_test') }}" class="btn">🔔 ทดสอบส่งข้อความ</a>
+                <a href="{{ url_for('market_news') }}" class="btn">📊 ข่าว / Macro Intel</a>
             </div>
         </div>
         <div class="status-footer">
@@ -1010,6 +1016,169 @@ HTML_TEMPLATE = """
         .catch(error => console.error('Error:', error));
     }
     </script>
+</body>
+</html>
+"""
+
+# ---------- หน้า /news — ข้อมูลวิเคราะห์ macro/ข่าว จาก market_intel ----------
+NEWS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MARKET INTEL — ZONE TRIGGER</title>
+    <meta http-equiv="refresh" content="120">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: "Prompt", "Segoe UI", "Tahoma", sans-serif;
+            background: linear-gradient(160deg, #f7ead9 0%, #e4d2c1 70%, #dcc6b4 100%);
+            background-attachment: fixed;
+            color: #5f4a43; margin: 0; padding: 24px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+        h1 { font-size: 1.4rem; color: #5f4a43; margin: 0; font-weight: 600; }
+        .sub { font-size: 0.8rem; color: #9b8477; margin-bottom: 18px; }
+        .back { font-size: 0.75rem; color: #9b8477; text-decoration: none; border: 1px solid #c5b0a1; padding: 6px 14px; border-radius: 999px; }
+        .back:hover { background: #fdf7ec; color: #5f4a43; }
+        .card {
+            background: rgba(253, 247, 236, 0.95); padding: 18px; border-radius: 20px;
+            margin-bottom: 16px; border: 1px solid #e4d2c1; box-shadow: 0 4px 16px rgba(95,74,67,0.08);
+        }
+        .card h2 { font-size: 0.95rem; margin: 0 0 12px 0; color: #5f4a43; font-weight: 600; }
+        .pxgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .px {
+            background: #f7ead9; border: 1px solid #e4d2c1; border-radius: 14px; padding: 12px 14px;
+        }
+        .px .lbl { font-size: 0.68rem; color: #9b8477; text-transform: uppercase; letter-spacing: 0.5px; }
+        .px .val { font-size: 1.25rem; font-weight: 600; color: #5f4a43; }
+        .px .chg { font-size: 0.75rem; font-weight: 500; }
+        .up { color: #6f8f5f; } .dn { color: #b0563f; } .mid { color: #9b8477; }
+        .qrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px dashed #e4d2c1; }
+        .qrow:last-child { border-bottom: none; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+        .dot.bull { background: #6f8f5f; } .dot.bear { background: #b0563f; }
+        .dot.mid { background: #c98a4b; } .dot.warn { background: #d9534f; } .dot.na { background: #c5b0a1; }
+        .q { font-size: 0.82rem; font-weight: 500; flex: 1; }
+        .a { font-size: 0.8rem; color: #9b8477; text-align: right; flex: 1; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th { text-align: left; color: #9b8477; font-weight: 500; font-size: 0.7rem; padding: 6px 8px; border-bottom: 2px solid #e4d2c1; }
+        td { padding: 6px 8px; border-bottom: 1px solid #efe0cd; vertical-align: top; }
+        .imp-h { color: #b0563f; font-weight: 600; } .imp-m { color: #c98a4b; font-weight: 600; }
+        .hl { padding: 8px 0; border-bottom: 1px dashed #e4d2c1; font-size: 0.82rem; }
+        .hl:last-child { border-bottom: none; }
+        .hl .src { font-size: 0.7rem; color: #9b8477; }
+        .hl a { color: #5f4a43; text-decoration: none; } .hl a:hover { text-decoration: underline; }
+        .links { display: flex; flex-wrap: wrap; gap: 8px; }
+        .links a {
+            font-size: 0.72rem; color: #5f4a43; text-decoration: none; background: #f7ead9;
+            border: 1px solid #e4d2c1; padding: 6px 14px; border-radius: 999px;
+        }
+        .links a:hover { background: #e4d2c1; }
+        .err { font-size: 0.72rem; color: #b0563f; margin-top: 8px; }
+        .layer { font-size: 0.8rem; padding: 6px 0; }
+        .layer b { color: #5f4a43; }
+        .foot { text-align: center; font-size: 0.7rem; color: #9b8477; margin-top: 8px; }
+        .sigsum { font-size: 0.85rem; font-weight: 600; color: #5f4a43; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="head">
+        <h1>MARKET INTEL — วิเคราะห์ทองแบบมาโคร</h1>
+        <a class="back" href="{{ url_for('home') }}">← กลับแดชบอร์ด</a>
+    </div>
+    <div class="sub">ข้อมูลจริงจากแหล่ง: Yahoo Finance / FRED / ForexFactory / Google News — อัปเดต {{ d.fetched_thai }} (ไทย) รีเฟรชอัตโนมัติทุก 2 นาที</div>
+
+    {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
+
+    <div class="card">
+        <h2>ราคา / อัตราผลตอบแทน</h2>
+        <div class="pxgrid">
+            {% for k in ['xauusd','dxy','us10y'] %}
+            {% set p = d.prices.get(k) or {} %}
+            <div class="px">
+                <div class="lbl">{{ d.symbol_names.get(k, k) }}</div>
+                {% if p.price %}
+                <div class="val">{{ p.price }}</div>
+                <div class="chg {{ 'up' if (p.chg_pct or 0) > 0 else 'dn' if (p.chg_pct or 0) < 0 else 'mid' }}">
+                    {{ '%+.2f'|format(p.chg or 0) }} ({{ '%+.2f'|format(p.chg_pct or 0) }}%) วันนี้
+                </div>
+                {% else %}<div class="val mid">ไม่มีข้อมูล</div>{% endif %}
+            </div>
+            {% endfor %}
+            {% set ry = d.fred.get('real_yield') or {} %}
+            <div class="px">
+                <div class="lbl">US10Y Real Yield (DFII10)</div>
+                {% if ry.value %}
+                <div class="val">{{ ry.value }}%</div>
+                <div class="chg mid">{{ ry.date }} · {{ '%+.2f'|format(ry.chg_5d or 0) }} ใน 5 วัน</div>
+                {% else %}<div class="val mid">ไม่มีข้อมูล</div>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>ตอบ 5 คำถามก่อนตีความราคาทอง</h2>
+        <div class="sigsum">{{ d.signal_summary }}</div>
+        {% for q in d.five_questions %}
+        <div class="qrow"><div class="dot {{ q.sig }}"></div><div class="q">{{ q.q }}</div><div class="a">{{ q.a }}</div></div>
+        {% endfor %}
+        <div class="err" style="color:#9b8477">เขียว=หนุนทอง แดง=กดทอง ส้ม=นิ่ง เทา=ต้องดูเองที่ลิงก์ — นี่คือข้อมูลประกอบ ไม่ใช่คำสั่งเทรด</div>
+    </div>
+
+    <div class="card">
+        <h2>ปฏิทินเศรษฐกิจ USD (เวลาไทย) {{ '(cache เก่า)' if d.calendar.stale }}</h2>
+        {% if d.calendar.today %}
+        <table><tr><th>เวลา</th><th>ข่าววันนี้</th><th>Impact</th><th>Forecast</th><th>Previous</th></tr>
+        {% for e in d.calendar.today %}
+        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
+        {% endfor %}</table>
+        {% else %}<div class="layer">วันนี้ไม่มีข่าวสำคัญ USD</div>{% endif %}
+        {% if d.calendar.upcoming %}
+        <table style="margin-top:10px"><tr><th>เวลา</th><th>ข่าวที่จะมา</th><th>Impact</th><th>Forecast</th><th>Previous</th></tr>
+        {% for e in d.calendar.upcoming %}
+        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
+        {% endfor %}</table>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>พาดหัวข่าวทองล่าสุด (Google News)</h2>
+        {% for h in d.headlines %}
+        <div class="hl"><a href="{{ h.link }}" target="_blank" rel="noopener">{{ h.title }}</a>
+            <div class="src">{{ h.source }} · {{ h.thai }}</div></div>
+        {% else %}<div class="layer">ดึง headline ไม่ได้ชั่วคราว</div>{% endfor %}
+    </div>
+
+    <div class="card">
+        <h2>แหล่งที่ต้องเปิดดูเอง (ไม่มี API ฟรีที่เชื่อได้)</h2>
+        <div class="links">
+            {% for name, url in d.links.items() %}<a href="{{ url }}" target="_blank" rel="noopener">{{ name }}</a>{% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>กรอบอ่านตลาด 3 ชั้น (แผนของนิน)</h2>
+        <div class="layer"><b>Macro Layer:</b> {{ d.layers.macro }}</div>
+        <div class="layer"><b>Flow Layer:</b> {{ d.layers.flow }}</div>
+        <div class="layer"><b>Technical Layer:</b> {{ d.layers.technical }}</div>
+        <table style="margin-top:8px">
+            <tr><th>สิ่งที่ติดตาม</th><th>ความถี่</th><th>ความสำคัญ</th></tr>
+            {% for w in d.watchlist %}<tr><td>{{ w[0] }}</td><td>{{ w[1] }}</td><td>{{ w[2] }}</td></tr>{% endfor %}
+        </table>
+    </div>
+
+    {% if d.errors %}<div class="card"><h2>แหล่งที่ดึงไม่สำเร็จ (ใช้ข้อมูลเก่า/ไม่มี)</h2>{% for e in d.errors %}<div class="err">· {{ e }}</div>{% endfor %}</div>{% endif %}
+
+    <div class="foot">{{ d.note }} — ตัวเลข yield จาก Yahoo/FRED อาจล่าสุดไม่ตรงกระแสนาทีต่อนาที ให้ใช้เป็นกรอบทิศทาง</div>
+    {% endif %}
+</div>
 </body>
 </html>
 """
@@ -1298,6 +1467,28 @@ def update_order_config(asset_key):
 def healthz():
     """health check เบาๆ สำหรับ Render — ตอบทันทีไม่วาดกราฟ กัน health check timeout ตอน deploy"""
     return "ok " + os.environ.get("RENDER_GIT_COMMIT", "")[:7], 200
+
+@app.route('/api/market', methods=['GET'])
+def api_market():
+    """ข้อมูล macro/ข่าวทองจากแหล่งจริง — Midas อ่านผ่าน tool get_market_intel (ชุดเดียวกับหน้า /news)"""
+    if market_intel is None:
+        return jsonify({"status": "error", "message": "market_intel module not loaded"}), 500
+    try:
+        return jsonify(market_intel.get_market_intel())
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)[:300]}), 500
+
+@app.route("/news")
+def market_news():
+    d, err = {}, None
+    if market_intel is None:
+        err = "โมดูล market_intel โหลดไม่ได้บน server (ไฟล์อาจยังไม่ deploy)"
+    else:
+        try:
+            d = market_intel.get_market_intel()
+        except Exception as e:
+            err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
+    return render_template_string(NEWS_TEMPLATE, d=d, err=err)
 
 @app.route("/")
 def home():
