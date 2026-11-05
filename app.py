@@ -40,8 +40,8 @@ def check_access():
         return None
     if path.startswith("/telegram-webhook"):
         return None  # Telegram server เรียกเอง ใส่ auth ไม่ได้
-    if path in ("/healthz", "/claspauth"):
-        return None  # Render health check / ลิงก์ยืนยัน Google ของวิน ต้องผ่านได้โดยไม่ต้อง auth
+    if path == "/healthz":
+        return None  # Render health check ต้องผ่านได้โดยไม่ต้อง auth
     # Midas/บอท ส่ง X-Api-Key มาแทน basic auth ได้ทุก route (ฟอร์ม POST ด้วย)
     if API_KEY and request.headers.get("X-Api-Key") == API_KEY:
         return None
@@ -1772,12 +1772,6 @@ def healthz():
     """health check เบาๆ สำหรับ Render — ตอบทันทีไม่วาดกราฟ กัน health check timeout ตอน deploy"""
     return "ok " + os.environ.get("RENDER_GIT_COMMIT", "")[:7], 200
 
-CLASP_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A8888&access_type=offline&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fscript.deployments+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fscript.projects+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fscript.webapp.deploy+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.metadata.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fservice.management+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Flogging.read+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform&state=HIptp7P9igaRvkSLJqPepxfun3x3jGzI&code_challenge=SU8xUT458EHsV_u2YTiBlXQk293Uid0KswOvIzEQcnY&code_challenge_method=S256&response_type=code&client_id=1072944905499-vm2v2i5dvn0a0d2o4ca36i1vge8cvbn0.apps.googleusercontent.com"
-
-@app.route("/claspauth")
-def claspauth():
-    """ลิงก์สั้นให้นินกดยืนยัน Google OAuth ของ clasp บน VPS — เด้งไปหน้า consent ของ Google"""
-    return redirect(CLASP_AUTH_URL)
 
 def _tech_state():
     """ผลวิเคราะห์ multi-TF ที่บอท push ขึ้นมา (tech_intel บน VPS) — None ถ้าบอทยังไม่ส่ง"""
