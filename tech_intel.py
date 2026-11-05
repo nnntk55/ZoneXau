@@ -346,6 +346,85 @@ def _flow_read(tfs, zones, price):
                      f"(ต้อง H4 ขาเดียว + stoch D1 ไหลทางเดียวยังไม่สุด) ระวัง sideway/พักฐาน")}
 
 
+CALL_MAX_AGE_H = 72   # คำทำนายเกิน 72 ชม. = expired ไม่นับถูก/ผิด
+
+def track_calls(tech, chart_dir="charts"):
+    """วงจรพิสูจน์: จดคำทำนายจาก flow_read แล้วให้คะแนนกับราคาจริงทุกรอบ
+    hit = ราคาถึงโซนเป้าหมาย / miss = ราคาหลุดกลับไปชนโซนฝั่งตรงข้ามก่อน / flipped = บทอ่านสลับทิศก่อนถึงเป้า
+    คืน call_stats สรุป accuracy จริง — เลขนี้คือตัววัดว่าบทวิเคราะห์ของระบบแม่นแค่ไหน"""
+    import os, json, time
+    from datetime import datetime, timezone, timedelta
+    fp = os.path.join(chart_dir, "call_log.json")
+    try:
+        with open(fp, encoding="utf-8") as f:
+            rows = json.load(f)
+    except Exception:
+        rows = []
+    rows = [r for r in rows if isinstance(r, dict)]
+    now = time.time()
+    fr = tech.get("flow_read") or {}
+    tfs = tech.get("tfs") or {}
+    price = next((v.get("price") for v in tfs.values() if v.get("price")), None)
+    if not price:
+        return None
+    # ---- 1) ให้คะแนนคำทำนายที่ยังเปิดอยู่ ----
+    for c in rows:
+        if c.get("status") != "open":
+            continue
+        if c.get("dir") == "up":
+            if price >= c["target_edge"]:
+                c["status"], c["exit_price"], c["exit_t"] = "hit", price, now
+            elif price <= c["barrier"]:
+                c["status"], c["exit_price"], c["exit_t"] = "miss", price, now
+        else:
+            if price <= c["target_edge"]:
+                c["status"], c["exit_price"], c["exit_t"] = "hit", price, now
+            elif price >= c["barrier"]:
+                c["status"], c["exit_price"], c["exit_t"] = "miss", price, now
+        if c["status"] == "open" and now - c["t"] > CALL_MAX_AGE_H * 3600:
+            c["status"], c["exit_price"], c["exit_t"] = "expired", price, now
+    # ---- 2) บทอ่านสลับทิศ = คำทำนายเดิมพลาด (ทิศไม่ยืน) ----
+    direction = fr.get("direction")
+    open_c = next((c for c in rows if c.get("status") == "open"), None)
+    if open_c and direction and open_c["dir"] != direction:
+        open_c["status"], open_c["exit_price"], open_c["exit_t"], open_c["flip_reason"] = \
+            "flipped", price, now, f"flow_read สลับเป็น {direction}"
+        open_c = None
+    # ---- 3) ออกคำทำนายใหม่เฉพาะเมื่อไม่มีที่เปิดอยู่ ----
+    if direction and not open_c and fr.get("next_zone"):
+        z = fr["next_zone"]
+        zones = tech.get("zones") or []
+        if direction == "up":
+            opp = sorted((x for x in zones if x["upper"] < price), key=lambda x: -x["upper"])
+            target_edge, barrier = z["lower"], (opp[0]["upper"] * 0.999 if opp else price * 0.985)
+        else:
+            opp = sorted((x for x in zones if x["lower"] > price), key=lambda x: x["lower"])
+            target_edge, barrier = z["upper"], (opp[0]["lower"] * 1.001 if opp else price * 1.015)
+        rows.insert(0, {"t": now, "thai": fr.get("_thai", ""), "dir": direction,
+                        "entry_price": price, "target_edge": target_edge, "barrier": round(barrier, 2),
+                        "target": {"kind": z["kind"], "tf": z["tf"], "lower": z["lower"], "upper": z["upper"]},
+                        "status": "open"})
+        rows = rows[:300]
+    try:
+        os.makedirs(chart_dir, exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+    # ---- 4) สรุปสถิติ ----
+    cnt = {s: sum(1 for c in rows if c.get("status") == s) for s in ("hit", "miss", "flipped", "expired", "open")}
+    decided = cnt["hit"] + cnt["miss"] + cnt["flipped"]
+    acc = round(cnt["hit"] / decided * 100, 1) if decided else None
+    th = timezone(timedelta(hours=7))
+    recent = [{"dir": c["dir"], "เข้า": round(c["entry_price"], 1), "เป้า": round(c["target_edge"], 1),
+               "ผล": c["status"], "เวลา": datetime.fromtimestamp(c["t"], th).strftime("%d/%m %H:%M")}
+              for c in rows[:8]]
+    return {"จำนวน": len(rows), "hit": cnt["hit"], "miss": cnt["miss"], "flipped": cnt["flipped"],
+            "expired": cnt["expired"], "open": cnt["open"], "accuracy_pct": acc,
+            "กำลังรอผล": rows[0] if cnt["open"] else None, "ล่าสุด": recent,
+            "นิยาม": "hit=ถึงโซนเป้า miss=หลุดกลับฝั่งตรงข้าม flipped=บทอ่านสลับทิศก่อนถึงเป้า expired=เกิน 72 ชม."}
+
+
 def _pivots(frames):
     """Classic floor-trader pivot จากแท่งปิดแล้ว (prev day / prev week) — สูตรมาตรฐาน โปร่งใสทุกตัว"""
     out = {}

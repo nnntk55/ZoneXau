@@ -1412,6 +1412,29 @@ TECH_BODY = """
     </div>
     {% endif %}
 
+    {% if t.get('flow_read') %}
+    <div class="card">
+        <h2>บทอ่านทิศ (flow read)</h2>
+        <div style="font-size:14px;line-height:1.7">{{ t.flow_read.read }}</div>
+        {% if t.flow_read.next_zone %}<div class="err" style="color:#9b8477">โซนเป้าหมาย: {{ t.flow_read.next_zone.kind }} {{ t.flow_read.next_zone.tf }} {{ '{:,.0f}'.format(t.flow_read.next_zone.lower) }}–{{ '{:,.0f}'.format(t.flow_read.next_zone.upper) }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if t.get('call_stats') %}
+    <div class="card">
+        <h2>สถิติความแม่นของบทอ่าน (call tracking)</h2>
+        <div style="font-size:14px;margin-bottom:8px">accuracy: <b>{{ t.call_stats.accuracy_pct or '—' }}%</b>
+            (hit {{ t.call_stats.hit }} / miss {{ t.call_stats.miss }} / flip {{ t.call_stats.flipped }} / หมดอายุ {{ t.call_stats.expired }} / รอผล {{ t.call_stats.open }})</div>
+        {% if t.call_stats['ล่าสุด'] %}
+        <table><tr><th>ทิศ</th><th>เข้า</th><th>เป้า</th><th>ผล</th><th>เวลา</th></tr>
+        {% for c in t.call_stats['ล่าสุด'] %}
+        <tr><td>{{ c.dir }}</td><td>{{ '{:,.0f}'.format(c['เข้า']) }}</td><td>{{ '{:,.0f}'.format(c['เป้า']) }}</td><td>{{ c['ผล'] }}</td><td>{{ c['เวลา'] }}</td></tr>
+        {% endfor %}</table>
+        {% endif %}
+        <div class="err" style="color:#9b8477">{{ t.call_stats['นิยาม'] }} — เลขนี้คือตัวพิสูจน์จริงว่าบทวิเคราะห์แม่นแค่ไหน (ต้องมีอย่างน้อย ~30-50 calls ถึงสรุปได้)</div>
+    </div>
+    {% endif %}
+
     {% if t.get('zones') %}
     <div class="card">
         <h2>โซนสำคัญ — แท่งสุดขั้วสวิง · Supply/Demand · FVG · Liquidity Sweep (ตรวจจับอัลกอริทึม ไม่ใช่ order block ฝันลอย)</h2>

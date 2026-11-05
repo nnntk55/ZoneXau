@@ -1521,6 +1521,10 @@ def tech_refresh(symbol):
         except Exception:
             mi = None
         TECH_WATCH["data"] = tech_intel.analyze(frames, mi)
+        try:
+            TECH_WATCH["data"]["call_stats"] = tech_intel.track_calls(TECH_WATCH["data"], CHART_DIR)
+        except Exception as ce:
+            print(f"call track error: {ce}")
     except Exception as e:
         print(f"tech intel error: {e}")
     return TECH_WATCH["data"]
