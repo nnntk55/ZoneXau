@@ -91,12 +91,12 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 หน้าที่ของคุณ:
 - พี่วิเคราะห์ทิศทางเอง คุณแปลคำสั่งเป็นการตั้งค่าจริงผ่าน tools
 - asset: xau(ทอง) us(ดาวโจนส์) oil(น้ำมัน) btc(บิทคอยน์) | set: long=เทรดยาว short=เทรดสั้น
-- direction LOW=เฝ้าโซนล่างหาจุด BUY, HIGH=เฝ้าโซนบนหาจุด SELL (พี่พูด "sell" = HIGH)
+- direction BUY=เฝ้าโซนล่างหาจุดซื้อ, SELL=เฝ้าโซนบนหาจุดขาย (พี่พูด "ขาลง/sell" = SELL)
 - stage engine จะยิงออเดอร์เองเมื่อ auto_order=on — คุณไม่ต้องสั่งยิงเอง แค่ตั้งค่าให้ถูก
 - auto_order=on ยิงเองเฉพาะสัญญาณที่ตามเทรนด์ (trend_tf บนเว็บ): BUY ต้องเทรนด์ UP, SELL ต้องเทรนด์ DOWN — สวนเทรนด์หรือ MIXED บอทแค่แจ้งเตือนให้นินจับจังหวะเข้าเอง แล้วกลับไปสแกนอีกฝั่ง; stage ที่ตั้ง TF 1h ต้องให้ Stoch แตะ 0/100 (TF อื่น 20/80)
 - default ของพี่คือ "เทรดอัตโนมัติ" — เมื่อพี่สั่งให้เทรดให้ตั้ง auto_order=true เสมอ ยกเว้นพี่บอกชัดว่า "ถามก่อน" ค่อยตั้ง false
 - คอนเวนชัน stage ที่พี่ใช้: เทรดสั้น = ["off","off","15m","5m"] (S3 เฝ้า 15m, S4 เฝ้า 5m, S5 ยิงออเดอร์); เทรดยาว = ["4h","1h","15m","5m"] — ใช้เฉพาะตอนพี่สั่งตั้งชุดกว้างๆ แบบไม่ระบุ stage (เช่น "ตั้งเทรดสั้นทอง") เท่านั้น
-- แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; หลายช่วง เช่น "กลางวัน 10-13 กับกลางคืน 18 ถึงเที่ยงคืน" = window "10:00-13:00,18:00-23:59" (คั่นด้วย , ใส่ทุกช่วงที่พี่บอกในครั้งเดียว ค่าใหม่แทนค่าเดิมทั้งหมด); "ช่วงละ N ไม้" / "แบ่งช่วง ช่วงละ 1" = per_window N (ระบบตั้ง per_day = N × จำนวนช่วงให้เอง); "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction HIGH (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
+- แปลภาษาพี่เป็นค่าตั้ง: "วันละ N ไม้" = per_day N; "สี่โมงเย็นเป็นต้นไป" = window "16:00-23:59"; หลายช่วง เช่น "กลางวัน 10-13 กับกลางคืน 18 ถึงเที่ยงคืน" = window "10:00-13:00,18:00-23:59" (คั่นด้วย , ใส่ทุกช่วงที่พี่บอกในครั้งเดียว ค่าใหม่แทนค่าเดิมทั้งหมด); "ช่วงละ N ไม้" / "แบ่งช่วง ช่วงละ 1" = per_window N (ระบบตั้ง per_day = N × จำนวนช่วงให้เอง); "sl 2000/tp 2000" = sl_pips/tp_pips; "ขา sell" = direction SELL (เซ็ตผ่าน set_direction); ระดับราคาที่พี่กำหนดเป็นแนว = add_srlevel
 - แผนโซน/ระยะยาว: "โซน 3500-3975" = zone_low 3500 + zone_high 3975 (ราคาทะลุขอบ → บอทหยุดเอง+แจ้งกลับมาให้วางแผนใหม่); "ภายใน 3 วัน/ถึงวันที่ 5" = until 'YYYY-MM-DD' (วันนี้+N หรือวันที่กำหนด เลยแล้วบอทหยุด); "ทั้งอาทิตย์" = until วันอาทิตย์นี้ — ตั้งทุกอย่างใน set_stage_plan ครั้งเดียวได้
 - ระยะห้ามเข้า: "ไม่เข้าเมื่อใกล้แนว 2000 pip/20 จุด" = min_room หน่วยราคา (ทอง 2000pip = $20 → min_room 20) — บอทจะไม่ยิง BUY เมื่อราคาใกล้แนวต้านเกินไป และไม่ยิง SELL เมื่อใกล้แนวรับเกินไป เพราะไม่มีระยะให้ TP
 - lot อัตโนมัติ: พี่ให้คำนวณเอง = ตั้ง risk_pct ในแผน (เช่น 30) — บอทคิด lot สดจาก equity จริงตอนยิงทุกไม้ (compounding โตตามพอร์ท); ใช้ calc_lot เช็คตัวเลขก่อนตั้งเสมอ — พี่กำหนด risk% รายสัปดาห์
@@ -266,7 +266,7 @@ def summarize_set(s, set_key):
         "เปิด": s.get("is_active", True),
         "พักวันนี้": s.get("auto_paused_today", False),
         "stage": s.get("current_stage", 1),
-        "direction": s.get("active_direction", "LOW"),
+        "direction": "BUY" if s.get("active_direction", "LOW") == "LOW" else "SELL",
         "stage_tfs": s.get("stage_tfs"),
         "s5": s.get("s5_enabled", True),
         "sr": s.get("sr_enabled", False),
@@ -291,7 +291,7 @@ def status_recap(asset, set_key):
     opened = [f"S{i + 1}" for i, tf in enumerate(tfs) if str(tf).lower() != "off"]
     if s.get("s5_enabled", True):
         opened.append("S5")
-    parts = [on, str(s.get("active_direction", "LOW")),
+    parts = [on, "BUY" if s.get("active_direction", "LOW") == "LOW" else "SELL",
              "เปิด " + "/".join(opened) if opened else "ไม่ได้เปิด stage",
              "ออโต้" if s.get("auto_order") else "ถามก่อน"]
     for a in cfg.get("alerts") or []:
@@ -358,7 +358,8 @@ def tool_set_direction(asset, set_key, direction):
         "is_active": True,
     }
     ok = dash_patch(asset, fields)
-    return {"ok": ok, "ตั้งฝั่ง": direction, "ชุด": set_key, "กลับไป stage": tgt.get("current_stage")}
+    return {"ok": ok, "ตั้งฝั่ง": "BUY" if direction == "LOW" else "SELL",
+            "ชุด": set_key, "กลับไป stage": tgt.get("current_stage")}
 
 def tool_set_stage_plan(asset, set_key, stage_tfs=None, s5=None, sr=None, auto=None, lot=None, tp=None, sl=None,
                         per_day=None, window=None, zone_low=None, zone_high=None, until=None, min_room=None, risk_pct=None,
@@ -847,7 +848,8 @@ def tool_view_chart(asset, tf):
 # ชื่อ tool -> ฟังก์ชัน (แปลงชื่อ args ให้ตรง)
 TOOL_IMPL = {
     "get_status":   lambda a: tool_get_status(a["asset"]),
-    "set_direction":lambda a: tool_set_direction(a["asset"], a.get("set", "long"), a["direction"].upper()),
+    "set_direction":lambda a: tool_set_direction(a["asset"], a.get("set", "long"),
+                                               "LOW" if a["direction"].upper() in ("BUY", "LOW") else "HIGH"),
     "set_stage_plan": lambda a: tool_set_stage_plan(a["asset"], a.get("set", "long"),
                             a.get("stage_tfs"), a.get("s5"), a.get("sr"), a.get("auto_order"),
                             a.get("lot"), a.get("tp_pips"), a.get("sl_pips"), a.get("per_day"), a.get("window"),
@@ -894,10 +896,10 @@ GEMINI_TOOLS = [{
     "function_declarations": [
         {"name": "get_status", "description": "อ่านสถานะปัจจุบันของคู่เงิน (ราคา stage direction ค่าตั้งทั้งหมดทั้ง 2 ชุด)",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}, "required": ["asset"]}},
-        {"name": "set_direction", "description": "ล็อคฝั่งเทรด: LOW=เฝ้าโซนล่าง(BUY) HIGH=เฝ้าโซนบน(SELL) — รีเซ็ต stage ให้ด้วย",
+        {"name": "set_direction", "description": "ล็อคฝั่งเทรด: BUY=เฝ้าโซนล่างหาจุดซื้อ SELL=เฝ้าโซนบนหาจุดขาย — รีเซ็ต stage ให้ด้วย",
          "parameters": {"type": "object", "properties": {
              "asset": asset_param(), "set": set_param(),
-             "direction": {"type": "string", "enum": ["LOW", "HIGH"]}},
+             "direction": {"type": "string", "enum": ["BUY", "SELL"]}},
             "required": ["asset", "direction"]}},
         {"name": "set_stage_plan", "description": "ตั้งแผน stage ของชุด: TF ที่เฝ้าในแต่ละ stage, S5, S/R filter, auto order, lot/tp/sl",
          "parameters": {"type": "object", "properties": {

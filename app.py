@@ -135,6 +135,15 @@ def to_bool(val, default=True):
         return default
     return bool(val)
 
+def _dir_label(v):
+    """แสดงผล: LOW=BUY (เฝ้าโซนล่างหาจุดซื้อ) HIGH=SELL (เฝ้าโซนบนหาจุดขาย) — ค่าใน state ยังเก็บ LOW/HIGH เดิม"""
+    return "BUY" if v == "LOW" else "SELL" if v == "HIGH" else (v or "-")
+
+
+def _mode_label(v):
+    return (v or "AUTO").replace("LOW", "BUY").replace("HIGH", "SELL")
+
+
 def default_set2():
     """ชุดเทรดสั้น — field เหมือนชุดหลักเป๊ะ"""
     return {
@@ -811,7 +820,7 @@ HTML_TEMPLATE = """
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'short')" id="dir-btn-{{ key }}-short"
                         class="badge toggle-btn {% if s2.get('active_direction', 'LOW') == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                            {% if s2.get('active_direction', 'LOW') == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                            {% if s2.get('active_direction', 'LOW') == 'LOW' %}🟢 BUY{% else %}🔴 SELL{% endif %}
                         </button>
                         {% set stg2 = s2.get('current_stage', 1)|int(1) %}
                         <span class="badge badge-stage{{ stg2 if stg2 in [1,2,3,4,5] else 1 }}" id="stage-badge-{{ key }}-short">Stage {{ stg2 }}</span>
@@ -882,10 +891,10 @@ HTML_TEMPLATE = """
                         </button>
                         <button type="button" onclick="toggleAssetStatus('{{ key }}', 'direction', 'long')" id="dir-btn-{{ key }}-long"
                         class="badge toggle-btn {% if asset.state.active_direction == 'LOW' %}badge-dir-low{% else %}badge-dir-high{% endif %}">
-                            {% if asset.state.active_direction == 'LOW' %}🟢 LOW{% else %}🔴 HIGH{% endif %}
+                            {% if asset.state.active_direction == 'LOW' %}🟢 BUY{% else %}🔴 SELL{% endif %}
                         </button>
                         {% if asset.state.custom_mode %}
-                            <span class="badge badge-custom" id="stage-badge-{{ key }}-long">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ asset.state.custom_dir }}</span>
+                            <span class="badge badge-custom" id="stage-badge-{{ key }}-long">🎯 Custom: {{ asset.state.custom_tf|upper }} {{ 'BUY' if asset.state.custom_dir == 'LOW' else 'SELL' }}</span>
                         {% else %}
                             {% set stg1 = asset.state.current_stage|int(1) %}
                             <span class="badge badge-stage{{ stg1 if stg1 in [1,2,3,4,5] else 1 }}" id="stage-badge-{{ key }}-long">Stage {{ stg1 }}</span>
@@ -1004,10 +1013,10 @@ HTML_TEMPLATE = """
                     } else if (actionType === 'direction') {
                         if (data.new_val === 'LOW') {
                             btn.className = "badge toggle-btn badge-dir-low";
-                            btn.innerText = "🟢 LOW";
+                            btn.innerText = "🟢 BUY";
                         } else {
                             btn.className = "badge toggle-btn badge-dir-high";
-                            btn.innerText = "🔴 HIGH";
+                            btn.innerText = "🔴 SELL";
                         }
                     }
                 }
@@ -1555,9 +1564,9 @@ def send_single_summary_text_only(asset_key, chat_id):
         st = asset["state"]
         status_str = "🟢 ON" if st.get("is_active", True) else "🔴 OFF"
         if st.get("custom_mode"):
-            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
+            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({_dir_label(st['custom_dir'])})"
         else:
-            mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
+            mode_desc = f"Stage {st['current_stage']} | โหมด: {_dir_label(st['active_direction'])} ({_mode_label(st['target_mode'])})"
 
         sr_line = ""
         if st.get("sr_enabled"):
@@ -1585,9 +1594,9 @@ def send_summary_report(asset_key, chat_id):
         dfs = fetch_all_data(asset["symbol"])
         status_str = "🟢 ON" if st.get("is_active", True) else "🔴 OFF"
         if st.get("custom_mode"):
-            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({st['custom_dir']})"
+            mode_desc = f"🎯 กำลังติดตามพิเศษ: {st['custom_tf'].upper()} ({_dir_label(st['custom_dir'])})"
         else:
-            mode_desc = f"Stage {st['current_stage']} | โหมด: {st['active_direction']} ({st['target_mode']})"
+            mode_desc = f"Stage {st['current_stage']} | โหมด: {_dir_label(st['active_direction'])} ({_mode_label(st['target_mode'])})"
 
         sr_line = ""
         if st.get("sr_enabled"):
