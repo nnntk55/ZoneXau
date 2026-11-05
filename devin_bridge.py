@@ -212,8 +212,12 @@ LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงา
                    "ถ้าขึ้นว่าไม่มี key ค่อยส่ง cloud) ยกเว้นงานที่เครื่องนี้ทำไม่ได้จริง เช่น ตั้งค่า env บน Render, "
                    "clasp/Apps Script, ทดสอบหน้าเว็บด้วย browser/แคปจอ, ต้องใช้ secret หรือ integration ที่เครื่องนี้ไม่มี "
                    "— กรณีนั้นทำส่วนที่ทำได้ก่อน แล้วจบคำตอบด้วยบรรทัด [[CLOUD: สรุปสิ่งที่ต้องให้วินฝั่ง cloud ทำต่อ + สิ่งที่ทำไปแล้ว]] "
-                   "bridge จะส่งต่อให้อัตโนมัติ ห้ามใช้ถ้าทำเองได้] ")
-LOCAL_RULES_V = 3
+                   "bridge จะส่งต่อให้อัตโนมัติ ห้ามใช้ถ้าทำเองได้] "
+                   "[ห้ามรันสคริปต์ที่วนไม่จบ (บอท/plutus.py/assistant.py/flask/server) แบบรอผลใน shell — คำสั่งจะไม่จบ "
+                   "วินค้างจนหมดเวลาและนินไม่ได้คำตอบเลย ถ้านินให้เปิดบอท ให้เปิดหน้าต่างแยกแบบไม่รอ เช่น "
+                   "`start \"\" /D <โฟลเดอร์ที่ loop_*.bat ตัวอื่นรันอยู่> cmd /c loop_xxx.bat` แล้วตอบทันที "
+                   "ทดสอบสคริปต์ให้ใส่ timeout สั้นเสมอ] ")
+LOCAL_RULES_V = 4
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0, "proc": None, "notified": False}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
@@ -415,6 +419,9 @@ def local_tick(st):
             LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
             send("งานก่อนหน้าค้างเกินเวลา วินตัดทิ้งแล้ว ทำข้อความถัดไปต่อเลย")
             return
+        if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
+            LOCAL["pings"] = LOCAL.get("pings", 0) + 1
+            send(f"วินยังทำงานอยู่ ({_busy_min()} นาที) ยังไม่หาย — /status ดูสถานะ  /stop หยุดงานนี้")
         if time.time() - LOCAL.get("typing", 0) > 5:
             LOCAL["typing"] = time.time()
             tg("sendChatAction", chat_id=CHAT, action="typing")
@@ -424,7 +431,7 @@ def local_tick(st):
         return
     st["local_q"] = []
     save_state(st)
-    LOCAL["busy"] = True; LOCAL["started"] = time.time()
+    LOCAL["busy"] = True; LOCAL["started"] = time.time(); LOCAL["pings"] = 0
     midas = any(MIDAS_TAG in x for x in q)
     threading.Thread(target=local_run, args=(st, "\n\n".join(q), midas), daemon=True).start()
 
