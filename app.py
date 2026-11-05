@@ -1398,6 +1398,20 @@ TECH_BODY = """
     </div>
     {% endif %}
 
+    {% if t.get('pivots') %}
+    <div class="card">
+        <h2>Classic Pivot (สูตรมาตรฐานจากแท่งปิดแล้ว)</h2>
+        <table><tr><th>ช่วง</th><th>S3</th><th>S2</th><th>S1</th><th>P</th><th>R1</th><th>R2</th><th>R3</th></tr>
+        {% for lbl, p in t.pivots.items() %}
+        <tr><td>{{ lbl }}<div class="src" style="font-size:0.65rem;color:#9b8477">{{ p.src }}</div></td>
+            <td>{{ '{:,.0f}'.format(p.S3) }}</td><td>{{ '{:,.0f}'.format(p.S2) }}</td><td>{{ '{:,.0f}'.format(p.S1) }}</td>
+            <td><b>{{ '{:,.0f}'.format(p.P) }}</b></td>
+            <td>{{ '{:,.0f}'.format(p.R1) }}</td><td>{{ '{:,.0f}'.format(p.R2) }}</td><td>{{ '{:,.0f}'.format(p.R3) }}</td></tr>
+        {% endfor %}</table>
+        <div class="err" style="color:#9b8477">ราคาเหนือ P = bias วันนี้เอียงขึ้น / ใต้ P = เอียงลง — R1-3/S1-3 คือเป้าเด้ง-ทะลุที่ตลาดเฝ้าด้วยกัน เทียบกับเส้น TC ของ Exness ได้</div>
+    </div>
+    {% endif %}
+
     {% if t.get('levels') %}
     <div class="card">
         <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>

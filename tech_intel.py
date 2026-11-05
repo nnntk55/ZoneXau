@@ -178,6 +178,22 @@ def _levels(frames, price):
     return out[:10]
 
 
+def _pivots(frames):
+    """Classic floor-trader pivot จากแท่งปิดแล้ว (prev day / prev week) — สูตรมาตรฐาน โปร่งใสทุกตัว"""
+    out = {}
+    for key, label in (("1d", "daily"), ("1w", "weekly")):
+        df = frames.get(key)
+        if df is None or len(df) < 2:
+            continue
+        h, l, c = float(df["High"].iloc[-2]), float(df["Low"].iloc[-2]), float(df["Close"].iloc[-2])
+        p = (h + l + c) / 3
+        out[label] = {"P": round(p, 2), "R1": round(2 * p - l, 2), "S1": round(2 * p - h, 2),
+                      "R2": round(p + (h - l), 2), "S2": round(p - (h - l), 2),
+                      "R3": round(h + 2 * (p - l), 2), "S3": round(l - 2 * (h - p), 2),
+                      "src": f"prev {key} H/L/C {h:,.0f}/{l:,.0f}/{c:,.0f}"}
+    return out
+
+
 def _setups(tfs, levels, price, bias_label, macro_bull, macro_bear):
     """Entry Setup Engine — ต้องบอก NO HIGH-QUALITY SETUP — WAIT ได้เสมอ (ห้ามฝืนหา setup)"""
     h4 = tfs.get("4h") or {}
@@ -239,10 +255,17 @@ def analyze(frames, mi=None):
     mbr = sum(1 for q in qs if q.get("sig") == "bear")
     bias = _daily_bias(tfs, mb, mbr)
     price = next((v["price"] for k, v in tfs.items() if v.get("price")), None)
+    pivots = _pivots(frames)
     levels = _levels(frames if "1mo" not in frames else {("mn" if k == "1mo" else k): v for k, v in frames.items()}, price) if price else []
+    if price and pivots.get("daily"):  # เอา pivot หลักเข้าตารางแนวด้วย ให้จัดอันดับร่วมกัน
+        pv = pivots["daily"]
+        for nm, kind in (("P", "pivot"), ("R1", "resistance"), ("S1", "support")):
+            levels.append({"name": f"daily {nm}", "price": pv[nm], "tf": "D1", "kind": kind,
+                           "dist_pct": round(abs(pv[nm] - price) / price * 100, 2)})
+        levels.sort(key=lambda x: x["dist_pct"])
     setups = _setups(tfs, levels, price or 0, bias["label"], mb, mbr) if price else []
     return {"fetched_thai": datetime.now(th).strftime("%d/%m %H:%M"),
             "tfs": tfs, "missing_tfs": missing, "daily_bias": bias,
-            "levels": levels, "setups": setups,
+            "levels": levels, "pivots": pivots, "setups": setups,
             "volatility": (tfs.get("1h") or {}).get("atr_pct"),
             "note": "วิเคราะห์จากแท่ง MT5 จริง — แผนเทรดเป็นแนวทางประเมิน ไม่ใช่คำสั่งยิงออเดอร์"}
