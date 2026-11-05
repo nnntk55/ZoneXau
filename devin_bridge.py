@@ -171,11 +171,18 @@ def session_why(s):
 def quota_err(err):
     return "quota" in (err or "").lower() or "limit" in (err or "").lower()
 
-def deliver(st, text):
+def route(st):
+    """auto (ค่าเริ่มต้น) = local ก่อนเสมอ เว้นช่วงที่เพิ่งส่งงานต่อให้ cloud (cloud_until) | /local | /cloud = บังคับ"""
+    mode = st.get("mode") or "auto"
+    if mode in ("local", "cloud"):
+        return mode
+    return "cloud" if time.time() < st.get("cloud_until", 0) else "local"
+
+def deliver(st, text, force_cloud=False):
     """ส่งข้อความถึงวินใน session เดิมเสมอ (session ที่หลับ ส่งข้อความเข้าไปแล้วตื่นเอง)
     เปิด session ใหม่เฉพาะตอน session เดิมหมดโควต้า/หมดอายุจริง หรือยังไม่เคยมี session
     คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่; ส่งไม่เข้าแต่ session ยังดีอยู่ = (False, None, "send_fail") ให้ลองใหม่ทีหลัง"""
-    if st.get("mode") == "local":
+    if not force_cloud and route(st) == "local":
         st.setdefault("local_q", []).append(text)
         return True, None, ""
     sid = st.get("session_id")
@@ -201,6 +208,12 @@ LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "2400"))
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
                  "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
+LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงานเองบนเครื่องนี้ (ถูกกว่า cloud มาก) ยกเว้นงานที่เครื่องนี้ทำไม่ได้จริง เช่น deploy/ตั้งค่า Render, "
+                   "clasp/Apps Script, ทดสอบหน้าเว็บด้วย browser/แคปจอ, ต้องใช้ secret หรือ integration ที่เครื่องนี้ไม่มี "
+                   "— กรณีนั้นทำส่วนที่ทำได้ก่อน แล้วจบคำตอบด้วยบรรทัด [[CLOUD: สรุปสิ่งที่ต้องให้วินฝั่ง cloud ทำต่อ + สิ่งที่ทำไปแล้ว]] "
+                   "bridge จะส่งต่อให้อัตโนมัติ ห้ามใช้ถ้าทำเองได้] ")
+LOCAL_RULES_V = 2
+_CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 
@@ -222,19 +235,35 @@ def local_prepare():
         subprocess.run([git, "pull", "--ff-only", "-q"], cwd=LOCAL_DIR, capture_output=True, timeout=120)
     return ""
 
+def escalate(st, text, why):
+    """โหมด auto: ส่งงานต่อให้ Devin Cloud (main loop ส่งให้ผ่าน cloud_q)"""
+    st.setdefault("cloud_q", []).append(f"[ส่งต่อจากวินฝั่ง local บน VPS — เหตุผล: {why}]\nงานของนิน: {text}")
+
 def local_run(st, text):
-    """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก"""
+    """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก
+    โหมด auto: local พัง หรือวิน local ขอ [[CLOUD: ...]] -> ส่งต่อให้ cloud เอง"""
+    auto = (st.get("mode") or "auto") == "auto"
+    def fail(msg):
+        if auto:
+            escalate(st, text, "local ใช้ไม่ได้: " + msg[:200])
+        else:
+            send(msg)
     try:
         exe = devin_cli()
         if not exe:
-            send("ยังไม่เจอ Devin CLI บนเครื่องนี้ ติดตั้งก่อน (PowerShell: irm https://static.devin.ai/cli/setup.ps1 | iex) แล้วรัน devin auth login หนึ่งครั้ง")
+            fail("ยังไม่เจอ Devin CLI บนเครื่องนี้ ติดตั้งก่อน (PowerShell: irm https://static.devin.ai/cli/setup.ps1 | iex) แล้วรัน devin auth login หนึ่งครั้ง")
             return
         err = local_prepare()
         if err:
-            send("โหมด local เตรียมโฟลเดอร์งานไม่ได้: " + err)
+            fail("โหมด local เตรียมโฟลเดอร์งานไม่ได้: " + err)
             return
         first = not st.get("local_started")
-        prompt = (CONTEXT + LOCAL_CONTEXT + CONTEXT_TAIL + text) if first else text
+        if first:
+            prompt = CONTEXT + LOCAL_CONTEXT + LOCAL_AUTO_RULE + CONTEXT_TAIL + text
+        elif st.get("local_rules_v") != LOCAL_RULES_V:
+            prompt = LOCAL_AUTO_RULE + "\n" + text
+        else:
+            prompt = text
         pf = os.path.join(LOCAL_DIR, "_telegram", "prompt.txt")
         os.makedirs(os.path.dirname(pf), exist_ok=True)
         open(pf, "w", encoding="utf-8").write(prompt)
@@ -250,13 +279,25 @@ def local_run(st, text):
         out = _ANSI.sub("", r.stdout or "").strip()
         er = _ANSI.sub("", r.stderr or "").strip()
         if r.returncode != 0 and ("login" in (out + er).lower() or "auth" in (out + er).lower()):
-            send("Devin CLI ยังไม่ได้ล็อกอิน เปิด PowerShell บนเครื่องนี้แล้วรัน: devin auth login")
+            fail("Devin CLI ยังไม่ได้ล็อกอิน เปิด PowerShell บนเครื่องนี้แล้วรัน: devin auth login")
             return
         if r.returncode == 0:
-            st["local_started"] = True
-        send(out or (f"Devin CLI จบงานแต่ไม่มีคำตอบ (exit {r.returncode}) {er[-500:]}"))
+            st["local_started"] = True; st["local_rules_v"] = LOCAL_RULES_V
+        elif not out:
+            fail(f"Devin CLI จบงานแต่ไม่มีคำตอบ (exit {r.returncode}) {er[-500:]}")
+            return
+        m = _CLOUD_TAG.search(out)
+        if m:
+            out = _CLOUD_TAG.sub("", out).strip()
+        if out:
+            send(out)
+        if m:
+            if auto:
+                escalate(st, text, m.group(1).strip() or "ต้องใช้เครื่องมือฝั่ง cloud")
+            else:
+                send("(งานนี้ต้องใช้ cloud — พิมพ์ /auto หรือ /cloud แล้วสั่งใหม่)")
     except Exception as e:
-        send(f"โหมด local error: {e}")
+        fail(f"โหมด local error: {e}")
     finally:
         LOCAL["busy"] = False
         save_state(st)
@@ -276,6 +317,7 @@ def local_tick(st):
     LOCAL["busy"] = True; LOCAL["started"] = time.time()
     threading.Thread(target=local_run, args=(st, "\n\n".join(q)), daemon=True).start()
 
+CLOUD_HOLD = 1800  # วิ: หลังส่งงานต่อให้ cloud ข้อความถัดไปไปฝั่ง cloud จนเงียบ 30 นาที แล้วกลับมา local
 BATCH_WAIT = 6  # วิ: รอข้อความถัดไปก่อนส่ง ถ้านินพิมพ์หลายข้อความติดกัน
 
 REMINDERS_URL = "https://raw.githubusercontent.com/nnntk55/ZoneXau/main/reminders.json"
@@ -358,7 +400,7 @@ def main():
         return
     st = load_state()
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
-    last_poll = last_rem = retry_at = 0
+    last_poll = last_rem = retry_at = cloud_retry = 0
     last_in = time.time()
     while True:
         try:
@@ -372,7 +414,7 @@ def main():
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 is_voice = bool(msg.get("voice") or msg.get("audio"))
                 if is_voice or msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
-                    att = tg_image_attachment(msg, local=st.get("mode") == "local")
+                    att = tg_image_attachment(msg, local=route(st) == "local")
                     what = "เสียง" if is_voice else "รูป"
                     if att:
                         text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
@@ -384,14 +426,15 @@ def main():
                 if not text:
                     continue
                 if text == "/new":
-                    st["session_id"] = None; st["seen"] = 0; st["local_started"] = False
+                    st["session_id"] = None; st["seen"] = 0; st["local_started"] = False; st["cloud_until"] = 0
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
                     continue
-                if text in ("/local", "/cloud"):
-                    st["mode"] = text[1:]
+                if text in ("/local", "/cloud", "/auto"):
+                    st["mode"] = text[1:]; st["cloud_until"] = 0
                     save_state(st)
-                    send("สลับเป็นโหมด local แล้ว: ใช้ Devin CLI บนเครื่องนี้ (คิดแค่ token) คุยต่อ conversation เดียวกันตลอด กลับไปใช้ cloud พิมพ์ /cloud"
-                         if text == "/local" else "สลับเป็นโหมด cloud แล้ว: ใช้ Devin Cloud session เดิม กลับไป local พิมพ์ /local")
+                    send({"/local": "บังคับโหมด local: ใช้ Devin CLI บน VPS อย่างเดียว (คิดแค่ token) กลับเป็นอัตโนมัติพิมพ์ /auto",
+                          "/cloud": "บังคับโหมด cloud: ใช้ Devin Cloud session เดิมอย่างเดียว กลับเป็นอัตโนมัติพิมพ์ /auto",
+                          "/auto": "โหมดอัตโนมัติ: ใช้ local บน VPS ก่อนเสมอ (ประหยัด) งานที่ต้องใช้ cloud หรือ local ใช้ไม่ได้ วินส่งต่อให้ cloud เอง"}[text])
                     continue
                 # รวมข้อความที่พิมพ์ติดๆ กันเป็นก้อนเดียว ปลุกวินครั้งเดียว (ประหยัดโควต้า)
                 st.setdefault("pending", []).append(text)
@@ -413,8 +456,23 @@ def main():
                         send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ข้อความเก็บไว้แล้ว จะส่งให้เองเมื่อเข้าได้" if quota_err(err)
                              else "ส่งข้อความเข้า session เดิมยังไม่ได้ ข้อความเก็บไว้แล้ว จะลองส่งใหม่ทุก 1 นาที (ไม่เปิด session ใหม่)")
                 save_state(st)
-            if st.get("mode") == "local":
-                local_tick(st)
+            local_tick(st)
+            # งานที่ local ส่งต่อให้ cloud (โหมด auto)
+            if st.get("cloud_q") and time.time() >= cloud_retry:
+                q = st["cloud_q"]; st["cloud_q"] = []
+                ok, url, err = deliver(st, "\n\n".join(q), force_cloud=True)
+                if ok:
+                    st["cloud_until"] = time.time() + CLOUD_HOLD
+                    send("งานนี้ต้องใช้ cloud วินส่งต่อให้วินฝั่ง cloud แล้ว ข้อความถัดไปช่วงนี้จะคุยกับฝั่ง cloud ต่อ"
+                         + (f"\n{url}" if url else ""))
+                else:
+                    st["cloud_q"] = q + st.get("cloud_q", []); cloud_retry = time.time() + 60
+                    if not st.get("cloud_warned"):
+                        st["cloud_warned"] = True
+                        send("ส่งงานต่อให้ cloud ยังไม่ได้" + (" (โควต้าหมด)" if quota_err(err) else "") + " จะลองใหม่ทุก 1 นาที")
+                if ok:
+                    st.pop("cloud_warned", None)
+                save_state(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
             if st.get("mode") != "local" and st.get("session_id") and time.time() - last_poll > 10:
                 last_poll = time.time()
@@ -425,6 +483,8 @@ def main():
                         for m in msgs[st["seen"]:]:
                             send(m.get('message', ''))
                         st["seen"] = len(msgs)
+                        if time.time() < st.get("cloud_until", 0):
+                            st["cloud_until"] = time.time() + CLOUD_HOLD
                         save_state(st)
                     # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
             if time.time() - last_rem > 60:
