@@ -258,6 +258,38 @@ def _kill_tree(proc):
     except Exception as e:
         print(f"kill err: {e}")
 
+LOCAL_PID_FILE = os.path.join(LOCAL_DIR, "_telegram", "local_pid.txt")
+
+def _kill_orphan():
+    """Devin CLI ที่ bridge รอบก่อนเปิดไว้แล้ว bridge ถูกปิด/อัปเดตตัวเองกลางงาน ยังรันค้างโดยไม่มีใครคุม (/stop มองไม่เห็น)
+    — ฆ่าเฉพาะเมื่อ PID นั้นยังเป็น devin จริง (กัน PID ถูกเอาไปใช้ซ้ำโดยบอท) คืน True ถ้าเจอและหยุดแล้ว"""
+    try:
+        pid = int(open(LOCAL_PID_FILE).read().strip())
+    except Exception:
+        return False
+    found = False
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=30).stdout.lower()
+            if "devin" in out:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
+                found = True
+        else:
+            name = open(f"/proc/{pid}/comm").read().lower() if os.path.exists(f"/proc/{pid}/comm") else ""
+            if "devin" in name:
+                os.kill(pid, 9)
+                found = True
+    except Exception as e:
+        print(f"orphan kill err: {e}")
+    try:
+        os.remove(LOCAL_PID_FILE)
+    except OSError:
+        pass
+    if found:
+        _rlog(f"killed orphan local devin pid {pid}")
+    return found
+
 def _busy_min():
     return int((time.time() - LOCAL.get("started", time.time())) // 60)
 
@@ -351,6 +383,7 @@ def local_run(st, text, midas=False):
         with open(of, "w", encoding="utf-8") as fo, open(ef, "w", encoding="utf-8") as fe:
             proc = subprocess.Popen(cmd, cwd=LOCAL_DIR, stdout=fo, stderr=fe, stdin=subprocess.DEVNULL)
             LOCAL["proc"] = proc
+            open(LOCAL_PID_FILE, "w").write(str(proc.pid))
             try:
                 rc = proc.wait(timeout=LOCAL_TIMEOUT)
             except subprocess.TimeoutExpired:
@@ -401,6 +434,10 @@ def local_run(st, text, midas=False):
         fail(f"โหมด local error: {e}")
     finally:
         LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
+        try:
+            os.remove(LOCAL_PID_FILE)
+        except OSError:
+            pass
         save_state(st)
 
 def local_tick(st):
@@ -587,6 +624,8 @@ def main():
         st["mode_v"] = 3
         save_state(st)
     _rlog(f"start mode={st.get('mode')} cli={devin_cli()} workdir={LOCAL_DIR} timeout={LOCAL_TIMEOUT}")
+    if _kill_orphan():
+        send("เจอวิน local ทำงานค้างจาก bridge รอบก่อน หยุดให้แล้ว (งานนั้นไม่เสร็จ สั่งใหม่ได้)")
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = last_rem = retry_at = cloud_retry = 0
     last_in = time.time()
@@ -629,6 +668,8 @@ def main():
                         LOCAL["cancelled"] = True
                         _kill_tree(p)
                         send("หยุดงานที่ค้างแล้ว ข้อความที่รอคิวจะทำต่อเลย")
+                    elif _kill_orphan():
+                        send("หยุดงาน local ที่ค้างจากรอบก่อน (ก่อน bridge รีสตาร์ท) แล้ว")
                     else:
                         send("ตอนนี้วิน local ไม่ได้ทำงานค้างอยู่")
                     continue
