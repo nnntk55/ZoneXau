@@ -29,6 +29,7 @@ LEDGER = os.path.join(CHART_DIR, "plutus_ledger.json")
 MEMORY_FILE = os.path.join(CHART_DIR, "plutus_memory.json")
 DEVIN_TASK_DIR = os.path.join(CHART_DIR, "devin_tasks")
 MIDAS_INBOX = os.path.join(CHART_DIR, "midas_inbox.txt")
+PLUTUS_INBOX = os.path.join(CHART_DIR, "plutus_inbox.txt")
 MAX_HISTORY = 40
 TH = timezone(timedelta(hours=7))
 
@@ -360,6 +361,20 @@ def main():
     while True:
         try:
             nudge = daily_nudge(nudge)
+            # ผลงานที่วินทำเสร็จส่งกลับเข้า inbox — ให้พลูตัสรายงานนินต่อในบทบาทตัวเอง
+            if os.path.exists(PLUTUS_INBOX):
+                try:
+                    ev = open(PLUTUS_INBOX, encoding="utf-8").read().strip()
+                    os.remove(PLUTUS_INBOX)
+                    if ev:
+                        chat_history.append({"role": "user", "content": ev})
+                        reply = handle(ev)
+                        if reply:
+                            chat_history.append({"role": "assistant", "content": reply})
+                            save_memory()
+                            tg_send(reply)
+                except Exception as e:
+                    _rlog(f"inbox err: {e}")
             for upd in tg_get_updates(offset):
                 offset = upd["update_id"] + 1
                 msg = upd.get("message") or {}
