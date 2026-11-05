@@ -208,8 +208,19 @@ def _zones(frames, price):
             if move <= -2 * atr and C[i] > O[i]:  # แท่งเขียวฐานก่อนยิงลง = supply
                 zones.append({"kind": "Supply", "tf": TF_LABEL[tfkey], "upper": round(float(H[i]), 1),
                               "lower": round(float(O[i]), 1), "bar": i, "impulse": round(abs(move) / atr, 1)})
-        # ---- Liquidity sweep: ทะลุ swing แล้วปิดกลับ ----
+        # ---- โซนแบบนิน: แท่งสุดขั้วของแต่ละสวิง = โซน (ต้าน=แท่ง high สูงสุดรอบ, รับ=แท่ง low ต่ำสุดรอบ) ----
         hs, ls = _swings(seg)
+        for si, px in hs[-6:]:
+            top = float(H[si]); bot = float(min(O[si], C[si]))
+            zones.append({"kind": "Supply (swing)", "tf": TF_LABEL[tfkey],
+                          "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
+                          "impulse": round((top - bot) / atr, 1) if atr else 0})
+        for si, px in ls[-6:]:
+            bot = float(L[si]); top = float(max(O[si], C[si]))
+            zones.append({"kind": "Demand (swing)", "tf": TF_LABEL[tfkey],
+                          "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
+                          "impulse": round((top - bot) / atr, 1) if atr else 0})
+        # ---- Liquidity sweep: ทะลุ swing แล้วปิดกลับ ----
         for si, px in hs[-4:]:
             later = [j for j in range(si + 1, len(seg)) if H[j] > px and C[j] < px]
             if later:
@@ -227,9 +238,10 @@ def _zones(frames, price):
     for z in zones:
         mid = (z["upper"] + z["lower"]) / 2
         z["dist_pct"] = round(abs(mid - price) / price * 100, 2) if price else 99
-        z["invalidation"] = round(z["lower"] * 0.999, 1) if "Demand" in z["kind"] or "ล่าง" in z["kind"] or "Bullish" in z["kind"] else round(z["upper"] * 1.001, 1)
-        z["status"] = "ทะลุแล้ว" if price and ((z["kind"] in ("Demand", "Bullish FVG", "Liquidity Sweep (ล่าง)") and price < z["lower"] * 0.999)
-                                             or (z["kind"] in ("Supply", "Bearish FVG", "Liquidity Sweep (บน)") and price > z["upper"] * 1.001)) else "ใช้ได้อยู่"
+        dn = "Demand" in z["kind"] or "ล่าง" in z["kind"] or "Bullish" in z["kind"]
+        z["invalidation"] = round(z["lower"] * 0.999, 1) if dn else round(z["upper"] * 1.001, 1)
+        z["status"] = "ทะลุแล้ว" if price and ((dn and price < z["lower"] * 0.999)
+                                             or (not dn and price > z["upper"] * 1.001)) else "ใช้ได้อยู่"
         score = (2 if z.get("impulse", 0) >= 2 else 1) + (2 if z["dist_pct"] < 0.5 else 1 if z["dist_pct"] < 1 else 0)
         score += {"D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
         if z["status"] == "ทะลุแล้ว":
