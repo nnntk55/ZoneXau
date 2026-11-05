@@ -178,6 +178,69 @@ def _levels(frames, price):
     return out[:10]
 
 
+def _zones(frames, price):
+    """Zone Engine มาตรฐาน: Supply/Demand (base ก่อน impulse), FVG, Liquidity Sweep
+    ทุกโซนมีขอบจริง/tf/คะแนน/touches/invalidation — algorithmic detection ไม่ใช่ order block ฝันลอย"""
+    zones = []
+    for tfkey, tail_n in (("1d", 80), ("4h", 100), ("1h", 120)):
+        df = frames.get(tfkey)
+        if df is None or len(df) < 30:
+            continue
+        seg = df.tail(tail_n).reset_index(drop=True)
+        H, L, O, C = seg["High"].values, seg["Low"].values, seg["Open"].values, seg["Close"].values
+        tr = [max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])) for i in range(1, len(seg))]
+        atr = sum(tr[-14:]) / min(14, len(tr)) if tr else 0
+        if not atr:
+            continue
+        for i in range(2, len(seg) - 1):
+            # ---- FVG: ช่องว่าง 3 แท่ง ----
+            if L[i] > H[i - 2] + 0.05 * atr:  # bullish gap
+                zones.append({"kind": "Bullish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i]), 1),
+                              "lower": round(float(H[i - 2]), 1), "bar": i})
+            if H[i] < L[i - 2] - 0.05 * atr:  # bearish gap
+                zones.append({"kind": "Bearish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i - 2]), 1),
+                              "lower": round(float(H[i]), 1), "bar": i})
+            # ---- Supply/Demand: แท่ง base สลับสี ตามด้วย impulse >= 2x ATR ----
+            move = C[i + 1] - O[i + 1]
+            if move >= 2 * atr and C[i] < O[i]:  # แท่งแดงฐานก่อนยิงขึ้น = demand
+                zones.append({"kind": "Demand", "tf": TF_LABEL[tfkey], "upper": round(float(O[i]), 1),
+                              "lower": round(float(L[i]), 1), "bar": i, "impulse": round(move / atr, 1)})
+            if move <= -2 * atr and C[i] > O[i]:  # แท่งเขียวฐานก่อนยิงลง = supply
+                zones.append({"kind": "Supply", "tf": TF_LABEL[tfkey], "upper": round(float(H[i]), 1),
+                              "lower": round(float(O[i]), 1), "bar": i, "impulse": round(abs(move) / atr, 1)})
+        # ---- Liquidity sweep: ทะลุ swing แล้วปิดกลับ ----
+        hs, ls = _swings(seg)
+        for si, px in hs[-4:]:
+            later = [j for j in range(si + 1, len(seg)) if H[j] > px and C[j] < px]
+            if later:
+                zones.append({"kind": "Liquidity Sweep (บน)", "tf": TF_LABEL[tfkey],
+                              "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
+                              "bar": later[-1], "swept": round(float(px), 1)})
+        for si, px in ls[-4:]:
+            later = [j for j in range(si + 1, len(seg)) if L[j] < px and C[j] > px]
+            if later:
+                zones.append({"kind": "Liquidity Sweep (ล่าง)", "tf": TF_LABEL[tfkey],
+                              "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
+                              "bar": later[-1], "swept": round(float(px), 1)})
+    # ---- ประเมินแต่ละโซน: touches / status / คะแนน / invalidation ----
+    out = []
+    for z in zones:
+        mid = (z["upper"] + z["lower"]) / 2
+        z["dist_pct"] = round(abs(mid - price) / price * 100, 2) if price else 99
+        z["invalidation"] = round(z["lower"] * 0.999, 1) if "Demand" in z["kind"] or "ล่าง" in z["kind"] or "Bullish" in z["kind"] else round(z["upper"] * 1.001, 1)
+        z["status"] = "ทะลุแล้ว" if price and ((z["kind"] in ("Demand", "Bullish FVG", "Liquidity Sweep (ล่าง)") and price < z["lower"] * 0.999)
+                                             or (z["kind"] in ("Supply", "Bearish FVG", "Liquidity Sweep (บน)") and price > z["upper"] * 1.001)) else "ใช้ได้อยู่"
+        score = (2 if z.get("impulse", 0) >= 2 else 1) + (2 if z["dist_pct"] < 0.5 else 1 if z["dist_pct"] < 1 else 0)
+        score += {"D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
+        if z["status"] == "ทะลุแล้ว":
+            score = 0
+        z["strength"] = score
+        out.append(z)
+    out = [z for z in out if z["status"] == "ใช้ได้อยู่"]
+    out.sort(key=lambda z: (-z["strength"], z["dist_pct"]))
+    return out[:8]
+
+
 def _pivots(frames):
     """Classic floor-trader pivot จากแท่งปิดแล้ว (prev day / prev week) — สูตรมาตรฐาน โปร่งใสทุกตัว"""
     out = {}
@@ -264,8 +327,9 @@ def analyze(frames, mi=None):
                            "dist_pct": round(abs(pv[nm] - price) / price * 100, 2)})
         levels.sort(key=lambda x: x["dist_pct"])
     setups = _setups(tfs, levels, price or 0, bias["label"], mb, mbr) if price else []
+    zones = _zones(frames, price or 0) if price else []
     return {"fetched_thai": datetime.now(th).strftime("%d/%m %H:%M"),
             "tfs": tfs, "missing_tfs": missing, "daily_bias": bias,
-            "levels": levels, "pivots": pivots, "setups": setups,
+            "levels": levels, "pivots": pivots, "setups": setups, "zones": zones,
             "volatility": (tfs.get("1h") or {}).get("atr_pct"),
             "note": "วิเคราะห์จากแท่ง MT5 จริง — แผนเทรดเป็นแนวทางประเมิน ไม่ใช่คำสั่งยิงออเดอร์"}

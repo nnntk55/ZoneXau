@@ -1412,6 +1412,18 @@ TECH_BODY = """
     </div>
     {% endif %}
 
+    {% if t.get('zones') %}
+    <div class="card">
+        <h2>โซนสำคัญ — Supply/Demand · FVG · Liquidity Sweep (ตรวจจับอัลกอริทึม ไม่ใช่ order block ฝันลอย)</h2>
+        <table><tr><th>ชนิด</th><th>TF</th><th>โซน (ล่าง-บน)</th><th>ห่าง</th><th>แรง</th><th>invalidation</th></tr>
+        {% for z in t.zones %}
+        <tr><td>{{ z.kind }}</td><td>{{ z.tf }}</td><td>{{ '{:,.0f}'.format(z.lower) }}–{{ '{:,.0f}'.format(z.upper) }}</td>
+            <td>{{ z.dist_pct }}%</td><td>{{ z.strength }}</td><td>{{ '{:,.0f}'.format(z.invalidation) }}</td></tr>
+        {% endfor %}</table>
+        <div class="err" style="color:#9b8477">แรง = คะแนนจากขนาด impulse + ความใกล้ราคา + น้ำหนัก TF — โซนที่ทะลุแล้วถูกตัดทิ้งเอง</div>
+    </div>
+    {% endif %}
+
     {% if t.get('levels') %}
     <div class="card">
         <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>
