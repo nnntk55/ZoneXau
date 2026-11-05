@@ -736,6 +736,7 @@ HTML_TEMPLATE = """
                 {% if bot_online %}MT5 Bot Online{% else %}MT5 Bot Offline{% endif %}
             </span>
             <span style="font-size: 0.75rem; color: #9b8477;">{{ bot_last }}</span>
+            <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500;">ข่าว / Macro Intel ↗</a>
         </div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -967,7 +968,7 @@ HTML_TEMPLATE = """
         <div class="card">
             <div class="btn-container">
                 <a href="{{ url_for('send_test') }}" class="btn">🔔 ทดสอบส่งข้อความ</a>
-                <a href="{{ url_for('market_news') }}" class="btn">📊 ข่าว / Macro Intel</a>
+                <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" class="btn">📊 ข่าว / Macro Intel</a>
             </div>
         </div>
         <div class="status-footer">
