@@ -1610,7 +1610,7 @@ def market_news():
             err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
     return render_template_string(NEWS_TEMPLATE, d=d, err=err)
 
-@app.route("/analyst")
+@app.route("/analyst", strict_slashes=False)
 def analyst_page():
     d, err = {}, None
     if market_intel is None:
