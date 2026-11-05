@@ -1100,7 +1100,7 @@ NEWS_TEMPLATE = """
     <div class="card">
         <h2>ราคา / อัตราผลตอบแทน</h2>
         <div class="pxgrid">
-            {% for k in ['xauusd','dxy','us10y'] %}
+            {% for k in ['xauusd','dxy','us10y','oil'] %}
             {% set p = d.prices.get(k) or {} %}
             <div class="px">
                 <div class="lbl">{{ d.symbol_names.get(k, k) }}</div>
@@ -1135,25 +1135,40 @@ NEWS_TEMPLATE = """
     <div class="card">
         <h2>ปฏิทินเศรษฐกิจ USD (เวลาไทย) {{ '(cache เก่า)' if d.calendar.stale }}</h2>
         {% if d.calendar.today %}
-        <table><tr><th>เวลา</th><th>ข่าววันนี้</th><th>Impact</th><th>Forecast</th><th>Previous</th></tr>
+        <table><tr><th>เวลา</th><th>ข่าววันนี้</th><th>Impact</th><th>สำคัญต่อทอง</th><th>Forecast</th><th>Previous</th></tr>
         {% for e in d.calendar.today %}
-        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
+        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td class="imp-h">{{ e.rank }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
         {% endfor %}</table>
         {% else %}<div class="layer">วันนี้ไม่มีข่าวสำคัญ USD</div>{% endif %}
         {% if d.calendar.upcoming %}
-        <table style="margin-top:10px"><tr><th>เวลา</th><th>ข่าวที่จะมา</th><th>Impact</th><th>Forecast</th><th>Previous</th></tr>
+        <table style="margin-top:10px"><tr><th>เวลา</th><th>ข่าวที่จะมา</th><th>Impact</th><th>สำคัญต่อทอง</th><th>Forecast</th><th>Previous</th></tr>
         {% for e in d.calendar.upcoming %}
-        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
+        <tr><td>{{ e.thai }}</td><td>{{ e.title }}</td><td class="{{ 'imp-h' if e.impact=='High' else 'imp-m' }}">{{ e.impact }}</td><td class="imp-h">{{ e.rank }}</td><td>{{ e.forecast }}</td><td>{{ e.previous }}</td></tr>
         {% endfor %}</table>
         {% endif %}
+        <div class="err" style="color:#9b8477">{{ d.news_guide.how }}</div>
+    </div>
+
+    <div class="card">
+        <h2>ข่าวที่น้ำหนักต่อทองสูงสุด (อ้างอิง)</h2>
+        <table><tr><th>ข่าว</th><th>ความสำคัญต่อทอง</th></tr>
+        {% for n in d.news_guide.table %}<tr><td>{{ n[0] }}</td><td class="imp-h">{{ n[1] }}</td></tr>{% endfor %}
+        </table>
     </div>
 
     <div class="card">
         <h2>พาดหัวข่าวทองล่าสุด (Google News)</h2>
-        {% for h in d.headlines %}
+        {% for h in d.headlines.gold %}
         <div class="hl"><a href="{{ h.link }}" target="_blank" rel="noopener">{{ h.title }}</a>
             <div class="src">{{ h.source }} · {{ h.thai }}</div></div>
         {% else %}<div class="layer">ดึง headline ไม่ได้ชั่วคราว</div>{% endfor %}
+        {% if d.headlines.geo %}
+        <h2 style="margin-top:14px">ข่าวภูมิรัฐศาสตร์ / ธนาคารกลาง</h2>
+        {% for h in d.headlines.geo %}
+        <div class="hl"><a href="{{ h.link }}" target="_blank" rel="noopener">{{ h.title }}</a>
+            <div class="src">{{ h.source }} · {{ h.thai }}</div></div>
+        {% endfor %}
+        {% endif %}
     </div>
 
     <div class="card">

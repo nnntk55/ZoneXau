@@ -98,7 +98,7 @@ def _yf_quote(sym):
 
 def _fetch_prices():
     out = {}
-    for key, sym in (("xauusd", "GC=F"), ("dxy", "DX-Y.NYB"), ("us10y", "^TNX")):
+    for key, sym in (("xauusd", "GC=F"), ("dxy", "DX-Y.NYB"), ("us10y", "^TNX"), ("oil", "CL=F")):
         out[key] = _yf_quote(sym)
     return out
 
@@ -119,6 +119,26 @@ def _fetch_fred():
 
 
 # ---------- ปฏิทิน: ForexFactory ----------
+# ข่าวที่ตลาดทองให้น้ำหนัก — อ้างจากแผนที่นินคุยไว้ (NFP/CPI/PCE/FOMC = สูงมาก)
+_NEWS_RANK = [
+    (("non-farm", "nonfarm", "nfp"), "สูงมาก"),
+    (("cpi", "consumer price"), "สูงมาก"),
+    (("pce",), "สูงมาก"),
+    (("fomc", "federal funds", "interest rate"), "สูงมาก"),
+    (("gdp",), "สูง"),
+    (("unemployment",), "สูง"),
+    (("retail sales",), "ปานกลาง-สูง"),
+    (("ism",), "ปานกลาง-สูง"),
+    (("adp",), "ปานกลาง"),
+]
+
+def _news_rank(title):
+    t = (title or "").lower()
+    for keys, rank in _NEWS_RANK:
+        if any(k in t for k in keys):
+            return rank
+    return ""
+
 def _us_eastern_dst(dt_naive):
     """US Eastern DST: อาทิตย์ที่ 2 มี.ค. – อาทิตย์แรก พ.ย. (True = EDT -4)"""
     y = dt_naive.year
@@ -133,7 +153,8 @@ def _fetch_calendar():
     from news_feed import get_calendar_xml
     feed = get_calendar_xml()
     if not feed["xml"]:
-        return {"events": [], "error": feed["error"], "stale": feed["stale"]}
+        return {"today": [], "upcoming": [], "error": feed["error"], "stale": feed["stale"],
+                "retry_in": feed.get("retry_in")}
     now_th = datetime.now(_TH)
     evts = []
     for e in ET.fromstring(feed["xml"].encode("utf-8")).iter("event"):
@@ -150,7 +171,8 @@ def _fetch_calendar():
                 thai = (et - timedelta(hours=off) + timedelta(hours=7)).replace(tzinfo=_TH)
             except ValueError:
                 pass
-        evts.append({"title": e.findtext("title") or "", "impact": imp,
+        title = e.findtext("title") or ""
+        evts.append({"title": title, "impact": imp, "rank": _news_rank(title),
                      "forecast": e.findtext("forecast") or "-",
                      "previous": e.findtext("previous") or "-",
                      "thai": thai.strftime("%d/%m %H:%M") if thai else f"{d} (ทั้งวัน)",
@@ -165,9 +187,9 @@ def _fetch_calendar():
 
 
 # ---------- headlines: Google News RSS ----------
-def _fetch_headlines():
+def _rss_items(query, limit):
     r = requests.get("https://news.google.com/rss/search",
-                     params={"q": "gold price OR XAUUSD", "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                     params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
                      headers=UA, timeout=15)
     items = []
     for it in ET.fromstring(r.content).iter("item"):
@@ -185,7 +207,13 @@ def _fetch_headlines():
         items.append({"title": title, "source": src,
                       "link": it.findtext("link") or "", "thai": _thai(ts), "ts": ts})
     items.sort(key=lambda x: x["ts"] or 0, reverse=True)
-    return items[:10]
+    return items[:limit]
+
+
+def _fetch_headlines():
+    """พาดหัวทอง (หลัก) + ภูมิรัฐศาสตร์ (แยกอีกฟีด ตามหมวด 6 ของแผน)"""
+    return {"gold": _rss_items("gold price OR XAUUSD", 8),
+            "geo": _rss_items("geopolitics OR sanctions OR \"central bank\" gold", 5)}
 
 
 # ---------- ตอบ 5 คำถาม ----------
@@ -259,9 +287,18 @@ LINKS = {"FedWatch (CME)": "https://www.cmegroup.com/markets/interest-rates/cme-
          "GLD Holdings (SPDR)": "https://www.spdrgoldshares.com/usa/",
          "ETF Flows / CB Gold (WGC)": "https://www.gold.org/goldhub",
          "DXY (TradingView)": "https://www.tradingview.com/symbols/TVC-DXY/",
-         "Economic Calendar (FF)": "https://www.forexfactory.com/calendar"}
+         "Economic Calendar (FF)": "https://www.forexfactory.com/calendar",
+         "Economic Calendar (Inv.)": "https://www.investing.com/economic-calendar/",
+         "Reuters Markets": "https://www.reuters.com/markets/",
+         "Bloomberg Markets": "https://www.bloomberg.com/markets"}
 
-SYMBOL_NAMES = {"xauusd": "ทอง (GC=F)", "dxy": "DXY", "us10y": "US10Y Yield"}
+# วิธีอ่านข่าว + ตารางข่าวสำคัญต่อทอง (ตามที่นินคุยไว้)
+NEWS_GUIDE = {"how": "ตลาดเทรดจากความคาดหวัง ไม่ใช่ตัวเลขล้วนๆ — เปรียบเทียบ 3 ตัว: Previous (ครั้งก่อน) / Forecast (ตลาดคาด) / Actual (ออกจริง) ตัวเลขดีกว่าคาดมาก = เซอร์ไพรส์ทิศหนึ่ง ต่ำกว่าคาดมาก = อีกทิศ",
+              "table": [("Nonfarm Payrolls (NFP)", "สูงมาก"), ("CPI", "สูงมาก"), ("PCE", "สูงมาก"),
+                        ("FOMC Interest Rate", "สูงมาก"), ("GDP", "สูง"), ("Unemployment Rate", "สูง"),
+                        ("Retail Sales", "ปานกลาง-สูง"), ("ISM", "ปานกลาง-สูง"), ("ADP Employment", "ปานกลาง")]}
+
+SYMBOL_NAMES = {"xauusd": "ทอง (GC=F)", "dxy": "DXY", "us10y": "US10Y Yield", "oil": "น้ำมัน WTI (CL=F)"}
 
 
 def get_market_intel():
@@ -271,6 +308,10 @@ def get_market_intel():
     fred, _ = _cached("fred", TTL_FRED, _fetch_fred, errors)
     cal, _ = _cached("calendar", 300, _fetch_calendar, errors)
     heads, _ = _cached("headlines", TTL_NEWS, _fetch_headlines, errors)
+    if cal:  # กัน cache รูปแบบเก่า/แหล่งล้ม — key หลักต้องมีเสมอ
+        cal.setdefault("today", []); cal.setdefault("upcoming", [])
+    if isinstance(heads, list):  # cache รูปแบบเก่า (list เดี่ยว) -> โครงใหม่
+        heads = {"gold": heads, "geo": []}
     qs, summary = _five(prices, fred, cal)
     return {"fetched_thai": _thai(time.time()),
             "prices": prices or {},
@@ -279,7 +320,8 @@ def get_market_intel():
             "five_questions": qs,
             "signal_summary": summary,
             "calendar": cal or {"today": [], "upcoming": []},
-            "headlines": heads or [],
+            "headlines": heads or {"gold": [], "geo": []},
+            "news_guide": NEWS_GUIDE,
             "watchlist": WATCHLIST, "layers": LAYERS, "links": LINKS,
             "errors": errors,
             "note": "ข้อมูลอ้างอิงจากแหล่งจริง ประกอบการตัดสินใจเท่านั้น ไม่ใช่สัญญาณเทรดของบอท"}
