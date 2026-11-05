@@ -1222,11 +1222,30 @@ ANALYST_BODY = """
     {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
 
     <div class="card">
-        <h2>Market Regime</h2>
-        <div class="sigsum">{{ ((d.regime or {}).get('tags') or [])|join(' · ') }}</div>
-        {% for w in (d.regime or {}).get('why') or [] %}<div class="layer">· {{ w }}</div>{% endfor %}
-        <div class="err" style="color:#9b8477">{{ (d.regime or {}).get('หมายเหตุ') }}</div>
+        <h2>Market Regime (แยกย่อย — อยู่คนละทิศกันได้)</h2>
+        {% set rg = d.regime or {} %}
+        {% if rg.get('detail') %}
+        {% for k, v in rg.detail.items() %}
+        <div class="qrow"><div class="dot {{ 'na' if v.label in ('ไม่ทราบ','นิ่ง','Mixed / ไม่ชัด') else 'mid' }}"></div><div class="q"><b>{{ k }}</b> — {{ v.label }}</div><div class="a">{{ v.why }}</div></div>
+        {% endfor %}
+        {% else %}
+        <div class="sigsum">{{ (rg.get('tags') or [])|join(' · ') }}</div>
+        {% for w in rg.get('why') or [] %}<div class="layer">· {{ w }}</div>{% endfor %}
+        {% endif %}
+        <div class="err" style="color:#9b8477">{{ rg.get('หมายเหตุ') }}</div>
     </div>
+
+    {% set wm = d.why_moved or {} %}
+    {% if wm.get('status') == 'ok' %}
+    <div class="card">
+        <h2>WHY DID GOLD MOVE? — สืบสาเหตุเชิงเวลา</h2>
+        <div class="sigsum">ทอง{{ wm.direction }} {{ '%+.2f'|format(wm.move_pct) }}% · {{ wm.from_to }} · {{ wm.start_thai }} → {{ wm.end_thai }} (ไทย)</div>
+        {% for t in wm.timeline or [] %}<div class="layer">· {{ t.t }} — {{ t.ev }}</div>{% endfor %}
+        <div class="layer" style="margin-top:8px"><b>ปัจจัยที่อาจขับ (correlation ตามเวลา):</b></div>
+        {% for x in wm.drivers or [] %}<div class="layer">· {{ x }}</div>{% endfor %}
+        <div class="err" style="color:#b0563f">ยืนยันไม่ได้: {{ (wm.cannot_confirm or [])|join(' · ') }}</div>
+    </div>
+    {% endif %}
 
     {% if d.alerts or d.divergences or d.thesis_invalidated %}
     <div class="card">
@@ -1249,9 +1268,13 @@ ANALYST_BODY = """
         <h2>Scenario Engine (สถานการณ์จำลอง)</h2>
         {% for key, label in (('A_bullish','A — Bullish'),('B_bearish','B — Bearish'),('C_neutral','C — Neutral')) %}
         {% set s = (d.scenario or {}).get(key) or {} %}
-        <div class="layer"><b>{{ label }}:</b> {{ (s.get('หลักฐาน') or [])|join('; ') or '—' }}
+        <div class="layer"><b>{{ label }}</b> [{{ s.get('สถานะ') or '—' }}]<br>หลักฐาน: {{ (s.get('หลักฐาน') or [])|join('; ') or '—' }}
+            {% if s.get('หลักฐานขัด') %}<br><span style="color:#b0563f">ขัด: {{ s.หลักฐานขัด|join('; ') }}</span>{% endif %}
             <div class="err" style="color:#9b8477">หักล้างเมื่อ: {{ s.get('หักล้างเมื่อ') }}</div></div>
         {% endfor %}
+        {% if (d.scenario or {}).get('ข้อมูลที่ยังไม่ทราบ') %}
+        <div class="err" style="color:#b0563f">ข้อมูลที่ยังไม่ทราบ (ไม่นับเป็นหนุน/กด): {{ d.scenario['ข้อมูลที่ยังไม่ทราบ']|join(' · ') }}</div>
+        {% endif %}
         <div class="err" style="color:#9b8477">{{ (d.scenario or {}).get('หมายเหตุ') }}</div>
     </div>
 
@@ -1284,8 +1307,15 @@ ANALYST_BODY = """
                 <div class="val" style="font-size:1rem">{{ '{:,}'.format(cot.open_interest) if cot.get('open_interest') is not none else '-' }}</div></div>
             <div class="px"><div class="lbl">ข้อมูลล่าสุด</div>
                 <div class="val" style="font-size:1rem">{{ cot.get('date') or '-' }}</div>
-                <div class="chg mid">{{ 'WoW {:+,} สัญญา'.format(cot.mm_net_chg_wow) if cot.get('mm_net_chg_wow') is not none else 'WoW เทียบได้สัปดาห์หน้า' }}</div></div>
+                <div class="chg mid">{{ 'WoW net {:+,} สัญญา'.format(cot.mm_net_chg_wow) if cot.get('mm_net_chg_wow') is not none else 'WoW เทียบได้สัปดาห์หน้า' }}</div></div>
         </div>
+        {% if cot.get('mm_long_chg_wow') is not none %}
+        <div class="layer">WoW: long {{ '{:+,}'.format(cot.mm_long_chg_wow) }} · short {{ '{:+,}'.format(cot.mm_short_chg_wow or 0) }} · OI {{ '{:+,}'.format(cot.oi_chg_wow or 0) }}{% if cot.get('net_chg_source') %} — {{ cot.net_chg_source }}{% endif %}</div>
+        {% endif %}
+        {% if cot.get('net_percentile') is not none %}
+        <div class="layer">{{ cot.get('crowding') }}</div>
+        {% endif %}
+        <div class="err" style="color:#9b8477">{{ cot.get('เผยแพร่') }} — net long สูงไม่ได้แปลว่าราคาต้องขึ้น</div>
         {% else %}<div class="layer">ยังไม่มีข้อมูล COT</div>{% endif %}
     </div>
 
@@ -1295,6 +1325,15 @@ ANALYST_BODY = """
         <div class="qrow"><div class="dot {{ q.sig }}"></div><div class="q">{{ q.q }}</div><div class="a">{{ q.a }}</div></div>
         {% endfor %}
         <div class="err" style="color:#9b8477">สรุป: {{ d.signal_summary }}</div>
+    </div>
+
+    <div class="card">
+        <h2>Data Quality / ข้อมูลที่ขาด</h2>
+        {% for s in d.data_quality or [] %}
+        <div class="qrow"><div class="dot {{ 'bull' if s.status=='ok' else 'warn' if s.status=='missing' else 'mid' }}"></div><div class="q">{{ s.src }}</div><div class="a">{{ s.status }}</div></div>
+        {% endfor %}
+        {% for e in d.errors or [] %}<div class="err">· {{ e }}</div>{% endfor %}
+        <div class="err" style="color:#9b8477">ค่า missing/unknown ไม่ถูกนับเป็นหนุนหรือกดทอง — DATA UNAVAILABLE คือประเมินไม่ได้ ไม่ใช่เป็นกลาง</div>
     </div>
 
     <div class="foot">ชั้นนี้คือการตีความข้อมูลจริง — ไม่ใช่คำทำนายราคาและไม่ใช่คำสั่งเทรด</div>

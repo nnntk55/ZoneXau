@@ -214,15 +214,121 @@ def _fetch_cot():
         if len(nums) < 16:
             return None
         out = {"date": date, "open_interest": nums[0], "mm_long": nums[6], "mm_short": nums[7],
-               "mm_net": nums[6] - nums[7]}
+               "mm_net": nums[6] - nums[7],
+               "เผยแพร่": "COT คือสถานะ ณ วันอังคาร เผยแพร่ศุกร์ — ไม่ใช่ real-time อย่าใช้แทน flow สด"}
         c = _load()
-        prev = (c.get("cot_prev") or {})
-        if prev.get("date") and prev["date"] != date:
+        hist = c.setdefault("cot_hist", [])
+        if not hist or hist[-1].get("date") != date:
+            hist.append({"date": date, "mm_net": out["mm_net"], "mm_long": out["mm_long"],
+                         "mm_short": out["mm_short"], "oi": out["open_interest"]})
+            del hist[:-60]
+            _save(c)
+        if len(hist) >= 2:
+            prev = hist[-2]
+            out["mm_long_chg_wow"] = out["mm_long"] - prev.get("mm_long", out["mm_long"])
+            out["mm_short_chg_wow"] = out["mm_short"] - prev.get("mm_short", out["mm_short"])
+            out["oi_chg_wow"] = out["open_interest"] - prev.get("oi", out["open_interest"])
             out["mm_net_chg_wow"] = out["mm_net"] - prev.get("mm_net", out["mm_net"])
-        c["cot_prev"] = {"date": date, "mm_net": out["mm_net"]}
-        _save(c)
+            if out["mm_net_chg_wow"] > 0:
+                out["net_chg_source"] = "net เพิ่มจาก long เปิดใหม่" if out["mm_long_chg_wow"] > 0 else "net เพิ่มจาก short ปิดตำแหน่ง"
+            elif out["mm_net_chg_wow"] < 0:
+                out["net_chg_source"] = "net ลดจาก long ออกตำแหน่ง" if out["mm_long_chg_wow"] < 0 else "net ลดจาก short เพิ่มตำแหน่ง"
+        if len(hist) >= 8:
+            nets = [x["mm_net"] for x in hist]
+            pct = round(100 * sum(1 for x in nets if x <= out["mm_net"]) / len(nets))
+            out["net_percentile"] = pct
+            out["crowding"] = (f"สถานะ net long อยู่ percentile {pct} — แออัด เสี่ยง long liquidation ถ้า macro พลิก"
+                               if pct >= 85 else f"percentile {pct} ของ {len(hist)} สัปดาห์ที่เก็บ")
         return out
     return None
+
+
+# ---------- WHY DID GOLD MOVE: สืบสาเหตุเชิงเวลา (intraday timeline) ----------
+def _yf_intraday(sym, rng="2d", interval="15m"):
+    r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
+                     params={"range": rng, "interval": interval}, headers=UA, timeout=15)
+    res = (r.json().get("chart") or {}).get("result") or []
+    if not res:
+        return []
+    ts = res[0].get("timestamp") or []
+    q = ((res[0].get("indicators") or {}).get("quote") or [{}])[0]
+    closes, vols = q.get("close") or [], q.get("volume") or []
+    return [{"ts": t, "c": c, "v": v} for t, c, v in zip(ts, closes, vols) if c]
+
+
+def _fetch_intraday():
+    return {"gold": _yf_intraday("GC=F"), "dxy": _yf_intraday("DX-Y.NYB"), "us10y": _yf_intraday("^TNX")}
+
+
+def _win_chg(series, t0, t1):
+    pts = [x for x in (series or []) if t0 <= x["ts"] <= t1]
+    return round((pts[-1]["c"] - pts[0]["c"]) / pts[0]["c"] * 100, 2) if len(pts) >= 2 else None
+
+
+def _why_gold_moved(intr, cal, heads):
+    """ตอบ 'ทองขยับเพราะอะไร' — หาช่วงเคลื่อนแรงสุดใน 48 ชม. (rolling 2h) แล้วเทียบ DXY/ยีลด์/ข่าว/volume ช่วงเดียวกัน
+    correlation ตามเวลา ไม่ใช่การพิสูจน์ causation — ขาดหลักฐานให้บอกว่าไม่รู้ ห้ามเดา"""
+    gold = (intr or {}).get("gold") or []
+    out = {"status": "insufficient", "timeline": [], "drivers": [],
+           "cannot_confirm": ["ข้อมูล intraday ไม่พอ — วิเคราะห์สาเหตุไม่ได้"]}
+    if len(gold) < 12:
+        return out
+    n = 8  # 8 แท่ง x 15 นาที = หน้าต่าง 2 ชม.
+    best = None
+    for i in range(n, len(gold)):
+        chg = (gold[i]["c"] - gold[i - n]["c"]) / gold[i - n]["c"] * 100
+        if best is None or abs(chg) > abs(best["chg"]):
+            best = {"t0": gold[i - n]["ts"], "t1": gold[i]["ts"],
+                    "p0": gold[i - n]["c"], "p1": gold[i]["c"], "chg": round(chg, 2)}
+    out.update({"status": "ok", "move_pct": best["chg"], "direction": "ขึ้น" if best["chg"] > 0 else "ลง",
+                "start_thai": _thai(best["t0"]), "end_thai": _thai(best["t1"]),
+                "from_to": f"{best['p0']:,.0f} → {best['p1']:,.0f}", "cannot_confirm": []})
+    if abs(best["chg"]) < 0.3:
+        out["status"] = "calm"
+        out["note"] = "ไม่มีการเคลื่อนไหวใหญ่พอจะสืบสาเหตุใน 48 ชม.ล่าสุด"
+        return out
+    t0, t1 = best["t0"], best["t1"]
+    tl = [{"t": _thai(t0), "ts": t0, "ev": f"ทองเริ่มขยับจาก {best['p0']:,.0f}"},
+          {"t": _thai(t1), "ts": t1, "ev": f"ทอง {best['chg']:+.1f}% ถึง {best['p1']:,.0f} ในช่วง ~2 ชม."}]
+    dxy_c = _win_chg((intr or {}).get("dxy"), t0, t1)
+    y_c = _win_chg((intr or {}).get("us10y"), t0, t1)
+    if dxy_c is not None:
+        tl.append({"t": _thai(t0), "ts": t0 + 1, "ev": f"DXY {dxy_c:+.2f}% ช่วงเดียวกัน"})
+        against = (dxy_c > 0) == (best["chg"] > 0) and abs(dxy_c) >= 0.05
+        out["drivers"].append(f"DXY {'แข็ง' if dxy_c > 0 else 'อ่อน'} {dxy_c:+.2f}% — " +
+                              ("ขัดความสัมพันธ์ปกติ (ทอง-DXY เดินทางเดียวกัน) ต้องหาตัวขับอื่น" if against
+                               else "สอดคล้องปกติ อาจเป็นตัวขับหนึ่ง"))
+    if y_c is not None:
+        tl.append({"t": _thai(t0), "ts": t0 + 2, "ev": f"US10Y {y_c:+.2f}% ช่วงเดียวกัน"})
+        against_y = (y_c > 0) == (best["chg"] > 0) and abs(y_c) >= 0.3
+        out["drivers"].append(f"US10Y {'ขึ้น' if y_c > 0 else 'ลง'} {y_c:+.2f}% — " +
+                              ("ขัดความสัมพันธ์ปกติ" if against_y else "สอดคล้อง อาจร่วมขับ"))
+    vols = [x["v"] for x in gold if x.get("v")]
+    wvol = [x["v"] for x in gold if t0 <= x["ts"] <= t1 and x.get("v")]
+    if vols and wvol:
+        ratio = (sum(wvol) / len(wvol)) / (sum(vols) / len(vols))
+        tl.append({"t": _thai(t0), "ts": t0 + 3, "ev": f"Volume ช่วงขยับ ~{ratio:.1f}x ค่าเฉลี่ย"})
+        if ratio >= 1.5:
+            out["drivers"].append(f"Volume futures พุ่ง ~{ratio:.1f}x ค่าเฉลี่ย — มีแรงจริง ไม่ใช่กราฟบางๆ")
+    evs = [e for e in ((cal or {}).get("today") or []) + ((cal or {}).get("upcoming") or [])
+           if e.get("ts") and t0 - 5400 <= e["ts"] <= t1 + 5400]
+    for e in evs:
+        tl.append({"t": e["thai"], "ts": e["ts"], "ev": f"ข่าว {e['impact']}: {e['title']}"})
+    if evs:
+        out["drivers"].append("มีข่าวปฏิทินใกล้ช่วงขยับ: " + ", ".join(x["title"] for x in evs[:3]))
+    else:
+        out["cannot_confirm"].append("ไม่พบข่าวในปฏิทินใกล้ช่วงขยับ — อาจเป็น flow/ภูมิรัฐศาสตร์/เหตุนอกปฏิทิน")
+    hls = [h for h in (((heads or {}).get("gold") or []) + ((heads or {}).get("geo") or []))
+           if h.get("ts") and t0 - 10800 <= h["ts"] <= t1 + 10800]
+    for h in hls[:3]:
+        out["drivers"].append(f"พาดหัวใกล้เวลา: {h['title'][:80]} ({h['source']})")
+    if not hls:
+        out["cannot_confirm"].append("ไม่พบพาดหัวข่าวใกล้ช่วงเวลา")
+    out["cannot_confirm"] += ["real yield ระดับ intraday (FRED มีแค่รายวัน)", "FedWatch % การเปลี่ยนคาดหวัง Fed"]
+    out["timeline"] = sorted(tl, key=lambda x: x["ts"] or 0)
+    if not out["drivers"]:
+        out["drivers"] = ["ไม่พบตัวขับที่ยืนยันได้จากข้อมูลที่มี — อย่าตีความเกินหลักฐาน"]
+    return out
 
 
 # ---------- ตอบ 5 คำถาม ----------
@@ -317,25 +423,38 @@ def _chg(p, k):
 
 
 def _regime(prices, fred):
-    """จำแนกสภาวะตลาดจากข้อมูลจริง: Risk-off/Risk-on/Monetary Easing/Tightening/Mixed"""
+    """จำแนกสภาวะตลาดแยกย่อย: risk sentiment / dollar / rates / real yield / gold
+    — risk-off ไม่ได้แปลว่าทองต้องขึ้นเสมอ (ดอลลาร์แข็งอาจกดทองใน risk-off ได้)"""
     g, d, y = _chg(prices, "xauusd"), _chg(prices, "dxy"), _chg(prices, "us10y")
     ry = ((fred or {}).get("real_yield") or {}).get("chg_5d")
-    tags, note = [], []
-    if d is not None and y is not None:
-        if d < -0.1 and y < -0.5:
-            tags.append("Monetary Easing")
-            note.append("ดอลลาร์+ยีลด์ลดพร้อมกัน ตลาดคาดผ่อนคลาย")
-        elif d > 0.1 and y > 0.5:
-            tags.append("Monetary Tightening")
-            note.append("ดอลลาร์+ยีลด์ขึ้นพร้อมกัน แรงกดสินทรัพย์เสี่ยง")
-    if g is not None and g > 0.4:
-        tags.append("Risk-off" if (d or 0) < 0.1 else "Risk-off (หนีภัยทั้งคู่)")
-    elif g is not None and g < -0.4:
-        tags.append("Risk-on / ลดการหนีภัย")
-    if ry is not None and abs(ry) >= 0.05:
-        tags.append("Real Yield " + ("ขึ้น" if ry > 0 else "ลง"))
-    return {"tags": tags or ["ไม่ชัด / Mixed"], "why": note,
-            "หมายเหตุ": "จำแนกจากการเคลื่อนไหวจริงวันนี้ ไม่ใช่คำทำนาย"}
+    detail = {
+        "risk_sentiment": {"label": "ไม่ทราบ", "why": "ข้อมูลทองไม่พอ"},
+        "dollar": {"label": "ไม่ทราบ" if d is None else "อ่อนค่า" if d < -0.1 else "แข็งค่า" if d > 0.1 else "นิ่ง",
+                   "why": f"DXY {d:+.2f}% วันนี้" if d is not None else "ไม่มีข้อมูล DXY"},
+        "rates": {"label": "ไม่ทราบ" if y is None else "แรงผ่อนคลาย" if y < -0.5 else "แรงตึงตัว" if y > 0.5 else "นิ่ง",
+                  "why": f"US10Y {y:+.2f}% วันนี้" if y is not None else "ไม่มีข้อมูล US10Y"},
+        "real_yield": {"label": "ไม่ทราบ" if ry is None else "ลง" if ry < -0.02 else "ขึ้น" if ry > 0.02 else "นิ่ง",
+                       "why": f"DFII10 {ry:+.2f} ใน 5 วัน" if ry is not None else "DFII10 ไม่มีข้อมูล — ประเมินปัจจัยนี้ไม่ได้"},
+        "gold": {"label": "ไม่ทราบ" if g is None else "แข็งแกร่ง" if g > 0.4 else "อ่อนแรง" if g < -0.4 else "ออกข้าง",
+                 "why": f"ทอง {g:+.2f}% วันนี้" if g is not None else "ไม่มีข้อมูลทอง"},
+    }
+    if g is not None:
+        if g > 0.4:
+            detail["risk_sentiment"] = {"label": "Risk-off (หนีภัย)",
+                                        "why": "ทองขึ้นแรง อาจมีแรงหนีภัย — แต่ถ้า dollar แข็งด้วย แรงกดทองยังอยู่"}
+        elif g < -0.4:
+            detail["risk_sentiment"] = {"label": "Risk-on / ลดหนีภัย",
+                                        "why": "ทองลง แรงหนีภัยลดหรือโดนกดจากปัจจัยอื่น"}
+        else:
+            detail["risk_sentiment"] = {"label": "Mixed / ไม่ชัด",
+                                        "why": "ทองไม่เคลื่อนแรงพอจะอ่าน sentiment"}
+    if d is not None and y is not None and d < -0.1 and y < -0.5:
+        detail["rates"]["why"] += " — ดอลลาร์+ยีลด์ลงพร้อมกัน ตลาดคาดผ่อนคลาย"
+    tags = [f"{k}: {v['label']}" for k, v in detail.items()
+            if v["label"] not in ("นิ่ง", "ไม่ทราบ", "Mixed / ไม่ชัด")]
+    return {"tags": tags or ["ไม่ชัด / Mixed"], "why": [v["why"] for v in detail.values()],
+            "detail": detail,
+            "หมายเหตุ": "แยก regime ย่อยจากการเคลื่อนไหวจริง — แต่ละตัวอยู่คนละทิศได้ ไม่ใช่คำทำนาย"}
 
 
 def _divergences(prices):
@@ -443,37 +562,49 @@ def _thesis(qs, chg):
 
 
 def _scenario(qs, regime, changes, cot):
-    """Forecast & Scenario Engine — 3 สถานการณ์พร้อมหลักฐานและเงื่อนไขหักล้าง (ไม่ใช่คำทำนายราคา)"""
+    """Forecast & Scenario Engine — 3 สถานการณ์พร้อมหลักฐาน/หลักฐานขัด/เงื่อนไขหักล้าง
+    ถ้าไม่มีหลักฐานพอต้องบอก INSUFFICIENT EVIDENCE ห้ามสร้างสถานการณ์ลอยๆ"""
     bull = [q["a"] for q in qs if q["sig"] == "bull"]
     bear = [q["a"] for q in qs if q["sig"] == "bear"]
-    cot_note = ""
+    unknown = [q["q"] for q in qs if q["sig"] == "na"]
     if cot and cot.get("mm_net") is not None:
-        cot_note = f"กองทุน MM net {'long' if cot['mm_net']>0 else 'short'} {abs(cot['mm_net']):,} สัญญา"
-        (bull if cot["mm_net"] > 0 else bear).append(cot_note)
+        note = f"กองทุน MM net {'long' if cot['mm_net'] > 0 else 'short'} {abs(cot['mm_net']):,} สัญญา"
+        (bull if cot["mm_net"] > 0 else bear).append(note)
+    def _sc(evidence, contra, inv):
+        return {"สถานะ": "มีหลักฐาน" if evidence else "INSUFFICIENT EVIDENCE",
+                "หลักฐาน": evidence or ["ยังไม่มี"],
+                "หลักฐานขัด": contra,
+                "หักล้างเมื่อ": inv}
     return {
-        "A_bullish": {"หลักฐาน": bull or ["ยังไม่มี"], "หักล้างเมื่อ": "DXY/ยีลด์กลับขึ้นแรงต่อเนื่อง หรือหลุดแนวที่ตั้งไว้"},
-        "B_bearish": {"หลักฐาน": bear or ["ยังไม่มี"], "หักล้างเมื่อ": "ยีลด์/real yield กลับลงต่อ หรือเกิดข่าวเสี่ยงใหญ่"},
-        "C_neutral": {"หลักฐาน": ["ข้อมูลขัดกัน/นิ่ง"] if not bull and not bear or (bull and bear) else [],
-                      "หักล้างเมื่อ": "ข่าวแรง/ตัวเลขใหญ่สัปดาห์นี้ออกผิดคาดชัด"},
-        "หมายเหตุ": "สถานการณ์จากข้อมูลจริง ณ เวลาดึง — ไม่ใช่คำสั่งเทรด"}
+        "A_bullish": _sc(bull, bear, "DXY/ยีลด์กลับขึ้นแรงต่อเนื่อง หรือหลุดแนวที่ตั้งไว้"),
+        "B_bearish": _sc(bear, bull, "ยีลด์/real yield กลับลงต่อ หรือเกิดข่าวเสี่ยงใหญ่"),
+        "C_neutral": _sc(["ข้อมูลขัดกัน/นิ่ง"] if (not bull and not bear) or (bull and bear) else [],
+                         [], "ข่าวแรง/ตัวเลขใหญ่สัปดาห์นี้ออกผิดคาดชัด"),
+        "ข้อมูลที่ยังไม่ทราบ": unknown,
+        "หมายเหตุ": "สถานการณ์จากข้อมูลจริง ณ เวลาดึง — ไม่ใช่คำทำนายราคาและไม่ใช่คำสั่งเทรด"}
 
 
 def get_market_intel():
     """คืน dict ข้อมูลตลาดทั้งหมด — ค่า None/field error หมายถึงแหล่งนั้นดึงไม่ได้ ห้ามเดาแทน"""
     errors = []
-    prices, _ = _cached("prices", TTL_PRICE, _fetch_prices, errors)
-    fred, _ = _cached("fred", TTL_FRED, _fetch_fred, errors)
-    cal, _ = _cached("calendar", 300, _fetch_calendar, errors)
-    heads, _ = _cached("headlines", TTL_NEWS, _fetch_headlines, errors)
+    prices, p_st = _cached("prices", TTL_PRICE, _fetch_prices, errors)
+    fred, f_st = _cached("fred", TTL_FRED, _fetch_fred, errors)
+    cal, c_st = _cached("calendar", 300, _fetch_calendar, errors)
+    heads, h_st = _cached("headlines", TTL_NEWS, _fetch_headlines, errors)
+    intr, i_st = _cached("intraday", 600, _fetch_intraday, errors)  # 15m ย้อน 48 ชม. สำหรับ why-moved
     if cal:  # กัน cache รูปแบบเก่า/แหล่งล้ม — key หลักต้องมีเสมอ
         cal.setdefault("today", []); cal.setdefault("upcoming", [])
     if isinstance(heads, list):  # cache รูปแบบเก่า (list เดี่ยว) -> โครงใหม่
         heads = {"gold": heads, "geo": []}
-    cot, _ = _cached("cot", 518400, _fetch_cot, errors)  # CFTC รายสัปดาห์
+    cot, ct_st = _cached("cot", 518400, _fetch_cot, errors)  # CFTC รายสัปดาห์
     qs, summary = _five(prices, fred, cal)
     snap, changes = _snap_and_change(prices or {}, fred or {})
     thesis, thesis_log, thesis_invalidated = _thesis(qs, changes)
     regime = _regime(prices or {}, fred or {})
+    dq = [{"src": n, "status": "missing" if v is None else ("stale" if s else "ok")}
+          for n, v, s in (("Yahoo prices", prices, p_st), ("FRED yields", fred, f_st),
+                          ("FF calendar", cal, c_st), ("headlines", heads, h_st),
+                          ("intraday 15m", intr, i_st), ("CFTC COT", cot, ct_st))]
     return {"fetched_thai": _thai(time.time()),
             "prices": prices or {},
             "symbol_names": SYMBOL_NAMES,
@@ -492,6 +623,8 @@ def get_market_intel():
             "alerts": _alerts(prices or {}, qs),
             "thesis": thesis,
             "thesis_log": thesis_log,
+            "why_moved": _why_gold_moved(intr, cal, heads),
+            "data_quality": dq,
             "watchlist": WATCHLIST, "layers": LAYERS, "links": LINKS,
             "errors": errors,
             "note": "ข้อมูลอ้างอิงจากแหล่งจริง ประกอบการตัดสินใจเท่านั้น ไม่ใช่สัญญาณเทรดของบอท"}
