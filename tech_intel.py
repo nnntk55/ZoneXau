@@ -150,8 +150,9 @@ def _levels(frames, price):
     """แนวสำคัญ: prev day/week/month H/L + swing D1/H4 + EMA50 แต่ละ TF — จัดอันดับใกล้ราคาก่อน"""
     out = []
     def add(name, px, tf, kind, w=0):
-        if px:
-            out.append({"name": name, "price": round(float(px), 2), "tf": tf, "kind": kind,
+        if px:  # กฎ flip: แนวเหนือราคา = ต้าน ใต้ราคา = รับ ไม่ว่าจะเคยเป็นอะไรมาก่อน
+            out.append({"name": name, "price": round(float(px), 2), "tf": tf,
+                        "kind": "resistance" if float(px) > price else "support",
                         "dist_pct": round(abs(float(px) - price) / price * 100, 2)})
     d1 = frames.get("1d")
     if d1 is not None and len(d1) > 1:
@@ -165,17 +166,25 @@ def _levels(frames, price):
     if mn is not None and len(mn) > 1:
         add("prev_month_high", mn["High"].iloc[-2], "MN", "resistance")
         add("prev_month_low", mn["Low"].iloc[-2], "MN", "support")
-    for tfkey, tail_n in (("4h", 120), ("1d", 120)):
+    for tfkey, tail_n in (("4h", 120), ("1d", 120), ("1w", 160)):
         df = frames.get(tfkey)
         if df is None:
             continue
         hs, ls = _swings(df.tail(tail_n))
-        for _, px in hs[-2:]:
+        for _, px in hs[-3:]:
             add(f"{TF_LABEL[tfkey]} swing high", px, TF_LABEL[tfkey], "resistance")
-        for _, px in ls[-2:]:
+        for _, px in ls[-3:]:
             add(f"{TF_LABEL[tfkey]} swing low", px, TF_LABEL[tfkey], "support")
+    # ---- จุดสุดขั้วย้อนหลังทั้งเฟรม: high/low เก่าที่ยังไม่ทะลุ ยังมีผลต่อเนื่อง (แนว 3900 แบบที่พลาด) ----
+    for tfkey in ("mn", "1w", "1d"):
+        df = frames.get(tfkey)
+        if df is None or len(df) < 5:
+            continue
+        lbl = TF_LABEL[tfkey]
+        add(f"{lbl} extreme high (ทั้งเฟรม)", df["High"].max(), lbl, "resistance")
+        add(f"{lbl} extreme low (ทั้งเฟรม)", df["Low"].min(), lbl, "support")
     out.sort(key=lambda x: x["dist_pct"])
-    return out[:10]
+    return out[:12]
 
 
 def _zn_dn(z):
