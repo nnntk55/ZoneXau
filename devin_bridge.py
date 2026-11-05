@@ -208,11 +208,12 @@ LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "2400"))
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
                  "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
-LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงานเองบนเครื่องนี้ (ถูกกว่า cloud มาก) ยกเว้นงานที่เครื่องนี้ทำไม่ได้จริง เช่น deploy/ตั้งค่า Render, "
+LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงานเองบนเครื่องนี้ (ถูกกว่า cloud มาก) deploy แดชบอร์ด Render ทำเองด้วย `python render_deploy.py` หลัง push (ใช้ RENDER_API_KEY บนเครื่องนี้ "
+                   "ถ้าขึ้นว่าไม่มี key ค่อยส่ง cloud) ยกเว้นงานที่เครื่องนี้ทำไม่ได้จริง เช่น ตั้งค่า env บน Render, "
                    "clasp/Apps Script, ทดสอบหน้าเว็บด้วย browser/แคปจอ, ต้องใช้ secret หรือ integration ที่เครื่องนี้ไม่มี "
                    "— กรณีนั้นทำส่วนที่ทำได้ก่อน แล้วจบคำตอบด้วยบรรทัด [[CLOUD: สรุปสิ่งที่ต้องให้วินฝั่ง cloud ทำต่อ + สิ่งที่ทำไปแล้ว]] "
                    "bridge จะส่งต่อให้อัตโนมัติ ห้ามใช้ถ้าทำเองได้] ")
-LOCAL_RULES_V = 2
+LOCAL_RULES_V = 3
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
