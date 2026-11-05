@@ -304,6 +304,16 @@ def status_recap(asset, set_key):
             parts.append(f"วันละ {a['per_day']} ไม้")
     return f"{label}: " + " | ".join(parts)
 
+def _live_price_line():
+    """ราคาสดจากแดชบอร์ด ณ ตอนนี้ — แนบเข้าอีเวนต์กันมิดาสเอาเลขเก่าจาก memory มาเล่า"""
+    try:
+        m = dash_get_market().get("xau") or {}
+        if m.get("price"):
+            return f"ข้อมูลสดจากแดชบอร์ด: ราคาทอง {m['price']} (อัปเดต {m.get('last_check','-')}) — ใช้เลขนี้เท่านั้น ห้ามเอาราคาจากความจำเก่า"
+    except Exception:
+        pass
+    return ""
+
 def _with_recap(text, touched):
     if not touched:
         return text
@@ -1508,7 +1518,10 @@ def main():
                         os.remove(pending_path)
                     except Exception:
                         pass
+                live = _live_price_line()
                 ev = f"[EVENT] รอบสรุปตลาด {hhmm} — เรียก get_market_intel แล้วสรุปภาพรวมตลาดให้พี่สั้นๆ"
+                if live:
+                    ev += "\n" + live
                 if held:
                     ev += f"\n\nอีเวนต์ระหว่างวันที่ต้องรายงานรวมด้วย:\n{held[:2000]}"
                 print(f"📨 scheduled report {hhmm}")
@@ -1530,7 +1543,8 @@ def main():
                     if ev:
                         if "ออเดอร์" in ev or "ปิดแล้ว" in ev:
                             print(f"📨 urgent event: {ev[:100]}")
-                            reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
+                            live = _live_price_line()
+                            reply = run_agent(ev + ("\n" + live if live else ""), TELEGRAM_CHAT_ID, None)
                             if reply:
                                 tg_send(reply)
                         else:
