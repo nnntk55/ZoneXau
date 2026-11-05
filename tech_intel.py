@@ -178,9 +178,15 @@ def _levels(frames, price):
     return out[:10]
 
 
+def _zn_dn(z):
+    """True = โซนฝั่งรับ (demand ใต้ราคา), False = ฝั่งต้าน (supply เหนือราคา)"""
+    k = z["kind"]
+    return "Demand" in k or "ล่าง" in k or "Bullish" in k
+
+
 def _zones(frames, price):
-    """Zone Engine มาตรฐาน: Supply/Demand (base ก่อน impulse), FVG, Liquidity Sweep
-    ทุกโซนมีขอบจริง/tf/คะแนน/touches/invalidation — algorithmic detection ไม่ใช่ order block ฝันลอย"""
+    """Zone Engine: Supply/Demand (base ก่อน impulse + แท่งสุดขั้วของสวิงตามวิธีนิน), FVG, Liquidity Sweep
+    โซนซ้อน/ติดกันถูกรวมเป็นกล่องเดียว (sideway ในกรอบเดิม = โซนเดิมยังใช้ได้) นับ touches ทุกโซน"""
     zones = []
     for tfkey, tail_n in (("1d", 80), ("4h", 100), ("1h", 120)):
         df = frames.get(tfkey)
@@ -192,63 +198,95 @@ def _zones(frames, price):
         atr = sum(tr[-14:]) / min(14, len(tr)) if tr else 0
         if not atr:
             continue
+        tfz = []
         for i in range(2, len(seg) - 1):
             # ---- FVG: ช่องว่าง 3 แท่ง ----
             if L[i] > H[i - 2] + 0.05 * atr:  # bullish gap
-                zones.append({"kind": "Bullish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i]), 1),
+                tfz.append({"kind": "Bullish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i]), 1),
                               "lower": round(float(H[i - 2]), 1), "bar": i})
             if H[i] < L[i - 2] - 0.05 * atr:  # bearish gap
-                zones.append({"kind": "Bearish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i - 2]), 1),
+                tfz.append({"kind": "Bearish FVG", "tf": TF_LABEL[tfkey], "upper": round(float(L[i - 2]), 1),
                               "lower": round(float(H[i]), 1), "bar": i})
             # ---- Supply/Demand: แท่ง base สลับสี ตามด้วย impulse >= 2x ATR ----
             move = C[i + 1] - O[i + 1]
             if move >= 2 * atr and C[i] < O[i]:  # แท่งแดงฐานก่อนยิงขึ้น = demand
-                zones.append({"kind": "Demand", "tf": TF_LABEL[tfkey], "upper": round(float(O[i]), 1),
+                tfz.append({"kind": "Demand", "tf": TF_LABEL[tfkey], "upper": round(float(O[i]), 1),
                               "lower": round(float(L[i]), 1), "bar": i, "impulse": round(move / atr, 1)})
             if move <= -2 * atr and C[i] > O[i]:  # แท่งเขียวฐานก่อนยิงลง = supply
-                zones.append({"kind": "Supply", "tf": TF_LABEL[tfkey], "upper": round(float(H[i]), 1),
+                tfz.append({"kind": "Supply", "tf": TF_LABEL[tfkey], "upper": round(float(H[i]), 1),
                               "lower": round(float(O[i]), 1), "bar": i, "impulse": round(abs(move) / atr, 1)})
         # ---- โซนแบบนิน: แท่งสุดขั้วของแต่ละสวิง = โซน (ต้าน=แท่ง high สูงสุดรอบ, รับ=แท่ง low ต่ำสุดรอบ) ----
         hs, ls = _swings(seg)
-        for si, px in hs[-6:]:
+        for si, px in hs[-10:]:
             top = float(H[si]); bot = float(min(O[si], C[si]))
-            zones.append({"kind": "Supply (swing)", "tf": TF_LABEL[tfkey],
-                          "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
-                          "impulse": round((top - bot) / atr, 1) if atr else 0})
-        for si, px in ls[-6:]:
+            tfz.append({"kind": "Supply (swing)", "tf": TF_LABEL[tfkey],
+                        "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
+                        "impulse": round((top - bot) / atr, 1) if atr else 0})
+        for si, px in ls[-10:]:
             bot = float(L[si]); top = float(max(O[si], C[si]))
-            zones.append({"kind": "Demand (swing)", "tf": TF_LABEL[tfkey],
-                          "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
-                          "impulse": round((top - bot) / atr, 1) if atr else 0})
+            tfz.append({"kind": "Demand (swing)", "tf": TF_LABEL[tfkey],
+                        "upper": round(top, 1), "lower": round(bot, 1), "bar": si,
+                        "impulse": round((top - bot) / atr, 1) if atr else 0})
         # ---- Liquidity sweep: ทะลุ swing แล้วปิดกลับ ----
         for si, px in hs[-4:]:
             later = [j for j in range(si + 1, len(seg)) if H[j] > px and C[j] < px]
             if later:
-                zones.append({"kind": "Liquidity Sweep (บน)", "tf": TF_LABEL[tfkey],
-                              "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
-                              "bar": later[-1], "swept": round(float(px), 1)})
+                tfz.append({"kind": "Liquidity Sweep (บน)", "tf": TF_LABEL[tfkey],
+                            "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
+                            "bar": later[-1], "swept": round(float(px), 1)})
         for si, px in ls[-4:]:
             later = [j for j in range(si + 1, len(seg)) if L[j] < px and C[j] > px]
             if later:
-                zones.append({"kind": "Liquidity Sweep (ล่าง)", "tf": TF_LABEL[tfkey],
-                              "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
-                              "bar": later[-1], "swept": round(float(px), 1)})
+                tfz.append({"kind": "Liquidity Sweep (ล่าง)", "tf": TF_LABEL[tfkey],
+                            "upper": round(float(px * 1.001), 1), "lower": round(float(px * 0.999), 1),
+                            "bar": later[-1], "swept": round(float(px), 1)})
+        # ---- รวมโซนที่ซ้อน/ติดกันฝั่งเดียวกันเป็นกล่องเดียว (sideway ในกรอบเดิม = โซนเดียว) ----
+        tfz2 = []
+        for side in (False, True):
+            grp = sorted((z for z in tfz if _zn_dn(z) == side), key=lambda z: -z["upper"])
+            cur = None
+            for z in grp:
+                if cur is not None and z["upper"] >= cur["lower"]:
+                    cur["lower"] = min(cur["lower"], z["lower"])
+                    cur["upper"] = max(cur["upper"], z["upper"])
+                    cur["bar"] = min(cur["bar"], z["bar"])
+                    cur["merged"] = cur.get("merged", 1) + 1
+                else:
+                    if cur is not None:
+                        tfz2.append(cur)
+                    cur = dict(z)
+            if cur is not None:
+                tfz2.append(cur)
+        # ---- นับ touches: ครั้งที่ราคาเข้าโซนแล้วไม่ทะลุ (sideway แตะบ่อย = โซนแข็ง) ----
+        for z in tfz2:
+            t = 0; inz = False
+            for j in range(z["bar"], len(seg)):
+                inside = L[j] <= z["upper"] and H[j] >= z["lower"]
+                if inside and not inz:
+                    t += 1
+                inz = inside
+            z["touches"] = t
+            if z.get("merged", 1) > 1:
+                z["kind"] = f"{'Demand' if _zn_dn(z) else 'Supply'} (รวม {z['merged']} จุด)"
+        zones.extend(tfz2)
     # ---- ประเมินแต่ละโซน: touches / status / คะแนน / invalidation ----
     out = []
     for z in zones:
         mid = (z["upper"] + z["lower"]) / 2
         z["dist_pct"] = round(abs(mid - price) / price * 100, 2) if price else 99
-        dn = "Demand" in z["kind"] or "ล่าง" in z["kind"] or "Bullish" in z["kind"]
+        dn = _zn_dn(z)
         z["invalidation"] = round(z["lower"] * 0.999, 1) if dn else round(z["upper"] * 1.001, 1)
         z["status"] = "ทะลุแล้ว" if price and ((dn and price < z["lower"] * 0.999)
-                                             or (not dn and price > z["upper"] * 1.001)) else "ใช้ได้อยู่"
+                                             or (not dn and price > z["upper"] * 1.001)) else (
+            "ราคาอยู่ในโซน" if price and z["lower"] <= price <= z["upper"] else "ใช้ได้อยู่")
         score = (2 if z.get("impulse", 0) >= 2 else 1) + (2 if z["dist_pct"] < 0.5 else 1 if z["dist_pct"] < 1 else 0)
         score += {"D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
+        score += 1 if z.get("touches", 0) >= 3 else 0.5 if z.get("touches", 0) >= 2 else 0
         if z["status"] == "ทะลุแล้ว":
             score = 0
         z["strength"] = score
         out.append(z)
-    out = [z for z in out if z["status"] == "ใช้ได้อยู่"]
+    out = [z for z in out if z["status"] != "ทะลุแล้ว"]
     out.sort(key=lambda z: (-z["strength"], z["dist_pct"]))
     return out[:8]
 

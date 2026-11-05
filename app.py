@@ -1414,13 +1414,14 @@ TECH_BODY = """
 
     {% if t.get('zones') %}
     <div class="card">
-        <h2>โซนสำคัญ — Supply/Demand · FVG · Liquidity Sweep (ตรวจจับอัลกอริทึม ไม่ใช่ order block ฝันลอย)</h2>
-        <table><tr><th>ชนิด</th><th>TF</th><th>โซน (ล่าง-บน)</th><th>ห่าง</th><th>แรง</th><th>invalidation</th></tr>
+        <h2>โซนสำคัญ — แท่งสุดขั้วสวิง · Supply/Demand · FVG · Liquidity Sweep (ตรวจจับอัลกอริทึม ไม่ใช่ order block ฝันลอย)</h2>
+        <table><tr><th>ชนิด</th><th>TF</th><th>โซน (ล่าง-บน)</th><th>ห่าง</th><th>แตะ</th><th>สถานะ</th><th>แรง</th><th>invalidation</th></tr>
         {% for z in t.zones %}
         <tr><td>{{ z.kind }}</td><td>{{ z.tf }}</td><td>{{ '{:,.0f}'.format(z.lower) }}–{{ '{:,.0f}'.format(z.upper) }}</td>
-            <td>{{ z.dist_pct }}%</td><td>{{ z.strength }}</td><td>{{ '{:,.0f}'.format(z.invalidation) }}</td></tr>
+            <td>{{ z.dist_pct }}%</td><td>{{ z.touches or 0 }}</td><td>{{ z.status }}</td><td>{{ z.strength }}</td>
+            <td>{{ '{:,.0f}'.format(z.invalidation) }}</td></tr>
         {% endfor %}</table>
-        <div class="err" style="color:#9b8477">แรง = คะแนนจากขนาด impulse + ความใกล้ราคา + น้ำหนัก TF — โซนที่ทะลุแล้วถูกตัดทิ้งเอง</div>
+        <div class="err" style="color:#9b8477">โซนซ้อน/ติดกันถูกรวมเป็นกล่องเดียว (รวม N จุด = sideway ในกรอบเดิม) · แตะ = ครั้งที่ราคาหวนทดสอบโซนโดยไม่ทะลุ ยิ่งบ่อยยิ่งแข็ง · แรง = คะแนนจากขนาด impulse + touches + ความใกล้ราคา + น้ำหนัก TF — โซนที่ทะลุแล้วถูกตัดทิ้งเอง</div>
     </div>
     {% endif %}
 
