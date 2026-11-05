@@ -202,6 +202,29 @@ def _fetch_headlines():
             "geo": _rss_items("geopolitics OR sanctions OR \"central bank\" gold", 5)}
 
 
+# ---------- COT: สถานะนักลงทุนใน gold futures (CFTC รายสัปดาห์) ----------
+def _fetch_cot():
+    r = requests.get("https://www.cftc.gov/dea/newcot/f_disagg.txt", headers=UA, timeout=20)
+    for line in r.text.splitlines():
+        if not line.startswith('"GOLD - COMMODITY'):
+            continue
+        parts = [x.strip().strip('"') for x in line.split(",")]
+        date = next((x for x in parts[:5] if len(x) == 10 and x[4] == "-"), "")
+        nums = [int(x) for x in parts[7:23] if x.lstrip("-").isdigit()]
+        if len(nums) < 16:
+            return None
+        out = {"date": date, "open_interest": nums[0], "mm_long": nums[6], "mm_short": nums[7],
+               "mm_net": nums[6] - nums[7]}
+        c = _load()
+        prev = (c.get("cot_prev") or {})
+        if prev.get("date") and prev["date"] != date:
+            out["mm_net_chg_wow"] = out["mm_net"] - prev.get("mm_net", out["mm_net"])
+        c["cot_prev"] = {"date": date, "mm_net": out["mm_net"]}
+        _save(c)
+        return out
+    return None
+
+
 # ---------- ตอบ 5 คำถาม ----------
 def _five(prices, fred, cal):
     dxy = (prices or {}).get("dxy") or {}
@@ -403,13 +426,36 @@ def _thesis(qs, chg):
             t += " | เปลี่ยนแปลงสัปดาห์: " + ", ".join(drift)
     c = _load()
     log = c.setdefault("thesis_log", {})
+    sig = "bull" if bull and not bear else "bear" if bear and not bull else "mid"
+    invalidated = ""
+    prev_sig = (c.get("thesis_sig") or {}).get("sig")
+    prev_date = (c.get("thesis_sig") or {}).get("date")
+    if prev_sig and prev_sig != "mid" and sig != "mid" and prev_sig != sig and prev_date != today:
+        invalidated = f"สัญญาณพลิกจาก {prev_sig} ({prev_date}) — thesis เดิมอาจใช้ไม่ได้แล้ว"
     if log.get(today) != t:
         log[today] = t
         for dt in (sorted(log)[:-30] if len(log) > 30 else []):
             del log[dt]
-        _save(c)
+    c["thesis_sig"] = {"date": today, "sig": sig}
+    _save(c)
     recent = [{"date": dt, "thesis": log[dt]} for dt in sorted(log, reverse=True)[:5]]
-    return t, recent
+    return t, recent, invalidated
+
+
+def _scenario(qs, regime, changes, cot):
+    """Forecast & Scenario Engine — 3 สถานการณ์พร้อมหลักฐานและเงื่อนไขหักล้าง (ไม่ใช่คำทำนายราคา)"""
+    bull = [q["a"] for q in qs if q["sig"] == "bull"]
+    bear = [q["a"] for q in qs if q["sig"] == "bear"]
+    cot_note = ""
+    if cot and cot.get("mm_net") is not None:
+        cot_note = f"กองทุน MM net {'long' if cot['mm_net']>0 else 'short'} {abs(cot['mm_net']):,} สัญญา"
+        (bull if cot["mm_net"] > 0 else bear).append(cot_note)
+    return {
+        "A_bullish": {"หลักฐาน": bull or ["ยังไม่มี"], "หักล้างเมื่อ": "DXY/ยีลด์กลับขึ้นแรงต่อเนื่อง หรือหลุดแนวที่ตั้งไว้"},
+        "B_bearish": {"หลักฐาน": bear or ["ยังไม่มี"], "หักล้างเมื่อ": "ยีลด์/real yield กลับลงต่อ หรือเกิดข่าวเสี่ยงใหญ่"},
+        "C_neutral": {"หลักฐาน": ["ข้อมูลขัดกัน/นิ่ง"] if not bull and not bear or (bull and bear) else [],
+                      "หักล้างเมื่อ": "ข่าวแรง/ตัวเลขใหญ่สัปดาห์นี้ออกผิดคาดชัด"},
+        "หมายเหตุ": "สถานการณ์จากข้อมูลจริง ณ เวลาดึง — ไม่ใช่คำสั่งเทรด"}
 
 
 def get_market_intel():
@@ -423,9 +469,11 @@ def get_market_intel():
         cal.setdefault("today", []); cal.setdefault("upcoming", [])
     if isinstance(heads, list):  # cache รูปแบบเก่า (list เดี่ยว) -> โครงใหม่
         heads = {"gold": heads, "geo": []}
+    cot, _ = _cached("cot", 518400, _fetch_cot, errors)  # CFTC รายสัปดาห์
     qs, summary = _five(prices, fred, cal)
     snap, changes = _snap_and_change(prices or {}, fred or {})
-    thesis, thesis_log = _thesis(qs, changes)
+    thesis, thesis_log, thesis_invalidated = _thesis(qs, changes)
+    regime = _regime(prices or {}, fred or {})
     return {"fetched_thai": _thai(time.time()),
             "prices": prices or {},
             "symbol_names": SYMBOL_NAMES,
@@ -435,7 +483,10 @@ def get_market_intel():
             "calendar": cal or {"today": [], "upcoming": []},
             "headlines": heads or {"gold": [], "geo": []},
             "news_guide": NEWS_GUIDE,
-            "regime": _regime(prices or {}, fred or {}),
+            "cot": cot or {},
+            "regime": regime,
+            "scenario": _scenario(qs, regime, changes, cot),
+            "thesis_invalidated": thesis_invalidated,
             "divergences": _divergences(prices or {}),
             "change_detection": changes,
             "alerts": _alerts(prices or {}, qs),

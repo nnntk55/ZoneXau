@@ -942,6 +942,7 @@ def run_asset_radar(asset_key):
             check_open_position(asset_key)
             announce_today_news()
             announce_morning_intel()
+            market_intel_watch()
 
             # คำถามยืนยันค้างเกิน 30 นาที → หมดอายุอัตโนมัติ ปล่อยให้สัญญาณแท่งใหม่เข้าได้
             pend = ASSETS[asset_key].get("pending_confirmation")
@@ -1483,6 +1484,41 @@ def announce_morning_intel():
     midas_inbox("[EVENT] MORNING_INTEL: สรุป Market Intelligence เช้าให้พี่ — เรียก get_market_intel + get_news แล้วรายงานตามโครง: "
                 "1) ภาพรวมตลาด (ทอง/DXY/ยีลด์/real yield ขยับยังไง) 2) ข่าววันนี้ 3) headline ทอง+ภูมิรัฐศาสตร์ "
                 "4) เช็คลิสต์ 5 คำถาม+สรุปสัญญาณ 5) regime/divergence/alerts ที่ระบบตรวจเจอ 6) thesis วันนี้เทียบวันก่อน 7) มุมมองล่วงหน้า 1-7 วัน — ห้ามเดาข่าวเอง")
+
+MI_WATCH = {"t": 0, "sent": {}}
+
+def market_intel_watch():
+    """เฝ้า macro ระหว่างวัน (ทุก ~5 นาที) — มี alerts/regime/divergence/thesis flip ใหม่จริงค่อยแจ้งเข้า inbox มิดาส
+    กันสแปม: key เดียวกันไม่ส่งซ้ำภายใน 2 ชม. — ใช้ข้อมูลจริงจาก market_intel เท่านั้น"""
+    if time.time() - MI_WATCH["t"] < 300:
+        return
+    MI_WATCH["t"] = time.time()
+    try:
+        import market_intel
+        d = market_intel.get_market_intel()
+        items = []
+        for a in d.get("alerts") or []:
+            items.append((a.get("level", "high"), a.get("msg", "")))
+        for v in d.get("divergences") or []:
+            items.append(("medium", v))
+        if d.get("thesis_invalidated"):
+            items.append(("critical", "Thesis flip: " + d["thesis_invalidated"]))
+        cot = d.get("cot") or {}
+        if abs(cot.get("mm_net_chg_wow") or 0) >= 20000:
+            items.append(("high", f"COT: กองทุน MM net เปลี่ยน {cot['mm_net_chg_wow']:+,} สัญญา/สัปดาห์ (ตอนนี้ net {cot.get('mm_net'):+,})"))
+        new = []
+        for lv, msg in items:
+            if msg and time.time() - MI_WATCH["sent"].get(msg, 0) > 7200:
+                MI_WATCH["sent"][msg] = time.time()
+                new.append((lv, msg))
+        if len(MI_WATCH["sent"]) > 100:
+            MI_WATCH["sent"] = {k: v for k, v in MI_WATCH["sent"].items() if time.time() - v < 14400}
+        if new:
+            top = "CRITICAL" if any(lv == "critical" for lv, _ in new) else "HIGH"
+            txt = "\n".join(f"[{lv.upper()}] {m}" for lv, m in new)
+            midas_inbox(f"[EVENT] MACRO_ALERT ({top}):\n{txt}\nสรุปให้พี่สั้นๆ จากข้อมูลจริงเท่านั้น บอกผลต่อทองและแนวที่ตั้งว่าเสี่ยงไหม ห้ามแนะนำเข้าออเดอร์")
+    except Exception as e:
+        print(f"market intel watch error: {e}")
 
 def is_weekend_thai():
     """เสาร์–อาทิตย์เวลาไทย = ห้ามเปิดออเดอร์ใหม่ (หลังเที่ยงคืนวันศุกร์เป็นต้นไป)"""
