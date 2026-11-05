@@ -92,13 +92,28 @@ def devin_create(text, prev=None):
     return None, None, f"{r.status_code} {r.text[:200]}"
 
 def devin_message(sid, text):
-    try:
-        r = requests.post(f"{API}/sessions/{sid}/message", json={"message": text},
-                          headers={"Authorization": f"Bearer {KEY}"}, timeout=20)
-        return r.status_code in (200, 201)
-    except Exception as e:
-        print(f"message err: {e}")
-        return False
+    """ส่งข้อความเข้า session เดิม — ปลุก session ที่หลับอาจตอบช้า ถ้า timeout/error ให้เช็คว่าข้อความเข้าไปแล้วหรือยังก่อนถือว่าพลาด"""
+    for attempt in range(3):
+        try:
+            r = requests.post(f"{API}/sessions/{sid}/message", json={"message": text},
+                              headers={"Authorization": f"Bearer {KEY}"}, timeout=90)
+            if r.status_code in (200, 201):
+                return True
+            print(f"message fail {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            print(f"message err: {e}")
+        time.sleep(5)
+        if message_landed(sid, text):
+            return True
+    return False
+
+def message_landed(sid, text):
+    s = devin_session(sid)
+    want = text.strip()[:200]
+    for m in reversed((s or {}).get("messages") or []):
+        if m.get("type") == "user_message":
+            return str(m.get("message", "")).strip()[:200] == want
+    return False
 
 def devin_session(sid):
     try:
@@ -114,21 +129,6 @@ def session_dead(s):
     st = " ".join(str(s.get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
     return "quota" in st or (s.get("status_enum") or "").lower() == "expired"
 
-AWAKE = ("working", "blocked", "resumed", "resume_requested", "resume_requested_frontend")
-
-def woke_up(sid, before, wait=60):
-    """session ที่หลับอยู่ ส่งข้อความแล้วต้องตื่น (status เปลี่ยน) ภายใน wait วิ ไม่งั้นถือว่าปลุกไม่ขึ้น"""
-    end = time.time() + wait
-    while time.time() < end:
-        time.sleep(5)
-        s = devin_session(sid)
-        if s and session_dead(s):
-            return False
-        now = ((s or {}).get("status_enum") or "").lower()
-        if now and now != before:
-            return True
-    return False
-
 def session_why(s):
     """เหตุผลที่ session เดิมใช้ต่อไม่ได้ แบบอ่านรู้เรื่อง"""
     st = " ".join(str((s or {}).get(k, "")) for k in ("status", "status_enum", "status_detail")).lower()
@@ -142,30 +142,26 @@ def quota_err(err):
     return "quota" in (err or "").lower() or "limit" in (err or "").lower()
 
 def deliver(st, text):
-    """ส่งข้อความถึงวิน: session เดิมถ้ายังใช้ได้ ไม่งั้นเปิดใหม่พร้อมลิงก์ session เก่า
-    คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่"""
+    """ส่งข้อความถึงวินใน session เดิมเสมอ (session ที่หลับ ส่งข้อความเข้าไปแล้วตื่นเอง)
+    เปิด session ใหม่เฉพาะตอน session เดิมหมดโควต้า/หมดอายุจริง หรือยังไม่เคยมี session
+    คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่; ส่งไม่เข้าแต่ session ยังดีอยู่ = (False, None, "send_fail") ให้ลองใหม่ทีหลัง"""
     sid = st.get("session_id")
-    info = devin_session(sid) if sid else None
-    if sid and session_dead(info):
-        st["prev_session"] = sid
-        st["switch_why"] = session_why(info)
-        st["session_id"] = None; st["seen"] = 0
-        sid = None
     if sid:
-        before = ((info or {}).get("status_enum") or "").lower()
-        if devin_message(sid, text):
-            if not info or before in AWAKE or woke_up(sid, before):
-                return True, None, ""
-            st["switch_why"] = "ปลุก session เดิมไม่ขึ้น"
-        else:
-            st["switch_why"] = "ส่งข้อความเข้า session เดิมไม่ได้"
-        st["prev_session"] = sid
-        st["session_id"] = None; st["seen"] = 0
+        info = devin_session(sid)
+        if session_dead(info):
+            st["prev_session"] = sid
+            st["switch_why"] = session_why(info)
+            st["session_id"] = None; st["seen"] = 0
+            sid = None
+    if sid:
+        return (True, None, "") if devin_message(sid, text) else (False, None, "send_fail")
     nsid, url, err = devin_create(text, st.get("prev_session"))
     if nsid:
         st["session_id"] = nsid; st["seen"] = 0
         return True, url or f"https://app.devin.ai/sessions/{nsid}", ""
     return False, None, err
+
+BATCH_WAIT = 6  # วิ: รอข้อความถัดไปก่อนส่ง ถ้านินพิมพ์หลายข้อความติดกัน
 
 REMINDERS_URL = "https://raw.githubusercontent.com/nnntk55/ZoneXau/main/reminders.json"
 
@@ -246,11 +242,12 @@ def main():
         return
     st = load_state()
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
-    last_poll = last_rem = 0
+    last_poll = last_rem = retry_at = 0
+    last_in = time.time()
     while True:
         try:
             # รับข้อความพี่
-            upd = tg("getUpdates", offset=st["offset"], timeout=30)
+            upd = tg("getUpdates", offset=st["offset"], timeout=2 if st.get("pending") else 30)
             for u in upd.get("result", []):
                 st["offset"] = u["update_id"] + 1
                 msg = u.get("message") or {}
@@ -273,14 +270,25 @@ def main():
                     st["session_id"] = None; st["seen"] = 0
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
                     continue
+                # รวมข้อความที่พิมพ์ติดๆ กันเป็นก้อนเดียว ปลุกวินครั้งเดียว (ประหยัดโควต้า)
+                st.setdefault("pending", []).append(text)
+                last_in = time.time()
+                save_state(st)
+            if st.get("pending") and time.time() - last_in >= BATCH_WAIT and time.time() >= retry_at:
+                text = "\n\n".join(st["pending"])
                 had = st.get("session_id")
                 ok, url, err = deliver(st, text)
-                if ok and url:
-                    send((f"session เดิมใช้ต่อไม่ได้ ({st.pop('switch_why', 'session จบงาน/หลับไปแล้ว')}) เปิดใหม่แล้ว วินอ่านเรื่องเดิมต่อได้ ไม่หาย\n" if had
-                          else "เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n") + url)
-                elif not ok:
-                    send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ลองใหม่ทีหลังนะนิน" if quota_err(err)
-                         else "ติดต่อ Devin ไม่ได้ตอนนี้ ลองใหม่อีกทีนะนิน")
+                if ok:
+                    st["pending"] = []; st.pop("send_warned", None)
+                    if url:
+                        send((f"session เดิมใช้ต่อไม่ได้ ({st.pop('switch_why', 'session หมดอายุ')}) เปิดใหม่แล้ว วินอ่านเรื่องเดิมต่อได้ ไม่หาย\n" if had
+                              else "เปิดเซสชันใหม่แล้ว — กำลังทำงาน\n") + url)
+                else:
+                    retry_at = time.time() + 60
+                    if not st.get("send_warned"):
+                        st["send_warned"] = True
+                        send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ข้อความเก็บไว้แล้ว จะส่งให้เองเมื่อเข้าได้" if quota_err(err)
+                             else "ส่งข้อความเข้า session เดิมยังไม่ได้ ข้อความเก็บไว้แล้ว จะลองส่งใหม่ทุก 1 นาที (ไม่เปิด session ใหม่)")
                 save_state(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
             if st.get("session_id") and time.time() - last_poll > 10:
