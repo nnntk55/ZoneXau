@@ -309,6 +309,43 @@ def _zones(frames, price):
     return out[:8]
 
 
+def _flow_read(tfs, zones, price):
+    """บทอ่านทิศตามวิธีนิน: H4 ยังเป็นขา + stoch D1 ไหลยังไม่สุด + ทะลุโซนเก่าแต่ยังไม่ชนโซนถัดไป
+    → มีแนวโน้มไปต่อถึงโซนถัดไปก่อนค่อยประเมินกลับตัว"""
+    d1, h4 = tfs.get("1d") or {}, tfs.get("4h") or {}
+    k, dd = d1.get("stoch_k"), d1.get("stoch_d")
+    if not price or k is None:
+        return None
+    def nxt(side_up):
+        cand = sorted((z for z in zones if z["lower"] > price), key=lambda z: z["lower"]) if side_up \
+            else sorted((z for z in zones if z["upper"] < price), key=lambda z: -z["upper"])
+        return cand[0] if cand else None
+    stoch_up = dd is None or k >= dd
+    tail = ("stoch D1 ไหลขึ้น ยังไม่สุด" if stoch_up and d1.get("stoch_zone") != "overbought"
+            else "stoch D1 ไหลลง ยังไม่สุด" if not stoch_up and d1.get("stoch_zone") != "oversold"
+            else f"stoch D1 {d1.get('stoch_zone')} แล้ว (K {k:.0f}/D {dd:.0f}) — ใกล้จุดกลับตัว" if dd is not None
+            else f"stoch D1 K {k:.0f}")
+    for up in (True, False):
+        ok = (h4.get("trend") == ("bull" if up else "bear")) and (stoch_up == up) and \
+             d1.get("stoch_zone") != ("overbought" if up else "oversold") and \
+             d1.get("stoch_cross") != ("bear cross" if up else "bull cross")
+        if ok:
+            z = nxt(up)
+            if not z:
+                return {"direction": "up" if up else "down", "next_zone": None,
+                        "read": f"H4 {'ขาขึ้น' if up else 'ขาลง'} + {tail} — แต่ไม่เห็นโซนถัดไปในระบบ ระวังสัญญาณกลับตัวเอง"}
+            edge = z["lower"] if up else z["upper"]
+            gap = round(abs(edge - price) / price * 100, 2)
+            side = "ต้าน" if up else "รับ"
+            return {"direction": "up" if up else "down", "next_zone": z,
+                    "read": (f"H4 {'ขาขึ้น' if up else 'ขาลง'} + {tail} + ราคาทะลุ/ผ่านโซนเก่ามาแล้ว → "
+                             f"มีแนวโน้มไปต่อชน{side}ถัดไป {z['lower']:,.0f}–{z['upper']:,.0f} ({z['kind']} {z['tf']}, "
+                             f"ห่าง ~{gap}%) ก่อนค่อยประเมินกลับตัว — การวิเคราะห์ไม่ใช่คำสั่งเข้าออเดอร์")}
+    return {"direction": None,
+            "read": (f"H4 {h4.get('trend')} + {tail} — เงื่อนไขไม่เป็นไปทางเดียวกันชัด "
+                     f"(ต้อง H4 ขาเดียว + stoch D1 ไหลทางเดียวยังไม่สุด) ระวัง sideway/พักฐาน")}
+
+
 def _pivots(frames):
     """Classic floor-trader pivot จากแท่งปิดแล้ว (prev day / prev week) — สูตรมาตรฐาน โปร่งใสทุกตัว"""
     out = {}
@@ -399,5 +436,6 @@ def analyze(frames, mi=None):
     return {"fetched_thai": datetime.now(th).strftime("%d/%m %H:%M"),
             "tfs": tfs, "missing_tfs": missing, "daily_bias": bias,
             "levels": levels, "pivots": pivots, "setups": setups, "zones": zones,
+            "flow_read": _flow_read(tfs, zones, price),
             "volatility": (tfs.get("1h") or {}).get("atr_pct"),
             "note": "วิเคราะห์จากแท่ง MT5 จริง — แผนเทรดเป็นแนวทางประเมิน ไม่ใช่คำสั่งยิงออเดอร์"}
