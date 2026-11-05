@@ -275,18 +275,27 @@ def _zones(frames, price):
         mid = (z["upper"] + z["lower"]) / 2
         z["dist_pct"] = round(abs(mid - price) / price * 100, 2) if price else 99
         dn = _zn_dn(z)
+        # ---- กฎนิน: ทะลุแนว = สลับข้างทันที (รับ→ต้าน, ต้าน→รับ ใช้ได้ทั้งฝั่ง buy/sell) ----
+        broken = price and ((dn and price < z["lower"] * 0.999)
+                            or (not dn and price > z["upper"] * 1.001))
+        if broken:
+            dn = not dn
+            z["flipped"] = True
+            tag = f" (สลับข้าง รวม {z['merged']} จุด)" if z.get("merged", 1) > 1 else " (สลับข้าง)"
+            z["kind"] = ("Demand" if dn else "Supply") + tag
         z["invalidation"] = round(z["lower"] * 0.999, 1) if dn else round(z["upper"] * 1.001, 1)
-        z["status"] = "ทะลุแล้ว" if price and ((dn and price < z["lower"] * 0.999)
-                                             or (not dn and price > z["upper"] * 1.001)) else (
-            "ราคาอยู่ในโซน" if price and z["lower"] <= price <= z["upper"] else "ใช้ได้อยู่")
+        if price and z["lower"] <= price <= z["upper"]:
+            z["status"] = "ราคาอยู่ในโซน"
+        elif z.get("flipped"):
+            z["status"] = "สลับเป็นแนวรับ" if dn else "สลับเป็นแนวต้าน"
+        else:
+            z["status"] = "ใช้ได้อยู่"
         score = (2 if z.get("impulse", 0) >= 2 else 1) + (2 if z["dist_pct"] < 0.5 else 1 if z["dist_pct"] < 1 else 0)
         score += {"D1": 2, "H4": 1.5, "H1": 1}.get(z["tf"], 0.5)
         score += 1 if z.get("touches", 0) >= 3 else 0.5 if z.get("touches", 0) >= 2 else 0
-        if z["status"] == "ทะลุแล้ว":
-            score = 0
+        score += 0.5 if z.get("flipped") else 0
         z["strength"] = score
         out.append(z)
-    out = [z for z in out if z["status"] != "ทะลุแล้ว"]
     out.sort(key=lambda z: (-z["strength"], z["dist_pct"]))
     return out[:8]
 
