@@ -25,6 +25,25 @@ def tg(method, **kw):
         print(f"tg {method} err: {e}")
         return {}
 
+def transcribe(data, name):
+    """ถอดเสียงเป็นข้อความด้วย Groq Whisper (ใช้ GROQ_API_KEY ตัวเดียวกับมิดาส) — ไม่มี key/พลาด คืน "" """
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        return ""
+    try:
+        r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                          headers={"Authorization": f"Bearer {key}"},
+                          files={"file": (name, data)},
+                          data={"model": os.getenv("GROQ_STT_MODEL", "whisper-large-v3"), "language": "th"},
+                          timeout=120)
+        if r.status_code != 200:
+            print(f"stt fail {r.status_code}: {r.text[:200]}")
+            return ""
+        return (r.json().get("text") or "").strip()
+    except Exception as e:
+        print(f"stt err: {e}")
+        return ""
+
 def tg_image_attachment(msg, local=False):
     """โหมด local: เซฟไฟล์ลงโฟลเดอร์งานของ Devin CLI แล้วคืนบรรทัดบอก path แทน
     โหลดรูป/ข้อความเสียงจาก Telegram (photo, ไฟล์รูป, voice, audio) -> อัปขึ้น Devin attachments -> คืนบรรทัด ATTACHMENT ให้ Devin เปิดดูได้"""
@@ -51,6 +70,10 @@ def tg_image_attachment(msg, local=False):
             os.makedirs(d, exist_ok=True)
             path = os.path.join(d, time.strftime("%Y%m%d_%H%M%S_") + name)
             open(path, "wb").write(img)
+            if name.endswith((".ogg", ".mp3", ".m4a", ".wav")) or msg.get("voice") or msg.get("audio"):
+                said = transcribe(img, name)
+                if said:
+                    return f"ถอดเสียงที่นินพูด: {said}\n(ไฟล์เสียง: {path})"
             return f"ไฟล์จากเทเลแกรม: {path}"
         r = requests.post(f"{API}/attachments", files={"file": (name, img)},
                           headers={"Authorization": f"Bearer {KEY}"}, timeout=60)
@@ -354,7 +377,8 @@ def main():
                     if att:
                         text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
                                          else "นินส่งรูปมา เปิดดูและวิเคราะห์")) + "\n" + att
-                        send("ได้เสียงแล้ว วินกำลังฟัง" if is_voice else "ได้รูปแล้ว วินกำลังดู")
+                        send(att.split("\n")[0].replace("ถอดเสียงที่นินพูด:", "วินได้ยินว่า:") if att.startswith("ถอดเสียง")
+                         else "ได้เสียงแล้ว วินกำลังฟัง" if is_voice else "ได้รูปแล้ว วินกำลังดู")
                     else:
                         send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
                 if not text:
