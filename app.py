@@ -1134,7 +1134,7 @@ NEWS_TEMPLATE = """
     </div>
 
     <div class="card">
-        <h2>ปฏิทินเศรษฐกิจ USD (เวลาไทย) {{ '(cache เก่า)' if d.calendar.stale }}</h2>
+        <h2>ปฏิทินเศรษฐกิจ USD + ข่าวแรงสกุลหลัก (เวลาไทย) {{ '(cache เก่า)' if d.calendar.stale }}</h2>
         {% if d.calendar.today %}
         <table><tr><th>เวลา</th><th>ข่าววันนี้</th><th>Impact</th><th>สำคัญต่อทอง</th><th>Forecast</th><th>Previous</th></tr>
         {% for e in d.calendar.today %}

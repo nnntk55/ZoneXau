@@ -756,7 +756,7 @@ def tool_get_news(asset=None):
             return {"error": f"ดึงปฏิทินไม่ได้ ({feed['error']})"
                              + (f" — ลองใหม่ได้ในอีก ~{max(1, wait // 60)} นาที" if wait else "")}
         root = ET.fromstring(feed["xml"].encode("utf-8"))
-        want = {"USD", "ALL"} if not asset else ({"USD", "ALL", "XAU"} if asset == "xau" else {"USD", "ALL"})
+        want = {"USD", "ALL", "EUR", "GBP", "JPY", "CNY", "CHF"} | ({"XAU"} if asset == "xau" else set())  # รวมข่าวแรงธนาคารกลางหลัก เช่น BoE
         from news_feed import ff_event_thai
         today = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%d/%m/%Y")
         evts = []

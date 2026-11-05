@@ -139,6 +139,8 @@ def _news_rank(title):
             return rank
     return ""
 
+_MAJOR_CB = {"EUR", "GBP", "JPY", "CNY", "CHF"}  # ข่าวแรงสกุลหลัก (เช่น BoE/ECB/BoJ) กระทบ DXY/ทองด้วย
+
 def _fetch_calendar():
     from news_feed import get_calendar_xml, ff_event_thai
     feed = get_calendar_xml()
@@ -150,13 +152,13 @@ def _fetch_calendar():
     for e in ET.fromstring(feed["xml"].encode("utf-8")).iter("event"):
         imp = (e.findtext("impact") or "").strip()
         cur = (e.findtext("country") or "").strip()
-        if imp not in ("High", "Medium") or cur != "USD":
+        if not (cur == "USD" and imp in ("High", "Medium")) and not (cur in _MAJOR_CB and imp == "High"):
             continue
         t, d = (e.findtext("time") or "").strip(), (e.findtext("date") or "").strip()
         thai = ff_event_thai(d, t)  # feed เป็น UTC -> +7 (อย่าแปลงเป็น ET เด็ดขาด)
         thai = thai.replace(tzinfo=_TH) if thai else None
         title = e.findtext("title") or ""
-        evts.append({"title": title, "impact": imp, "rank": _news_rank(title),
+        evts.append({"title": title if cur == "USD" else f"[{cur}] {title}", "cur": cur, "impact": imp, "rank": _news_rank(title),
                      "forecast": e.findtext("forecast") or "-",
                      "previous": e.findtext("previous") or "-",
                      "thai": thai.strftime("%d/%m %H:%M") if thai else f"{d} (ทั้งวัน)",
