@@ -1260,29 +1260,31 @@ ANALYST_BODY = """
         <h2>Macro Change Detection (เทียบย้อนหลัง)</h2>
         <table><tr><th>ช่วง</th><th>ทอง %</th><th>DXY %</th><th>US10Y</th><th>Real Yield</th></tr>
         {% for lbl, c in (d.change_detection or {}).items() %}
-        <tr><td>{{ lbl }} (ตั้งแต่ {{ c.since }})</td>
-            <td>{{ '%+.1f'|format(c.fields.gold) if c.fields.gold is not none else '-' }}%</td>
-            <td>{{ '%+.2f'|format(c.fields.dxy) if c.fields.dxy is not none else '-' }}%</td>
-            <td>{{ '%+.2f'|format(c.fields.us10y) if c.fields.us10y is not none else '-' }}</td>
-            <td>{{ '%+.2f'|format(c.fields.real_yield) if c.fields.real_yield is not none else '-' }}</td></tr>
+        {% set f = (c or {}).get('fields') or {} %}
+        <tr><td>{{ lbl }} (ตั้งแต่ {{ (c or {}).get('since') }})</td>
+            <td>{{ '%+.1f'|format(f.get('gold')) ~ '%' if f.get('gold') is not none else '-' }}</td>
+            <td>{{ '%+.2f'|format(f.get('dxy')) ~ '%' if f.get('dxy') is not none else '-' }}</td>
+            <td>{{ '%+.2f'|format(f.get('us10y')) if f.get('us10y') is not none else '-' }}</td>
+            <td>{{ '%+.2f'|format(f.get('real_yield')) if f.get('real_yield') is not none else '-' }}</td></tr>
         {% endfor %}</table>
     </div>
     {% endif %}
 
     <div class="card">
         <h2>COT — สถานะกองทุนใน Gold Futures (CFTC รายสัปดาห์)</h2>
-        {% if d.cot and d.cot.mm_net is not none %}
+        {% set cot = d.cot or {} %}
+        {% if cot.get('mm_net') is not none %}
         <div class="pxgrid">
             <div class="px"><div class="lbl">Managed Money Net</div>
-                <div class="val {{ 'up' if d.cot.mm_net>0 else 'dn' }}">{{ '{:,}'.format(d.cot.mm_net) }}</div>
-                <div class="chg mid">สัญญา ({{ 'long' if d.cot.mm_net>0 else 'short' }})</div></div>
+                <div class="val {{ 'up' if cot.mm_net>0 else 'dn' }}">{{ '{:,}'.format(cot.mm_net) }}</div>
+                <div class="chg mid">สัญญา ({{ 'long' if cot.mm_net>0 else 'short' }})</div></div>
             <div class="px"><div class="lbl">MM Long / Short</div>
-                <div class="val" style="font-size:1rem">{{ '{:,}'.format(d.cot.mm_long) }} / {{ '{:,}'.format(d.cot.mm_short) }}</div></div>
+                <div class="val" style="font-size:1rem">{{ '{:,}'.format(cot.mm_long) if cot.get('mm_long') is not none else '-' }} / {{ '{:,}'.format(cot.mm_short) if cot.get('mm_short') is not none else '-' }}</div></div>
             <div class="px"><div class="lbl">Open Interest</div>
-                <div class="val" style="font-size:1rem">{{ '{:,}'.format(d.cot.open_interest) }}</div></div>
+                <div class="val" style="font-size:1rem">{{ '{:,}'.format(cot.open_interest) if cot.get('open_interest') is not none else '-' }}</div></div>
             <div class="px"><div class="lbl">ข้อมูลล่าสุด</div>
-                <div class="val" style="font-size:1rem">{{ d.cot.date }}</div>
-                <div class="chg mid">{{ 'WoW {:+,} สัญญา'.format(d.cot.mm_net_chg_wow) if d.cot.mm_net_chg_wow is not none else 'WoW เทียบได้สัปดาห์หน้า' }}</div></div>
+                <div class="val" style="font-size:1rem">{{ cot.get('date') or '-' }}</div>
+                <div class="chg mid">{{ 'WoW {:+,} สัญญา'.format(cot.mm_net_chg_wow) if cot.get('mm_net_chg_wow') is not none else 'WoW เทียบได้สัปดาห์หน้า' }}</div></div>
         </div>
         {% else %}<div class="layer">ยังไม่มีข้อมูล COT</div>{% endif %}
     </div>
