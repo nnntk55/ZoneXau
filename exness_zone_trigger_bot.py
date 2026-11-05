@@ -1423,15 +1423,6 @@ def dynamic_lot(st, s, set_key, asset_key):
 
 NEWS_CACHE = {"fetched": 0, "events": [], "announced": set()}
 
-def _us_eastern_dst(dt_naive):
-    """US Eastern DST: อาทิตย์ที่ 2 ของมี.ค. – อาทิตย์แรกของพ.ย. (คืน True = EDT -4)"""
-    y = dt_naive.year
-    mar1 = datetime(y, 3, 1)
-    dst_start = mar1 + timedelta(days=(6 - mar1.weekday()) % 7 + 7)
-    nov1 = datetime(y, 11, 1)
-    dst_end = nov1 + timedelta(days=(6 - nov1.weekday()) % 7)
-    return dst_start <= dt_naive < dst_end
-
 def fetch_news_events():
     """ข่าวแรง USD จาก ForexFactory feed (ผ่าน cache ร่วม news_feed.py) — คืน list {thai, title}
     เช็ค cache ทุก 60 วิ; ยิงเน็ตจริงไม่เกิน 1 ครั้ง/ชม. — ดึงไม่ได้/โดน 429 = ใช้ข่าวชุดเดิม ไม่ล้างทิ้ง"""
@@ -1444,21 +1435,17 @@ def fetch_news_events():
         feed = get_calendar_xml()
         if not feed["xml"] or feed["fetched"] == NEWS_CACHE.get("xml_ts"):
             return NEWS_CACHE["events"]
+        from news_feed import ff_event_thai
         evts = []
         for e in ET.fromstring(feed["xml"].encode("utf-8")).iter("event"):
             if (e.findtext("impact") or "").strip() != "High":
                 continue
             if (e.findtext("country") or "").strip() != "USD":
                 continue
-            t, d = (e.findtext("time") or "").strip(), (e.findtext("date") or "").strip()
-            if not t or "day" in t.lower() or "tentative" in t.lower():
+            # เวลาใน feed เป็น UTC (ไม่ใช่ ET) — แปลงผ่าน ff_event_thai (+7)
+            thai = ff_event_thai((e.findtext("date") or "").strip(), (e.findtext("time") or "").strip())
+            if thai is None:
                 continue
-            try:
-                et = datetime.strptime(f"{d} {t}", "%m-%d-%Y %I:%M%p")
-            except ValueError:
-                continue
-            off = -4 if _us_eastern_dst(et) else -5  # ET -> UTC -> ไทย (+7)
-            thai = et - timedelta(hours=off) + timedelta(hours=7)
             evts.append({"thai": thai, "title": e.findtext("title") or ""})
         NEWS_CACHE["events"] = evts
         NEWS_CACHE["xml_ts"] = feed["fetched"]

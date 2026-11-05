@@ -757,19 +757,21 @@ def tool_get_news(asset=None):
                              + (f" — ลองใหม่ได้ในอีก ~{max(1, wait // 60)} นาที" if wait else "")}
         root = ET.fromstring(feed["xml"].encode("utf-8"))
         want = {"USD", "ALL"} if not asset else ({"USD", "ALL", "XAU"} if asset == "xau" else {"USD", "ALL"})
-        today = time.strftime("%m-%d-%Y")
+        from news_feed import ff_event_thai
+        today = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%d/%m/%Y")
         evts = []
         for e in root.iter("event"):
             imp = (e.findtext("impact") or "").strip()
             cur = (e.findtext("country") or "").strip()
             if imp != "High" or cur not in want:
                 continue
-            evts.append({"วันที่": e.findtext("date"), "เวลา_US": e.findtext("time"),
+            thai = ff_event_thai((e.findtext("date") or "").strip(), (e.findtext("time") or "").strip())  # feed เป็น UTC
+            evts.append({"เวลาไทย": thai.strftime("%d/%m %H:%M") if thai else (e.findtext("date") or "") + " (ทั้งวัน)",
                          "ข่าว": e.findtext("title"), "สกุล": cur,
                          "forecast": e.findtext("forecast"), "previous": e.findtext("previous"),
-                         "วันนี้": e.findtext("date") == today})
+                         "วันนี้": bool(thai) and thai.strftime("%d/%m/%Y") == today})
         out = {"ข่าวแรงสัปดาห์นี้": evts[:20],
-               "หมายเหตุ": "เวลาเป็น US Eastern — เลี่ยงเปิดออเดอร์ช่วงข่าวแรง"}
+               "หมายเหตุ": "เวลาไทยแล้ว — เลี่ยงเปิดออเดอร์ช่วงข่าวแรง ±15 นาที"}
         if feed["stale"]:
             age = int((time.time() - feed["fetched"]) // 60)
             out["ข้อมูลจาก_cache"] = f"ดึงใหม่ไม่ได้ ({feed['error']}) — ใช้ข้อมูลเมื่อ {age} นาทีก่อน"

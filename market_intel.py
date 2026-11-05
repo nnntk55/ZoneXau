@@ -139,18 +139,8 @@ def _news_rank(title):
             return rank
     return ""
 
-def _us_eastern_dst(dt_naive):
-    """US Eastern DST: อาทิตย์ที่ 2 มี.ค. – อาทิตย์แรก พ.ย. (True = EDT -4)"""
-    y = dt_naive.year
-    mar1 = datetime(y, 3, 1)
-    dst_start = mar1 + timedelta(days=(6 - mar1.weekday()) % 7 + 7)
-    nov1 = datetime(y, 11, 1)
-    dst_end = nov1 + timedelta(days=(6 - nov1.weekday()) % 7)
-    return dst_start <= dt_naive < dst_end
-
-
 def _fetch_calendar():
-    from news_feed import get_calendar_xml
+    from news_feed import get_calendar_xml, ff_event_thai
     feed = get_calendar_xml()
     if not feed["xml"]:
         return {"today": [], "upcoming": [], "error": feed["error"], "stale": feed["stale"],
@@ -163,14 +153,8 @@ def _fetch_calendar():
         if imp not in ("High", "Medium") or cur != "USD":
             continue
         t, d = (e.findtext("time") or "").strip(), (e.findtext("date") or "").strip()
-        thai = None
-        if t and "day" not in t.lower() and "tentative" not in t.lower():
-            try:
-                et = datetime.strptime(f"{d} {t}", "%m-%d-%Y %I:%M%p")
-                off = -4 if _us_eastern_dst(et) else -5
-                thai = (et - timedelta(hours=off) + timedelta(hours=7)).replace(tzinfo=_TH)
-            except ValueError:
-                pass
+        thai = ff_event_thai(d, t)  # feed เป็น UTC -> +7 (อย่าแปลงเป็น ET เด็ดขาด)
+        thai = thai.replace(tzinfo=_TH) if thai else None
         title = e.findtext("title") or ""
         evts.append({"title": title, "impact": imp, "rank": _news_rank(title),
                      "forecast": e.findtext("forecast") or "-",

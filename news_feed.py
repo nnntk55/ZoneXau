@@ -11,6 +11,21 @@ import time
 import requests
 
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
+# เวลาใน feed เป็น UTC (พิสูจน์: NFP ออก 8:30 ET แต่ feed เขียน 1:30pm วันเดียวกัน) — แปลงไทย = +7 ชม. ตรงๆ
+# เคยแปลงผิดเป็น ET (+12 ชม.) ทำให้ blackout/ปฏิทินคลาดไป 5 ชม. — ใช้ฟังก์ชันนี้จุดเดียวทุกตัว
+def ff_event_thai(date_str, time_str):
+    """แปลง date/time ของ FF feed (UTC, รูปแบบ MM-DD-YYYY + h:mmam/pm) -> naive datetime เวลาไทย
+    คืน None ถ้า parse ไม่ได้ (เช่น all-day/tentative)"""
+    from datetime import datetime, timedelta
+    t = (time_str or "").strip()
+    if not t or "day" in t.lower() or "tentative" in t.lower():
+        return None
+    try:
+        et = datetime.strptime(f"{(date_str or '').strip()} {t}", "%m-%d-%Y %I:%M%p")
+    except ValueError:
+        return None
+    return et + timedelta(hours=7)
+
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "ff_calendar_cache.json")
 TTL = 3600            # feed อัปเดตรายชั่วโมง — ยิงจริงไม่ถี่กว่านี้
 BACKOFF_429 = 900     # โดน 429 แล้วพักอย่างน้อย 15 นาที
