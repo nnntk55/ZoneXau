@@ -1,7 +1,7 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
 # นินคุยกับวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
-import os, sys, json, time, requests
+import os, sys, json, time, re, shutil, subprocess, threading, requests
 
 BOT = os.getenv("DEVIN_BOT_TOKEN", "")
 KEY = os.getenv("DEVIN_API_KEY", "")
@@ -25,8 +25,9 @@ def tg(method, **kw):
         print(f"tg {method} err: {e}")
         return {}
 
-def tg_image_attachment(msg):
-    """โหลดรูป/ข้อความเสียงจาก Telegram (photo, ไฟล์รูป, voice, audio) -> อัปขึ้น Devin attachments -> คืนบรรทัด ATTACHMENT ให้ Devin เปิดดูได้"""
+def tg_image_attachment(msg, local=False):
+    """โหมด local: เซฟไฟล์ลงโฟลเดอร์งานของ Devin CLI แล้วคืนบรรทัดบอก path แทน
+    โหลดรูป/ข้อความเสียงจาก Telegram (photo, ไฟล์รูป, voice, audio) -> อัปขึ้น Devin attachments -> คืนบรรทัด ATTACHMENT ให้ Devin เปิดดูได้"""
     photos = msg.get("photo") or []
     doc = msg.get("document") or {}
     if photos:
@@ -45,6 +46,12 @@ def tg_image_attachment(msg):
             print("photo: getFile ไม่คืน file_path")
             return None
         img = requests.get(f"https://api.telegram.org/file/bot{BOT}/{fp}", timeout=30).content
+        if local:
+            d = os.path.join(LOCAL_DIR, "_telegram")
+            os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, time.strftime("%Y%m%d_%H%M%S_") + name)
+            open(path, "wb").write(img)
+            return f"ไฟล์จากเทเลแกรม: {path}"
         r = requests.post(f"{API}/attachments", files={"file": (name, img)},
                           headers={"Authorization": f"Bearer {KEY}"}, timeout=60)
         if r.status_code not in (200, 201):
@@ -145,6 +152,9 @@ def deliver(st, text):
     """ส่งข้อความถึงวินใน session เดิมเสมอ (session ที่หลับ ส่งข้อความเข้าไปแล้วตื่นเอง)
     เปิด session ใหม่เฉพาะตอน session เดิมหมดโควต้า/หมดอายุจริง หรือยังไม่เคยมี session
     คืน (ok, new_url, err) — new_url มีค่าเมื่อเปิด session ใหม่; ส่งไม่เข้าแต่ session ยังดีอยู่ = (False, None, "send_fail") ให้ลองใหม่ทีหลัง"""
+    if st.get("mode") == "local":
+        st.setdefault("local_q", []).append(text)
+        return True, None, ""
     sid = st.get("session_id")
     if sid:
         info = devin_session(sid)
@@ -160,6 +170,88 @@ def deliver(st, text):
         st["session_id"] = nsid; st["seen"] = 0
         return True, url or f"https://app.devin.ai/sessions/{nsid}", ""
     return False, None, err
+
+# ---------- โหมด local: ส่งงานให้ Devin CLI บนเครื่องนี้ (คิดแค่ token ถูกกว่า cloud) ----------
+LOCAL_DIR = os.getenv("DEVIN_WORKDIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_work", "ZoneXau")
+LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "smart")
+LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "2400"))
+LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
+                 "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
+                 "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
+LOCAL = {"busy": False, "started": 0.0}
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+
+def devin_cli():
+    return os.getenv("DEVIN_CLI") or shutil.which("devin") or shutil.which("devin.exe")
+
+def local_prepare():
+    """เตรียม clone ของ repo ไว้ให้ Devin CLI ทำงาน (แยกจากโฟลเดอร์ที่บอทรันจริง)"""
+    git = shutil.which("git")
+    if not os.path.isdir(os.path.join(LOCAL_DIR, ".git")):
+        if not git:
+            return "เครื่องนี้ยังไม่มี git"
+        os.makedirs(os.path.dirname(LOCAL_DIR), exist_ok=True)
+        r = subprocess.run([git, "clone", f"https://github.com/{SELF_UPDATE_REPO}.git", LOCAL_DIR],
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            return "git clone ไม่สำเร็จ: " + (r.stderr or r.stdout)[-300:]
+    elif git:
+        subprocess.run([git, "pull", "--ff-only", "-q"], cwd=LOCAL_DIR, capture_output=True, timeout=120)
+    return ""
+
+def local_run(st, text):
+    """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก"""
+    try:
+        exe = devin_cli()
+        if not exe:
+            send("ยังไม่เจอ Devin CLI บนเครื่องนี้ ติดตั้งก่อน (PowerShell: irm https://static.devin.ai/cli/setup.ps1 | iex) แล้วรัน devin auth login หนึ่งครั้ง")
+            return
+        err = local_prepare()
+        if err:
+            send("โหมด local เตรียมโฟลเดอร์งานไม่ได้: " + err)
+            return
+        first = not st.get("local_started")
+        prompt = (CONTEXT + LOCAL_CONTEXT + CONTEXT_TAIL + text) if first else text
+        pf = os.path.join(LOCAL_DIR, "_telegram", "prompt.txt")
+        os.makedirs(os.path.dirname(pf), exist_ok=True)
+        open(pf, "w", encoding="utf-8").write(prompt)
+        cmd = [exe] + ([] if first else ["-c"]) + ["-p", "--prompt-file", pf, "--permission-mode", LOCAL_PERMISSION,
+                                                   "--respect-workspace-trust", "false"]
+        try:
+            r = subprocess.run(cmd, cwd=LOCAL_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               stdin=subprocess.DEVNULL, timeout=LOCAL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            send(f"วินทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ตัดรอบนี้ไปก่อน สั่งต่อได้เลย")
+            st["local_started"] = True
+            return
+        out = _ANSI.sub("", r.stdout or "").strip()
+        er = _ANSI.sub("", r.stderr or "").strip()
+        if r.returncode != 0 and ("login" in (out + er).lower() or "auth" in (out + er).lower()):
+            send("Devin CLI ยังไม่ได้ล็อกอิน เปิด PowerShell บนเครื่องนี้แล้วรัน: devin auth login")
+            return
+        if r.returncode == 0:
+            st["local_started"] = True
+        send(out or (f"Devin CLI จบงานแต่ไม่มีคำตอบ (exit {r.returncode}) {er[-500:]}"))
+    except Exception as e:
+        send(f"โหมด local error: {e}")
+    finally:
+        LOCAL["busy"] = False
+        save_state(st)
+
+def local_tick(st):
+    """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
+    if LOCAL["busy"]:
+        if time.time() - LOCAL.get("typing", 0) > 5:
+            LOCAL["typing"] = time.time()
+            tg("sendChatAction", chat_id=CHAT, action="typing")
+        return
+    q = st.get("local_q") or []
+    if not q:
+        return
+    st["local_q"] = []
+    save_state(st)
+    LOCAL["busy"] = True; LOCAL["started"] = time.time()
+    threading.Thread(target=local_run, args=(st, "\n\n".join(q)), daemon=True).start()
 
 BATCH_WAIT = 6  # วิ: รอข้อความถัดไปก่อนส่ง ถ้านินพิมพ์หลายข้อความติดกัน
 
@@ -230,12 +322,13 @@ def _self_update_worker():
                     open(os.path.join(base, fn), "wb").write(zf.read(n))
             open(SELF_UPDATE_SHA_FILE, "w").write(sha)
             time.sleep(3)
+            while LOCAL["busy"]:
+                time.sleep(10)
             os._exit(0)
         except Exception as e:
             print(f"self-update err: {e}")
 
 def main():
-    import threading
     threading.Thread(target=_self_update_worker, daemon=True).start()
     if not all([BOT, KEY, CHAT]):
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
@@ -256,7 +349,7 @@ def main():
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 is_voice = bool(msg.get("voice") or msg.get("audio"))
                 if is_voice or msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
-                    att = tg_image_attachment(msg)
+                    att = tg_image_attachment(msg, local=st.get("mode") == "local")
                     what = "เสียง" if is_voice else "รูป"
                     if att:
                         text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
@@ -267,8 +360,14 @@ def main():
                 if not text:
                     continue
                 if text == "/new":
-                    st["session_id"] = None; st["seen"] = 0
+                    st["session_id"] = None; st["seen"] = 0; st["local_started"] = False
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
+                    continue
+                if text in ("/local", "/cloud"):
+                    st["mode"] = text[1:]
+                    save_state(st)
+                    send("สลับเป็นโหมด local แล้ว: ใช้ Devin CLI บนเครื่องนี้ (คิดแค่ token) คุยต่อ conversation เดียวกันตลอด กลับไปใช้ cloud พิมพ์ /cloud"
+                         if text == "/local" else "สลับเป็นโหมด cloud แล้ว: ใช้ Devin Cloud session เดิม กลับไป local พิมพ์ /local")
                     continue
                 # รวมข้อความที่พิมพ์ติดๆ กันเป็นก้อนเดียว ปลุกวินครั้งเดียว (ประหยัดโควต้า)
                 st.setdefault("pending", []).append(text)
@@ -290,8 +389,10 @@ def main():
                         send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ข้อความเก็บไว้แล้ว จะส่งให้เองเมื่อเข้าได้" if quota_err(err)
                              else "ส่งข้อความเข้า session เดิมยังไม่ได้ ข้อความเก็บไว้แล้ว จะลองส่งใหม่ทุก 1 นาที (ไม่เปิด session ใหม่)")
                 save_state(st)
+            if st.get("mode") == "local":
+                local_tick(st)
             # ดึงคำตอบใหม่จาก Devin ทุก 10 วิ
-            if st.get("session_id") and time.time() - last_poll > 10:
+            if st.get("mode") != "local" and st.get("session_id") and time.time() - last_poll > 10:
                 last_poll = time.time()
                 s = devin_session(st["session_id"])
                 if s:

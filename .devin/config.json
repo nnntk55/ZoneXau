@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Read(**)", "Exec(git)", "Exec(python)", "Exec(py)"],
+    "deny": ["Exec(taskkill)", "Exec(shutdown)", "Exec(Stop-Process)", "Exec(wmic)"]
+  }
+}

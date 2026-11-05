@@ -7,3 +7,6 @@ request_*.txt
 run_all.bat
 run_midas.bat
 ff_calendar_cache.json*
+devin_work/
+_telegram/
+devin_bridge_state.json
