@@ -346,6 +346,60 @@ def _flow_read(tfs, zones, price):
                      f"(ต้อง H4 ขาเดียว + stoch D1 ไหลทางเดียวยังไม่สุด) ระวัง sideway/พักฐาน")}
 
 
+def _trade_read(tfs, zones, price):
+    """สรุป top-down ตามวิธีนิน: HTF (W1/D1/H4) ให้ทิศ → โซนให้เป้า → LTF (M15/M5) ให้จังหวะเข้า
+    คำตอบคำถาม: ควรเทรดไหม / รอสัญญาณอะไร / เข้าตรงไหน — วิเคราะห์ไม่ใช่คำสั่งออเดอร์"""
+    if not price:
+        return None
+    def tr(tf):
+        return (tfs.get(tf) or {}).get("trend")
+    chain = {TF_LABEL[t]: tr(t) for t in ("1w", "1d", "4h")}
+    votes = list(chain.values())
+    bull, bear = votes.count("bull"), votes.count("bear")
+    dirn = "up" if bull > bear else "down" if bear > bull else None
+    inside = [z for z in zones if z["lower"] <= price <= z["upper"]]
+    above = sorted((z for z in zones if z["lower"] > price), key=lambda z: z["lower"])
+    below = sorted((z for z in zones if z["upper"] < price), key=lambda z: -z["upper"])
+    # สัญญาณ LTF: stoch cross/zone บน M15+M5 เทียบทิศ HTF
+    ltf = []
+    for tf in ("15m", "5m"):
+        d = tfs.get(tf) or {}
+        cr, zn = d.get("stoch_cross"), d.get("stoch_zone")
+        if cr:
+            ltf.append(f"{TF_LABEL[tf]} {cr}")
+        elif zn in ("overbought", "oversold"):
+            ltf.append(f"{TF_LABEL[tf]} stoch {zn}")
+    aligned = [s for s in ltf if (dirn == "up" and ("bull" in s or "oversold" in s))
+               or (dirn == "down" and ("bear" in s or "overbought" in s))]
+    if not dirn:
+        verdict = "หลีกเลี่ยง — HTF ขัดกันไม่มีทิศชัด"
+        plan = "W1/D1/H4 เทรนด์ไม่ตรงกัน → รอ HTF นิ่งเป็นทิศเดียวก่อนคิดเข้า ฝืนเข้าช่วงนี้เจอสองหน้า"
+    elif inside:
+        z = inside[0]
+        want = "bull cross/oversold" if dirn == "up" else "bear cross/overbought"
+        verdict = f"จุดตัดสินใจ — ราคาอยู่ในโซน {z['kind']} {z['tf']} {z['lower']:,.0f}–{z['upper']:,.0f}"
+        plan = (f"ทิศ HTF = {'ขึ้น' if dirn == 'up' else 'ลง'} ราคาอยู่ในโซนพอดี → "
+                f"รอสัญญาณ {want} บน M15/M5 ภายในโซนเพื่อเข้าตามทิศ / "
+                f"ถ้าหลุด{'ขอบล่าง' if dirn == 'up' else 'ขอบบน'} {z['invalidation']:,.0f} = โซนแตก เปลี่ยนมุมมอง")
+    else:
+        tgt = (above[0] if dirn == "up" else below[0]) if (above or below) else None
+        if tgt:
+            edge = tgt["lower"] if dirn == "up" else tgt["upper"]
+            gap = round(abs(edge - price) / price * 100, 2)
+            side = "ต้าน" if dirn == "up" else "รับ"
+            verdict = f"กลางทาง — ทิศ{'ขึ้น' if dirn == 'up' else 'ลง'} เป้าหมาย{side} {tgt['lower']:,.0f}–{tgt['upper']:,.0f} (~{gap}%)"
+            plan = (f"ราคาอยู่ระหว่างโซน ไม่ควรไล่เข้ากลางทาง → รออย่างใดอย่างหนึ่ง: "
+                    f"(a) ราคาไปถึงโซนเป้าแล้วรอสัญญาณกลับตัวบน M15/M5 หรือ "
+                    f"(b) ย่อกลับมาหาโซนฝั่งทิศแล้วรอสัญญาณตามทิศ")
+        else:
+            verdict, plan = f"ทิศ{'ขึ้น' if dirn == 'up' else 'ลง'} แต่ไม่เห็นโซนถัดไป", "ระวัง ไม่มีโซนอ้างอิงในระบบ"
+    if aligned:
+        plan += f" | LTF เริ่มตามทิศแล้ว: {', '.join(aligned)}"
+    return {"htf_chain": chain, "direction": dirn, "in_zone": inside[0] if inside else None,
+            "ltf_signals": ltf, "verdict": verdict, "plan": plan,
+            "note": "top-down read — HTF ทิศ / โซน เป้า / LTF จังหวะ ไม่ใช่คำสั่งเข้าออเดอร์"}
+
+
 CALL_MAX_AGE_H = 72   # คำทำนายเกิน 72 ชม. = expired ไม่นับถูก/ผิด
 
 def track_calls(tech, chart_dir="charts"):
@@ -516,5 +570,6 @@ def analyze(frames, mi=None):
             "tfs": tfs, "missing_tfs": missing, "daily_bias": bias,
             "levels": levels, "pivots": pivots, "setups": setups, "zones": zones,
             "flow_read": _flow_read(tfs, zones, price),
+            "trade_read": _trade_read(tfs, zones, price),
             "volatility": (tfs.get("1h") or {}).get("atr_pct"),
             "note": "วิเคราะห์จากแท่ง MT5 จริง — แผนเทรดเป็นแนวทางประเมิน ไม่ใช่คำสั่งยิงออเดอร์"}

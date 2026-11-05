@@ -172,6 +172,25 @@ def _fetch_calendar():
     return out
 
 
+def _news_read(cal):
+    """อ่านความเสี่ยงข่าวล่วงหน้า: ข่าวแรงถัดไป + อีกกี่ชม. + คาดการณ์ vs ครั้งก่อน + แนวโน้มผลกระทบต่อทอง
+    ตีความเป็น 'แนวโน้ม' จากตัวเลข forecast/previous จริงเท่านั้น — ผลจริงออกมาอาจตรงข้าม"""
+    now = datetime.now(_TH).timestamp()
+    evs = (cal or {}).get("today", []) + (cal or {}).get("upcoming", [])
+    nxt = next((e for e in evs if (e.get("ts") or 0) > now), None)
+    if not nxt:
+        return {"ข่าวถัดไป": None, "คำแนะนำ": "ไม่มีข่าวแรง USD/CB ในคิว — สภาพแวดล้อมข่าวสงบ"}
+    hrs = round((nxt["ts"] - now) / 3600, 1)
+    fc, pv = nxt.get("forecast", "-"), nxt.get("previous", "-")
+    risk = ("สูง — เลี่ยงเปิดออเดอร์ใหม่ ±15-30 นาทีรอบเวลาข่าว รอผลจริงออกมาก่อน"
+            if hrs <= 24 else "ปานกลาง — ระวังความผันผวนใกล้เวลาข่าว")
+    return {"ข่าวถัดไป": f"{nxt['title']} ({nxt['impact']}) {nxt['thai']} — forecast {fc} / previous {pv}",
+            "อีกกี่_ชม": hrs, "ความเสี่ยง": risk,
+            "แนวโน้ม_ตีความ": ("ถ้าออกแรงกว่าคาด → USD มักแข็ง กดทอง / อ่อนกว่าคาด → USD อ่อน หนุนทอง "
+                            "(อ่านทิศตัวเลขเทียบ forecast เท่านั้น — ไม่ใช่การทำนายผลข่าว)"),
+            "สัญญาณที่ควรรอ": "ผลข่าวจริง + ปฏิกิริยา 15 นาทีแรก — อย่าเดาทิศก่อนตัวเลขออก"}
+
+
 # ---------- headlines: Google News RSS ----------
 def _rss_items(query, limit):
     r = requests.get("https://news.google.com/rss/search",
@@ -627,6 +646,7 @@ def get_market_intel():
             "five_questions": qs,
             "signal_summary": summary,
             "calendar": cal or {"today": [], "upcoming": []},
+            "news_read": _news_read(cal),
             "headlines": heads or {"gold": [], "geo": []},
             "news_guide": NEWS_GUIDE,
             "cot": cot or {},
