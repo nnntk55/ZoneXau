@@ -215,8 +215,47 @@ LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงา
                    "bridge จะส่งต่อให้อัตโนมัติ ห้ามใช้ถ้าทำเองได้] ")
 LOCAL_RULES_V = 3
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
-LOCAL = {"busy": False, "started": 0.0}
+LOCAL = {"busy": False, "started": 0.0, "proc": None, "notified": False}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+
+# remote log: ส่งเหตุการณ์ของ bridge ขึ้น Render /api/remote_log (ชีท Logs, source=bridge) ให้วินฝั่ง cloud เห็นได้โดยไม่ต้องเห็นจอ VPS
+DASH_URL = (os.getenv("RENDER_DASHBOARD_URL") or "https://zonexau.onrender.com").rstrip("/")
+_rlog_buf = []
+
+def _rlog(msg):
+    print(msg)
+    from datetime import datetime, timezone
+    _rlog_buf.append({"time": datetime.now(timezone.utc).isoformat(), "msg": str(msg)[:1000]})
+    del _rlog_buf[:-100]
+
+def _rlog_worker():
+    auth = (os.getenv("DASH_USER"), os.getenv("DASH_PASS")) if os.getenv("DASH_USER") and os.getenv("DASH_PASS") else None
+    hdr = {"X-Api-Key": os.getenv("DASH_API_KEY")} if os.getenv("DASH_API_KEY") else {}
+    while True:
+        time.sleep(30)
+        if not _rlog_buf:
+            continue
+        batch = _rlog_buf[:50]
+        try:
+            r = requests.post(f"{DASH_URL}/api/remote_log", json={"source": "bridge", "lines": batch},
+                              timeout=30, headers=hdr, auth=auth)
+            if r.status_code == 200:
+                del _rlog_buf[:len(batch)]
+        except Exception:
+            pass
+
+def _kill_tree(proc):
+    """ฆ่า Devin CLI พร้อม process ลูก (git/python/node ที่มันเปิด) — เฉพาะ tree ของงานนี้ ไม่แตะบอทที่รันอยู่"""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+        else:
+            proc.kill()
+    except Exception as e:
+        print(f"kill err: {e}")
+
+def _busy_min():
+    return int((time.time() - LOCAL.get("started", time.time())) // 60)
 
 def devin_cli():
     return os.getenv("DEVIN_CLI") or shutil.which("devin") or shutil.which("devin.exe")
@@ -300,17 +339,37 @@ def local_run(st, text, midas=False):
         open(pf, "w", encoding="utf-8").write(prompt)
         cmd = [exe] + ([] if first else ["-c"]) + ["-p", "--prompt-file", pf, "--permission-mode", LOCAL_PERMISSION,
                                                    "--respect-workspace-trust", "false"]
-        try:
-            r = subprocess.run(cmd, cwd=LOCAL_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                               stdin=subprocess.DEVNULL, timeout=LOCAL_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        # stdout/stderr ลงไฟล์ (ไม่ใช้ pipe): ถ้า Devin CLI เปิด process ลูกค้างไว้ (เช่นรัน server ทดสอบ) pipe จะไม่ปิด
+        # subprocess.run(capture_output) เลยค้างตลอดไป -> bridge busy ค้าง ไม่ตอบนินอีกเลย
+        of, ef = pf[:-4] + "_out.txt", pf[:-4] + "_err.txt"
+        t0 = time.time()
+        _rlog(f"local start ({len(text)} chars, {'new' if first else 'continue'}): {text[:150]!r}")
+        with open(of, "w", encoding="utf-8") as fo, open(ef, "w", encoding="utf-8") as fe:
+            proc = subprocess.Popen(cmd, cwd=LOCAL_DIR, stdout=fo, stderr=fe, stdin=subprocess.DEVNULL)
+            LOCAL["proc"] = proc
+            try:
+                rc = proc.wait(timeout=LOCAL_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
+                rc = None
+        LOCAL["proc"] = None
+        if LOCAL.pop("cancelled", False):
+            _rlog(f"local cancelled by /stop after {int(time.time() - t0)}s")
+            if midas:
+                _midas_report(False, "นินสั่งหยุดงานนี้ (/stop)")
+            st["local_started"] = True
+            return
+        if rc is None:
+            _rlog(f"local TIMEOUT after {LOCAL_TIMEOUT}s")
             if midas:
                 _midas_report(False, f"ทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ถูกตัดกลางคัน")
             send(f"วินทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ตัดรอบนี้ไปก่อน สั่งต่อได้เลย")
             st["local_started"] = True
             return
-        out = _ANSI.sub("", r.stdout or "").strip()
-        er = _ANSI.sub("", r.stderr or "").strip()
+        out = _ANSI.sub("", open(of, encoding="utf-8", errors="replace").read()).strip()
+        er = _ANSI.sub("", open(ef, encoding="utf-8", errors="replace").read()).strip()
+        _rlog(f"local exit {rc} in {int(time.time() - t0)}s, out {len(out)} chars" + (f", err: {er[-300:]!r}" if er else ""))
+        r = subprocess.CompletedProcess(cmd, rc)
         if r.returncode != 0 and ("login" in (out + er).lower() or "auth" in (out + er).lower()):
             fail("Devin CLI ยังไม่ได้ล็อกอิน เปิด PowerShell บนเครื่องนี้แล้วรัน: devin auth login")
             return
@@ -334,14 +393,28 @@ def local_run(st, text, midas=False):
             else:
                 send("(งานนี้ต้องใช้ cloud — พิมพ์ /auto หรือ /cloud แล้วสั่งใหม่)")
     except Exception as e:
+        _rlog(f"local error: {e}")
         fail(f"โหมด local error: {e}")
     finally:
-        LOCAL["busy"] = False
+        LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
         save_state(st)
 
 def local_tick(st):
     """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
     if LOCAL["busy"]:
+        q = st.get("local_q") or []
+        if q and not LOCAL.get("notified"):
+            LOCAL["notified"] = True
+            send(f"วินยังทำงานก่อนหน้าอยู่ ({_busy_min()} นาทีแล้ว) ข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที\n"
+                 "/status ดูสถานะ  /stop หยุดงานที่ค้างแล้วทำข้อความใหม่")
+        if time.time() - LOCAL.get("started", 0) > LOCAL_TIMEOUT + 300:
+            # thread ค้างเกินเวลาตัดแล้ว (ไม่ควรเกิด) — ปลดล็อกเพื่อให้รับงานใหม่ได้
+            _rlog(f"local watchdog: busy {_busy_min()} min, force reset")
+            if LOCAL.get("proc"):
+                _kill_tree(LOCAL["proc"])
+            LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
+            send("งานก่อนหน้าค้างเกินเวลา วินตัดทิ้งแล้ว ทำข้อความถัดไปต่อเลย")
+            return
         if time.time() - LOCAL.get("typing", 0) > 5:
             LOCAL["typing"] = time.time()
             tg("sendChatAction", chat_id=CHAT, action="typing")
@@ -497,6 +570,7 @@ def _self_update_worker():
 
 def main():
     threading.Thread(target=_self_update_worker, daemon=True).start()
+    threading.Thread(target=_rlog_worker, daemon=True).start()
     if not all([BOT, KEY, CHAT]):
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
@@ -505,6 +579,7 @@ def main():
         st["mode"] = "auto"; st["cloud_active"] = False
         st["mode_v"] = 3
         save_state(st)
+    _rlog(f"start mode={st.get('mode')} cli={devin_cli()} workdir={LOCAL_DIR} timeout={LOCAL_TIMEOUT}")
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = last_rem = retry_at = cloud_retry = 0
     last_in = time.time()
@@ -534,6 +609,21 @@ def main():
                 if text == "/new":
                     st["session_id"] = None; st["seen"] = 0; st["local_started"] = False; st["cloud_until"] = 0; st["cloud_active"] = False
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
+                    continue
+                if text == "/status":
+                    q = len(st.get("local_q") or []) + len(st.get("pending") or [])
+                    send(f"โหมด {st.get('mode') or 'auto'} | ตอนนี้ใช้ {route(st)} | "
+                         + (f"วิน local กำลังทำงาน {_busy_min()} นาที (ตัดเองที่ {LOCAL_TIMEOUT // 60} นาที)" if LOCAL["busy"] else "วิน local ว่าง")
+                         + f" | ข้อความรอคิว {q}")
+                    continue
+                if text == "/stop":
+                    p = LOCAL.get("proc")
+                    if LOCAL["busy"] and p:
+                        LOCAL["cancelled"] = True
+                        _kill_tree(p)
+                        send("หยุดงานที่ค้างแล้ว ข้อความที่รอคิวจะทำต่อเลย")
+                    else:
+                        send("ตอนนี้วิน local ไม่ได้ทำงานค้างอยู่")
                     continue
                 if text in ("/local", "/cloud", "/auto"):
                     st["mode"] = text[1:]; st["cloud_until"] = 0; st["cloud_active"] = False
@@ -613,7 +703,7 @@ def main():
                 check_midas_reminders(st)
             time.sleep(2)
         except Exception as e:
-            print(f"loop err: {e}")
+            _rlog(f"loop err: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":
