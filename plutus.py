@@ -217,15 +217,28 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 กฎเหล็ก: ถ้าเป็น "คำถาม" เกี่ยวกับรายการที่จดไปแล้ว (เช่น "เมื่อกี้จดอะไรไป" "ทำไม 2676") ให้ตอบ chat/ask เท่านั้น ห้ามสร้างรายการใหม่ซ้ำเด็ดขาด — สร้างรายการเฉพาะเมื่อนินสั่งจดชัดเจน
 ถ้าไม่บอกวัน due เดาวันเดียวกันเดือนถัดไป; ตอบเฉพาะ JSON ห้ามมีข้อความอื่น"""
 
+def _choices(body):
+    try:
+        return body["choices"][0]["message"]["content"]
+    except Exception:
+        _rlog("llm bad body: " + str(body)[:300])
+        return None
+
 def _call_llm(prompt):
-    msgs = [{"role": "system", "content": SYS}] + chat_history[-20:] + [{"role": "user", "content": prompt}]
+    hist = chat_history[-20:]
+    if hist and hist[-1].get("role") == "user" and hist[-1].get("content") == prompt:
+        hist = hist[:-1]
+    msgs = [{"role": "system", "content": SYS}] + hist + [{"role": "user", "content": prompt}]
     if GROQ_API_KEY:
         try:
             r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                               headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                               json={"model": GROQ_MODEL, "messages": msgs, "max_tokens": 600},
                               timeout=30)
-            return r.json()["choices"][0]["message"]["content"]
+            out = _choices(r.json())
+            if out:
+                return out
+            _rlog(f"groq http {r.status_code}")
         except Exception as e:
             _rlog(f"groq err: {e}")
     if OPENROUTER_API_KEY:
@@ -234,17 +247,27 @@ def _call_llm(prompt):
                               headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
                               json={"model": "google/gemini-2.0-flash-001", "messages": msgs,
                                     "max_tokens": 600}, timeout=30)
-            return r.json()["choices"][0]["message"]["content"]
+            out = _choices(r.json())
+            if out:
+                return out
+            _rlog(f"openrouter http {r.status_code}")
         except Exception as e:
             _rlog(f"openrouter err: {e}")
     if GEMINI_API_KEY:
+        body = {}
         try:
+            contents = [{"role": "model" if m["role"] == "assistant" else "user",
+                         "parts": [{"text": str(m.get("content", ""))[:2000]}]}
+                        for m in hist]
+            contents.append({"role": "user", "parts": [{"text": prompt}]})
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-                json={"contents": [{"parts": [{"text": SYS + "\n\n" + prompt}]}]}, timeout=30)
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                json={"system_instruction": {"parts": [{"text": SYS}]}, "contents": contents},
+                timeout=30)
+            body = r.json()
+            return body["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
-            _rlog(f"gemini err: {e}")
+            _rlog(f"gemini err: {e} {str(body)[:200]}")
     return None
 
 def handle(text):
