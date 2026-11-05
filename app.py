@@ -2007,9 +2007,11 @@ def process_market_data(data):
             st = ASSETS[asset_key]["state"]
             print(f"📊 Processing {asset_key}: price={payload.get('price')}, k_5m={payload.get('k_5m')}")
 
-            # 1. อัปเดตราคาปัจจุบัน
+            # 1. อัปเดตราคาปัจจุบัน + tech ก่อน (กัน chart พังแล้ว tech ไม่ถูกเขียน)
             if "price" in payload:
                 st["price"] = float(payload["price"])
+            if "tech" in payload:  # tech_intel multi-TF จากบอท (วิเคราะห์บน VPS ทุก 5 นาที)
+                st["tech"] = payload["tech"]
 
             # 2. เตรียมโครงสร้างเก็บบันทึกประวัติ K/D ย้อนหลัง (30 ค่า) สำหรับวาดกราฟ
             if "history" not in st:
@@ -2031,12 +2033,15 @@ def process_market_data(data):
 
                 # 3. วาดภาพกราฟมินิเฉพาะ TF ที่มีข้อมูลใหม่เข้ามาจริง (ลดภาระ CPU บน free tier)
                 if f"k_{tf}" in payload or f"d_{tf}" in payload:
-                    sub_k = st["history"][tf]["k"]
-                    sub_d = st["history"][tf]["d"]
-                    img_b64 = build_mini_chart(sub_k, sub_d)
-                    if img_b64:
-                        st["charts"][tf] = img_b64
-                        print(f"✅ Chart generated for {asset_key} {tf}")
+                    try:
+                        sub_k = st["history"][tf]["k"]
+                        sub_d = st["history"][tf]["d"]
+                        img_b64 = build_mini_chart(sub_k, sub_d)
+                        if img_b64:
+                            st["charts"][tf] = img_b64
+                            print(f"✅ Chart generated for {asset_key} {tf}")
+                    except Exception as ce:
+                        print(f"chart err {asset_key} {tf}: {ce}")
 
             # 4. แนวรับ-ต้าน + เทรนด์จากบอท (ส่งมาเฉพาะเมื่อเปิด sr)
             if "sr_ema50" in payload:
@@ -2051,8 +2056,6 @@ def process_market_data(data):
                 st["trend"] = payload["trend"]
             if "trend_tf" in payload:
                 st["trend_tf"] = payload["trend_tf"]
-            if "tech" in payload:  # tech_intel multi-TF จากบอท (วิเคราะห์บน VPS ทุก 5 นาที)
-                st["tech"] = payload["tech"]
 
             st["last_check"] = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
 
