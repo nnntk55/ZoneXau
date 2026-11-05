@@ -46,3 +46,9 @@
 - quota meta: `{"type":"quota","set":"long|short","per_day","today","date","window","zone_low","zone_high","until","min_room","risk_pct"}` เก็บใน `alerts` JSON
 - stage_tfs = 4 ช่อง [S1,S2,S3,S4] ("off"=ปิด), S5 ยิงบน TF ของ S4; สั้น default ["off","off","15m","5m"], ยาว ["4h","1h","15m","5m"]
 - set2 = ชุดเทรดสั้น (dict ภายใต้ state), top-level = เทรดยาว
+
+- **plutus.py** — พลูตัส CFO การเงินของนิน (Telegram แยก token, PLUTUS_BOT_TOKEN/TELEGRAM_CHAT_ID/GOOGLE_SCRIPT_URL ใน env บนเครื่อง) ledger=charts/plutus_ledger.json memory=charts/plutus_memory.json sync ขึ้นชีท "Ninin Finance" (Transactions/Payables/Recurring/Planned ผ่าน Apps Script type:"finance_sync") รัน loop_plutus.bat บน Desktop — env: GROQ_MODEL default llama-3.3-70b-versatile
+- **ช่องคุยบอท↔วิน**: บอทเขียน charts/devin_tasks/*.json {"task","from":"midas|plutus"} -> bridge รัน local แล้วเขียนผลกลับ charts/{from}_inbox.txt -> บอทอ่าน inbox ตัวเองรายงานนินต่อ (midas_inbox.txt ใช้ร่วมกับ [EVENT] ของบอทเทรดด้วย)
+- **Apps Script deploy**: เครื่องนี้ทำไม่ได้ (ไม่มี clasp creds — OAuth client ของ clasp โดน Google บล็อก 401 invalid_client; ทางเดียวคือ OAuth client ของนินเองใน GCP Desktop-app type + clasp login --creds) ส่ง [[CLOUD:]] เสมอ — deploy ด้วย clasp version + deploy -i เท่านั้น
+- **มิดาส anti-โม้**: หลัง tool สำคัญต้อง verify จากของจริง (status_recap/ไฟล์คิว/ไฟล์เตือน) + _live_price_line() แนบข้อมูลสด /api/market ทุกอีเวนต์กันเล่าเลขเก่า; อีเวนต์ทั่วไปกักส่งเฉพาะ 07:50/15:50 ไทย (midas_pending_events.txt) ยกเว้นออเดอร์ปิดส่งทันที; LLM fallback Groq->OpenRouter->Gemini ต้องส่ง history ให้ทุก provider
+- **งานค้าง**: ออกแบบมิดาสเทรดเอง (หน้า /midas + 3 เฟส shadow->paper->live, gate deterministic เหนือ LLM, ห้ามแตะ stage engine), ตัด payload get_market_intel กัน Groq 413, Diablo ผู้จัดการส่วนตัว, OCR บิล
