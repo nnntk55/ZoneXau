@@ -110,14 +110,44 @@ def _sheet_sync(d):
 POCKETS = {"ฝาก": "เงินฝาก", "เข้า": "แหล่งเงินเข้า", "พอร์ท": "พอร์ทเทรด",
            "ธนาคาร": "ธนาคารค่าใช้จ่าย", "เก็บ": "เงินเก็บ", "สำรอง": "เงินสำรอง"}
 
-def log_tx(kind, amount, cat, note="", pocket="ธนาคาร", date=None):
-    """kind: in(รับ) / out(จ่าย) / save(เงินเก็บ) / reserve(เงินสำรอง)"""
+# ---------- อัตราแลกเปลี่ยน (ECB/Frankfurter ฟรี ไม่ต้อง key, cache 6 ชม.) ----------
+_rate_cache = {"rate": None, "at": 0}
+
+def usd_thb():
+    """1 USD = x THB (เรทจริง ECB) — cache 6 ชม."""
+    if _rate_cache["rate"] and time.time() - _rate_cache["at"] < 21600:
+        return _rate_cache["rate"]
+    for url in ("https://api.frankfurter.app/latest?from=USD&to=THB",
+                "https://open.er-api.com/v6/latest/USD"):
+        try:
+            r = requests.get(url, timeout=15).json()
+            rate = (r.get("rates") or {}).get("THB")
+            if rate:
+                _rate_cache.update({"rate": float(rate), "at": time.time()})
+                return _rate_cache["rate"]
+        except Exception as e:
+            _rlog(f"fx err: {e}")
+    return None
+
+def _fmt(amount, cur="THB"):
+    return f"${amount:,.2f}" if cur == "USD" else f"{amount:,.0f}฿"
+
+def _fmt_pair(rows):
+    """รวมยอดแยกสกุล → '800฿ / $25.00'"""
+    tot = {}
+    for x in rows:
+        tot[x.get("cur", "THB")] = tot.get(x.get("cur", "THB"), 0) + x["amount"]
+    return " / ".join(_fmt(v, k) for k, v in tot.items()) or "-"
+
+def log_tx(kind, amount, cat, note="", pocket="ธนาคาร", date=None, cur="THB"):
+    """kind: in(รับ) / out(จ่าย) / save(เงินเก็บ) / reserve(เงินสำรอง); cur: THB|USD"""
     d = _load()
     if not (isinstance(date, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", date)):
         date = datetime.now(TH).strftime("%Y-%m-%d")
+    cur = "USD" if str(cur).upper() in ("USD", "ดอล", "ดอลลาร์", "$") else "THB"
     d["tx"].append({"t": time.time(), "date": date,
                     "kind": kind, "amount": float(amount), "cat": cat or "ทั่วไป",
-                    "note": note, "pocket": pocket})
+                    "note": note, "pocket": pocket, "cur": cur})
     d["tx"] = d["tx"][-2000:]
     _save(d)
     return d["tx"][-1]
@@ -131,13 +161,13 @@ def monthly_report(month=None):
     def cat_sum(rs):
         c = {}
         for r in rs:
-            c[r["cat"]] = c.get(r["cat"], 0) + r["amount"]
+            k = f"{r['cat']} ({r.get('cur','THB')})" if r.get("cur") == "USD" else r["cat"]
+            c[k] = c.get(k, 0) + r["amount"]
         return sorted(c.items(), key=lambda x: -x[1])
     ins, outs = rows_of("in"), rows_of("out")
     saves, reserves = rows_of("save"), rows_of("reserve")
-    ti, to = sum(x["amount"] for x in ins), sum(x["amount"] for x in outs)
-    return {"month": month, "รับ": ti, "จ่าย": to, "สุทธิ": ti - to,
-            "เก็บ": sum(x["amount"] for x in saves), "สำรอง": sum(x["amount"] for x in reserves),
+    return {"month": month, "รับ": _fmt_pair(ins), "จ่าย": _fmt_pair(outs),
+            "เก็บ": _fmt_pair(saves), "สำรอง": _fmt_pair(reserves),
             "รับ_แยกหมวด": cat_sum(ins), "จ่าย_แยกหมวด": cat_sum(outs)}
 
 def port_snapshot():
@@ -196,8 +226,9 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 ตอบเป็น JSON เดียวเสมอ {"action": "...", "say": "...", ...}
 - "say" = ประโยคสั้นๆ สไตล์ CFO พูดกับนิน (ทักท้วง/เสนอ/ถามได้ตามกฎ) ใส่ทุก action ยกเว้น chat ที่ใช้ "reply" แทน
 เลือก action:
-- log_in: เงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร","date":"YYYY-MM-DD หรือละไว้ถ้าวันนี้","say":"..."}
-- log_out: เงินจ่าย (default pocket ธนาคาร, ใส่ date เหมือนกันถ้าเป็นย้อนหลัง)
+- log_in: เงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร","cur":"THB|USD","date":"YYYY-MM-DD หรือละไว้ถ้าวันนี้","say":"..."}
+- log_out: เงินจ่าย (default pocket ธนาคาร, ใส่ date/cur เหมือนกัน)
+- convert: แปลงเงินบาท↔ดอลลาร์ {"action":"convert","amount":ตัวเลข,"from":"THB|USD"}
 - save: โยนเข้าเงินเก็บ {"action":"save","amount":ตัวเลข,"note":"","say":"..."}
 - reserve: โยนเข้าเงินสำรอง เหมือนกัน
 - add_payable: ใครค้างจ่าย {"action":"add_payable","who":"ชื่อ","amount":ตัวเลข,"due":"YYYY-MM-DD","note":""}
@@ -214,6 +245,8 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - chat: คุยทั่วไป {"action":"chat","reply":"..."}
 ตัวอย่าง: "จดค่ากิน 350" -> {"action":"log_out","amount":350,"cat":"อาหาร","pocket":"ธนาคาร","say":"จดให้แล้วครับ"}
 "จ่ายค่าน้ำเมื่อวาน 200" -> {"action":"log_out","amount":200,"cat":"อาหาร","date":"(วันที่ของเมื่อวาน)","say":"..."}
+"จดรับ 20 ดอลจากเทรด" -> {"action":"log_in","amount":20,"cat":"เทรด","pocket":"พอร์ท","cur":"USD","say":"..."}
+"1000 บาทเป็นกี่ดอล" -> {"action":"convert","amount":1000,"from":"THB"}
 กฎเหล็ก: ถ้าเป็น "คำถาม" เกี่ยวกับรายการที่จดไปแล้ว (เช่น "เมื่อกี้จดอะไรไป" "ทำไม 2676") ให้ตอบ chat/ask เท่านั้น ห้ามสร้างรายการใหม่ซ้ำเด็ดขาด — สร้างรายการเฉพาะเมื่อนินสั่งจดชัดเจน
 ถ้าไม่บอกวัน due เดาวันเดียวกันเดือนถัดไป; ตอบเฉพาะ JSON ห้ามมีข้อความอื่น"""
 
@@ -285,9 +318,19 @@ def handle(text):
     if a in ("log_in", "log_out", "save", "reserve"):
         kind = {"log_in": "in", "log_out": "out", "save": "save", "reserve": "reserve"}[a]
         pocket = {"save": "เก็บ", "reserve": "สำรอง"}.get(a, cmd.get("pocket", "ธนาคาร"))
-        t = log_tx(kind, cmd.get("amount", 0), cmd.get("cat"), cmd.get("note", ""), pocket, cmd.get("date"))
+        t = log_tx(kind, cmd.get("amount", 0), cmd.get("cat"), cmd.get("note", ""), pocket,
+                   cmd.get("date"), cmd.get("cur", "THB"))
         label = {"in": "รับ", "out": "จ่าย", "save": "เก็บ", "reserve": "สำรอง"}[kind]
-        reply = f"จด{label} {t['amount']:,.0f} ({t['cat']}) วันที่ {t['date']} กระเป๋า {POCKETS.get(t['pocket'], t['pocket'])}"
+        reply = f"จด{label} {_fmt(t['amount'], t['cur'])} ({t['cat']}) วันที่ {t['date']} กระเป๋า {POCKETS.get(t['pocket'], t['pocket'])}"
+    elif a == "convert":
+        amt = float(cmd.get("amount", 0)); frm = str(cmd.get("from", "THB")).upper()
+        rate = usd_thb()
+        if not rate:
+            reply = "ดึงเรทแลกเปลี่ยนไม่ได้ครับ ลองใหม่อีกที"
+        elif frm == "THB":
+            reply = f"{amt:,.0f}฿ = ${amt / rate:,.2f} (เรท {rate:,.2f})"
+        else:
+            reply = f"${amt:,.2f} = {amt * rate:,.0f}฿ (เรท {rate:,.2f})"
     elif a == "add_payable":
         d = _load()
         d["payables"].append({"who": cmd.get("who", "-"), "amount": float(cmd.get("amount", 0)),
@@ -337,8 +380,8 @@ def handle(text):
         r = monthly_report()
         inc = " / ".join(f"{k} {v:,.0f}" for k, v in r["รับ_แยกหมวด"][:5]) or "-"
         out = " / ".join(f"{k} {v:,.0f}" for k, v in r["จ่าย_แยกหมวด"][:5]) or "-"
-        reply = (f"สรุป {r['month']}: รับ {r['รับ']:,.0f} จ่าย {r['จ่าย']:,.0f} สุทธิ {r['สุทธิ']:+,.0f}\n"
-                 f"เก็บ {r['เก็บ']:,.0f} สำรอง {r['สำรอง']:,.0f}\nรับ: {inc}\nจ่าย: {out}")
+        reply = (f"สรุป {r['month']}: รับ {r['รับ']} จ่าย {r['จ่าย']}\n"
+                 f"เก็บ {r['เก็บ']} สำรอง {r['สำรอง']}\nรับ: {inc}\nจ่าย: {out}")
     elif a == "port":
         p = port_snapshot()
         reply = (f"พอร์ทเทรด: equity {p['equity']:,.2f} balance {p['balance']:,.2f} profit {p['profit']:+,.2f}"

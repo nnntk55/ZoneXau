@@ -43,7 +43,7 @@ function getLogSheet() {
 // ==== PLUTUS FINANCE — ชีทการเงินแยกของนิน ===
 const FIN_SS_PROP = "FIN_SS_ID";
 const FIN_TABS = {
-  "Transactions": ["time","date","kind","amount","cat","note","pocket"],
+  "Transactions": ["time","date","kind","amount","cur","cat","note","pocket"],
   "Payables":     ["who","amount","due","note","paid"],
   "Recurring":    ["name","amount","due_day","cat"],
   "Planned":      ["item","amount","date","note"]
@@ -64,7 +64,8 @@ function finTab(ss, name) {
   let s = ss.getSheetByName(name);
   if (!s) s = ss.insertSheet(name);
   const heads = FIN_TABS[name];
-  if (heads && (s.getLastRow() === 0 || s.getRange(1, 1).getValue() !== heads[0])) {
+  const head = s.getLastRow() > 0 ? s.getRange(1, 1, 1, heads.length).getValues()[0] : [];
+  if (heads && (s.getLastRow() === 0 || head[0] !== heads[0] || head[heads.length - 1] !== heads[heads.length - 1])) {
     s.getRange(1, 1, 1, heads.length).setValues([heads]);
   }
   return s;
@@ -84,7 +85,7 @@ function financeSync(data) {
   const d = data.ledger || {};
   finWrite(finTab(ss, "Transactions"), (d.tx || []).map(function (x) {
     return [x.t || "", x.date || "", x.kind || "", x.amount != null ? x.amount : "",
-            x.cat || "", x.note || "", x.pocket || ""];
+            x.cur || "THB", x.cat || "", x.note || "", x.pocket || ""];
   }));
   finWrite(finTab(ss, "Payables"), (d.payables || []).map(function (x) {
     return [x.who || "", x.amount != null ? x.amount : "", x.due || "", x.note || "", !!x.paid];
