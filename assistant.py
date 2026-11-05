@@ -1474,31 +1474,57 @@ def main():
         return
     load_memory()
     print("🤖 AI Assistant started — รอคำสั่งทาง Telegram ...")
-    tg_send("Midas พร้อมแล้วพี่ — วันนี้จะเก็บกำไรจากตลาดยังไงดี บอกแผนมาได้เลย")
+    # ไม่ส่งข้อความเปิดตัวทุกรีสตาร์ท — self-update/crash ทำให้สแปม (นินสั่งให้เงียบ ส่งเฉพาะรอบ 07:50/15:50)
     offset = 0
     inbox_path = os.path.join(CHART_DIR, "midas_inbox.txt")
+    pending_path = os.path.join(CHART_DIR, "midas_pending_events.txt")
     last_weekly_report = None
+    last_report_slot = ""
+    REPORT_SLOTS = {"07:50", "15:50"}  # รอบส่งรายงานตลาดตามที่นินสั่ง — อีเวนต์ทั่วไปรวบส่งเฉพาะรอบนี้
     while True:
         try:
             process_retry_queue()
-            # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             now_th = datetime.now(timezone.utc) + timedelta(hours=7)
+            # รอบรายงานตลาด — สรุปตลาด + ปล่อยอีเวนต์ที่กักไว้รวมเป็นข้อความเดียว
+            hhmm = now_th.strftime("%H:%M")
+            if hhmm in REPORT_SLOTS and last_report_slot != now_th.strftime("%Y-%m-%d ") + hhmm:
+                last_report_slot = now_th.strftime("%Y-%m-%d ") + hhmm
+                held = ""
+                if os.path.exists(pending_path):
+                    try:
+                        held = open(pending_path, encoding="utf-8").read().strip()
+                        os.remove(pending_path)
+                    except Exception:
+                        pass
+                ev = f"[EVENT] รอบสรุปตลาด {hhmm} — เรียก get_market_intel แล้วสรุปภาพรวมตลาดให้พี่สั้นๆ"
+                if held:
+                    ev += f"\n\nอีเวนต์ระหว่างวันที่ต้องรายงานรวมด้วย:\n{held[:2000]}"
+                print(f"📨 scheduled report {hhmm}")
+                reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
+                if reply:
+                    tg_send(reply)
+            # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
                 last_weekly_report = now_th.date()
                 print("📨 weekly report trigger")
                 reply = run_agent("[EVENT] ถึงเวลาสรุปผลประจำสัปดาห์ — เรียก get_stats แล้วสรุปให้พี่", TELEGRAM_CHAT_ID, None)
                 if reply:
                     tg_send(reply)
-            # อีเวนต์จากบอทเทรด (ปิดออเดอร์/แผนหยุด) → รายงานให้พี่ในบทบาทตัวเอง
+            # อีเวนต์จากบอทเทรด: ออเดอร์ปิด (เงินจริง) ส่งทันที — อย่างอื่นกักไว้ส่งรอบรายงาน
             if os.path.exists(inbox_path):
                 try:
                     ev = open(inbox_path, encoding="utf-8").read().strip()
                     os.remove(inbox_path)
                     if ev:
-                        print(f"📨 event: {ev[:100]}")
-                        reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
-                        if reply:
-                            tg_send(reply)
+                        if "ออเดอร์" in ev or "ปิดแล้ว" in ev:
+                            print(f"📨 urgent event: {ev[:100]}")
+                            reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
+                            if reply:
+                                tg_send(reply)
+                        else:
+                            with open(pending_path, "a", encoding="utf-8") as f:
+                                f.write(ev + "\n")
+                            print(f"📨 held event ({ev[:60]})")
                 except Exception as e:
                     print(f"inbox error: {e}")
             for upd in tg_get_updates(offset):
