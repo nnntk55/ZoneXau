@@ -540,7 +540,10 @@ def tool_send_to_devin(task):
         fn = os.path.join(DEVIN_TASK_DIR, f"task_{int(time.time() * 1000)}_{os.getpid()}.json")
         with open(fn, "w", encoding="utf-8") as f:
             json.dump({"task": task, "at": time.time(), "from": "midas"}, f, ensure_ascii=False)
-        return {"ok": True, "แจ้ง": "ส่งงานให้วินบนเครื่องนี้แล้ว (local queue) — เดี๋ยววินหยิบไปทำ"}
+        verified = os.path.exists(fn) and os.path.getsize(fn) > 10
+        return {"ok": verified, "หลักฐาน_ไฟล์": os.path.basename(fn) if verified else "เขียนไม่สำเร็จ",
+                "แจ้ง": ("ส่งงานให้วินบนเครื่องนี้แล้ว (local queue) — เดี๋ยววินหยิบไปทำ" if verified
+                        else "เขียนคิวไม่สำเร็จ ห้ามบอกพี่ว่าส่งแล้ว")}
     except Exception as e:
         return {"error": str(e)}
 
@@ -763,8 +766,17 @@ def tool_set_reminder(text, at):
             json.dump(items, f, ensure_ascii=False, indent=1)
     except Exception as e:
         return {"ผล": f"เขียนไฟล์เตือนไม่ได้: {e}"}
-    return {"ผล": f"ตั้งเตือนแล้ว {dt.strftime('%d/%m %H:%M')} (เวลาไทย) — จะส่งข้อความปลุกพี่ตอนนั้น",
-            "รอส่ง": len(items)}
+    # เช็คกลับจากไฟล์จริง — ห้ามเคลมตั้งเตือนถ้าไฟล์ไม่มีรายการนั้น
+    try:
+        saved = json.load(open(fp, encoding="utf-8"))
+        ok = any(r.get("at") == dt.isoformat() for r in saved)
+        n = len(saved)
+    except Exception:
+        ok, n = False, 0
+    if not ok:
+        return {"ผล": "ตั้งเตือนไม่สำเร็จ — ไฟล์ไม่มีรายการนี้ ห้ามบอกพี่ว่าตั้งแล้ว"}
+    return {"ผล": f"ตั้งเตือนแล้วจริง {dt.strftime('%d/%m %H:%M')} (เวลาไทย, เช็คจากไฟล์แล้ว) — จะส่งข้อความปลุกพี่ตอนนั้น",
+            "รอส่ง": n}
 
 def tool_get_sr_stats(asset=None):
     """อ่านบันทึกผลหลังเตือนแนว (บอทเทรดเขียน charts/sr_touches.json) แล้วนับ เด้ง/ทะลุ/ไม่ชัด"""
