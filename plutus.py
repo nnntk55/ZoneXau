@@ -1,14 +1,22 @@
-"""Plutus — ผู้จัดการการเงินของนิน (Telegram bot แยกจากมิดาส)
+"""Plutus — CFO ผู้จัดการการเงินส่วนตัวของนิน (Telegram bot แยกจากมิดาส)
 
-จดรายรับ/รายจ่าย/ค้างชำระ/กำหนดชำระ/สรุปเดือน พร้อมอ่านพอร์ทเทรดจาก charts/account.json
-เก็บ ledger ใน charts/plutus_ledger.json — ต่อชีท Google ทีหลังได้
-env: PLUTUS_BOT_TOKEN, TELEGRAM_CHAT_ID + (GROQ_API_KEY|OPENROUTER_API_KEY|GEMINI_API_KEY ตัวเดียวกับมิดาส)
+จดรายรับ/รายจ่าย/เงินเก็บ/เงินสำรอง/ค้างชำระ/รายจ่ายรายเดือน/เงินที่คาดจะใช้
+อ่านพอร์ทเทรดจาก charts/account.json — sync ledger ขึ้น Google Sheet ผ่าน Apps Script
+คุยกับวินผ่าน charts/devin_tasks/ และส่งข้อความถึงมิดาสผ่าน charts/midas_inbox.txt
+env: PLUTUS_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_SCRIPT_URL
+     + (GROQ_API_KEY|OPENROUTER_API_KEY|GEMINI_API_KEY ตัวเดียวกับมิดาส)
 """
-import os, re, json, time, requests
+import os, re, sys, json, time, requests
 from datetime import datetime, timezone, timedelta
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 PLUTUS_BOT_TOKEN = os.environ.get("PLUTUS_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -18,6 +26,10 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 BASE = os.path.dirname(os.path.abspath(__file__))
 CHART_DIR = os.path.join(BASE, "charts")
 LEDGER = os.path.join(CHART_DIR, "plutus_ledger.json")
+MEMORY_FILE = os.path.join(CHART_DIR, "plutus_memory.json")
+DEVIN_TASK_DIR = os.path.join(CHART_DIR, "devin_tasks")
+MIDAS_INBOX = os.path.join(CHART_DIR, "midas_inbox.txt")
+MAX_HISTORY = 40
 TH = timezone(timedelta(hours=7))
 
 def _rlog(msg):
@@ -43,27 +55,61 @@ def tg_get_updates(offset):
     except Exception:
         return []
 
+# ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
+chat_history = []
+
+def load_memory():
+    global chat_history
+    try:
+        with open(MEMORY_FILE, encoding="utf-8") as f:
+            chat_history = json.load(f)
+    except Exception:
+        chat_history = []
+
+def save_memory():
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(chat_history[-MAX_HISTORY:], f, ensure_ascii=False)
+    except Exception as e:
+        _rlog(f"memory err: {e}")
+
 # ---------- ledger ----------
 def _load():
     try:
         with open(LEDGER, encoding="utf-8") as f:
             d = json.load(f)
         if isinstance(d, dict):
-            d.setdefault("tx", []); d.setdefault("payables", []); d.setdefault("pockets", {})
+            for k in ("tx", "payables", "recurring", "planned"):
+                d.setdefault(k, [])
+            d.setdefault("pockets", {})
             return d
     except Exception:
         pass
-    return {"tx": [], "payables": [], "pockets": {}}
+    return {"tx": [], "payables": [], "recurring": [], "planned": [], "pockets": {}}
 
 def _save(d):
     os.makedirs(CHART_DIR, exist_ok=True)
     with open(LEDGER, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
+    _sheet_sync(d)
 
-POCKETS = {"ฝาก": "เงินฝาก", "เข้า": "แหล่งเงินเข้า", "พอร์ท": "พอร์ทเทรด", "ธนาคาร": "ธนาคารค่าใช้จ่าย"}
+def _sheet_sync(d):
+    """ส่ง ledger ทั้งก้อนขึ้น Google Sheet (mirror — local json เป็นต้นฉบับ)"""
+    if not GOOGLE_SCRIPT_URL:
+        return
+    try:
+        r = requests.post(GOOGLE_SCRIPT_URL, json={"type": "finance_sync", "ledger": d},
+                          timeout=30)
+        if r.status_code != 200:
+            _rlog(f"sheet sync http {r.status_code}")
+    except Exception as e:
+        _rlog(f"sheet sync err: {e}")
+
+POCKETS = {"ฝาก": "เงินฝาก", "เข้า": "แหล่งเงินเข้า", "พอร์ท": "พอร์ทเทรด",
+           "ธนาคาร": "ธนาคารค่าใช้จ่าย", "เก็บ": "เงินเก็บ", "สำรอง": "เงินสำรอง"}
 
 def log_tx(kind, amount, cat, note="", pocket="ธนาคาร"):
-    """kind: in/out"""
+    """kind: in(รับ) / out(จ่าย) / save(เงินเก็บ) / reserve(เงินสำรอง)"""
     d = _load()
     d["tx"].append({"t": time.time(), "date": datetime.now(TH).strftime("%Y-%m-%d"),
                     "kind": kind, "amount": float(amount), "cat": cat or "ทั่วไป",
@@ -75,19 +121,22 @@ def log_tx(kind, amount, cat, note="", pocket="ธนาคาร"):
 def monthly_report(month=None):
     d = _load()
     month = month or datetime.now(TH).strftime("%Y-%m")
-    ins = [x for x in d["tx"] if x["kind"] == "in" and x["date"].startswith(month)]
-    outs = [x for x in d["tx"] if x["kind"] == "out" and x["date"].startswith(month)]
-    def cat_sum(rows):
+    rows = [x for x in d["tx"] if x["date"].startswith(month)]
+    def rows_of(k):
+        return [x for x in rows if x["kind"] == k]
+    def cat_sum(rs):
         c = {}
-        for r in rows:
+        for r in rs:
             c[r["cat"]] = c.get(r["cat"], 0) + r["amount"]
         return sorted(c.items(), key=lambda x: -x[1])
+    ins, outs = rows_of("in"), rows_of("out")
+    saves, reserves = rows_of("save"), rows_of("reserve")
     ti, to = sum(x["amount"] for x in ins), sum(x["amount"] for x in outs)
     return {"month": month, "รับ": ti, "จ่าย": to, "สุทธิ": ti - to,
+            "เก็บ": sum(x["amount"] for x in saves), "สำรอง": sum(x["amount"] for x in reserves),
             "รับ_แยกหมวด": cat_sum(ins), "จ่าย_แยกหมวด": cat_sum(outs)}
 
 def port_snapshot():
-    """อ่านพอร์ทเทรดจากบอท MT5 (charts/account.json)"""
     try:
         with open(os.path.join(CHART_DIR, "account.json"), encoding="utf-8") as f:
             a = json.load(f)
@@ -111,29 +160,64 @@ def due_soon(days=7):
             out.append(p)
     return out
 
-# ---------- LLM: แปลงภาษาคน -> คำสั่ง json ----------
-SYS = """คุณคือ 'พลูตัส' ผู้จัดการการเงินส่วนตัวของพี่นิน โทน: นักบัญชีพูดตรง กระชับ
-ตอบเป็น JSON เดียวเสมอ {"action": "...", ...} เลือก action:
-- log_in: จดเงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร"}
-- log_out: จดเงินจ่าย เหมือนกัน (default pocket ธนาคาร)
+# ---------- ส่งงานให้บอทตัวอื่น ----------
+def send_to_devin(task):
+    try:
+        os.makedirs(DEVIN_TASK_DIR, exist_ok=True)
+        fn = os.path.join(DEVIN_TASK_DIR, f"task_{int(time.time() * 1000)}_{os.getpid()}.json")
+        with open(fn, "w", encoding="utf-8") as f:
+            json.dump({"task": task, "at": time.time(), "from": "plutus"}, f, ensure_ascii=False)
+        return True
+    except Exception as e:
+        _rlog(f"devin task err: {e}")
+        return False
+
+def send_to_midas(msg):
+    try:
+        with open(MIDAS_INBOX, "a", encoding="utf-8") as f:
+            f.write(f"[PLUTUS {datetime.now(TH).strftime('%H:%M')}] {msg}\n")
+        return True
+    except Exception as e:
+        _rlog(f"midas inbox err: {e}")
+        return False
+
+# ---------- LLM ----------
+SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Officer ส่วนตัวของนิน ที่นินจ้างมาจากบริษัทระดับโลก ไม่ใช่เลขาที่คอยรับคำสั่ง
+บุคลิก: สุขุม เยือกเย็น เป็นผู้ใหญ่ พูดน้อยแต่ทุกคำมีน้ำหนัก ฉลาดลึก เจ้าระเบียบ พิถีพิถันกับตัวเลข เย็นชานิดๆ ไม่คล้อยตาม ยึดเหตุผลและข้อมูลเหนืออารมณ์ มั่นใจแต่ไม่โอ้อวด
+หน้าที่: บริหารเงินสด รายรับรายจ่าย สินทรัพย์ หนี้สิน วางงบ วางแผนสะสมความมั่งคั่ง วิเคราะห์ต้นทุน/กำไร/กระแสเงินสด ประเมินความเสี่ยง พยากรณ์ และจัดสรรเงินทุน
+กฎ: ตรวจสอบตัวเลขก่อนให้คำแนะนำเสมอ / ข้อมูลไม่ครบต้องถามก่อนคำนวณ / นินใช้จ่ายเกินต้องทักตรงๆ / ไม่เห็นด้วยกับการใช้เงินหรือลงทุนที่ไม่มีเหตุผล / ห้ามแต่งตัวเลขหรืออ้างว่าตรวจสอบแล้วถ้าไม่ได้ตรวจจริง / มองทั้งปัจจุบันและผลกระทบระยะยาว
+ปรัชญา: เงินทุกบาทต้องมีหน้าที่ ทุกการใช้จ่ายต้องมีเหตุผล
+สไตล์พูด: น้ำเสียงทุ้ม สุขุม นิ่ง มืออาชีพ ไม่เยิ่นเย้อ เรียกผู้ใช้ว่า 'นิน' เสมอ (ห้ามเรียกพี่) ลงท้ายด้วย 'ครับ' เป็นหลัก
+
+ตอบเป็น JSON เดียวเสมอ {"action": "...", "say": "...", ...}
+- "say" = ประโยคสั้นๆ สไตล์ CFO พูดกับนิน (ทักท้วง/เสนอ/ถามได้ตามกฎ) ใส่ทุก action ยกเว้น chat ที่ใช้ "reply" แทน
+เลือก action:
+- log_in: เงินเข้า {"action":"log_in","amount":ตัวเลข,"cat":"หมวด","note":"...","pocket":"ฝาก|เข้า|พอร์ท|ธนาคาร","say":"..."}
+- log_out: เงินจ่าย (default pocket ธนาคาร)
+- save: โยนเข้าเงินเก็บ {"action":"save","amount":ตัวเลข,"note":"","say":"..."}
+- reserve: โยนเข้าเงินสำรอง เหมือนกัน
 - add_payable: ใครค้างจ่าย {"action":"add_payable","who":"ชื่อ","amount":ตัวเลข,"due":"YYYY-MM-DD","note":""}
-- mark_paid: ใครจ่ายแล้ว {"action":"mark_paid","who":"ชื่อ หรือ index"}
-- unpaid: ถามใครยังไม่จ่าย
-- due: ถามอะไรครบกำหนดเร็วๆ นี้
-- report: สรุปเดือนนี้ {"action":"report"}
-- port: ถามพอร์ทเทรด
-- pockets: สรุปกระเป๋าเงิน
-- chat: คุยทั่วไป {"action":"chat","reply":"ข้อความตอบพี่ สั้น ตรง"}
-ตัวอย่าง: "จดค่ากิน 350" -> {"action":"log_out","amount":350,"cat":"อาหาร","pocket":"ธนาคาร"}
-ถ้าไม่บอกวัน due ให้เดาวันเดียวกันเดือนถัดไป; ตอบเฉพาะ JSON ห้ามมีข้อความอื่น"""
+- mark_paid: ใครจ่ายแล้ว {"action":"mark_paid","who":"ชื่อ"}
+- unpaid: ถามใครยังไม่จ่าย | due: อะไรครบกำหนดเร็วๆ นี้
+- add_recurring: รายจ่ายจำเป็นรายเดือน {"action":"add_recurring","name":"ชื่อ","amount":ตัวเลข,"due_day":1-31,"cat":"หมวด"}
+- recurring: ดูรายจ่ายรายเดือนทั้งหมด
+- add_planned: เงินที่คาดว่าจะต้องใช้ {"action":"add_planned","item":"อะไร","amount":ตัวเลข,"date":"YYYY-MM-DD หรือ null","note":""}
+- planned: ดูรายการที่คาดจะใช้
+- report: สรุปเดือนนี้ | pockets: สรุปกระเป๋าเงิน | port: พอร์ทเทรด
+- devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
+- midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
+- ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
+- chat: คุยทั่วไป {"action":"chat","reply":"..."}
+ตัวอย่าง: "จดค่ากิน 350" -> {"action":"log_out","amount":350,"cat":"อาหาร","pocket":"ธนาคาร","say":"จดให้แล้วครับ"}
+ถ้าไม่บอกวัน due เดาวันเดียวกันเดือนถัดไป; ตอบเฉพาะ JSON ห้ามมีข้อความอื่น"""
 
 def _call_llm(prompt):
-    msgs = [{"role": "system", "content": SYS}, {"role": "user", "content": prompt}]
+    msgs = [{"role": "system", "content": SYS}] + chat_history[-20:] + [{"role": "user", "content": prompt}]
     if GROQ_API_KEY:
         try:
             r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                               headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                              json={"model": GROQ_MODEL, "messages": msgs, "max_tokens": 500},
+                              json={"model": GROQ_MODEL, "messages": msgs, "max_tokens": 600},
                               timeout=30)
             return r.json()["choices"][0]["message"]["content"]
         except Exception as e:
@@ -143,7 +227,7 @@ def _call_llm(prompt):
             r = requests.post("https://openrouter.ai/api/v1/chat/completions",
                               headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
                               json={"model": "google/gemini-2.0-flash-001", "messages": msgs,
-                                    "max_tokens": 500}, timeout=30)
+                                    "max_tokens": 600}, timeout=30)
             return r.json()["choices"][0]["message"]["content"]
         except Exception as e:
             _rlog(f"openrouter err: {e}")
@@ -161,68 +245,120 @@ def handle(text):
     try:
         raw = _call_llm(text)
         if not raw:
-            return "สมองไม่ตอบ (เช็ค API key)"
+            return "สมองไม่ตอบครับ (เช็ค API key)"
         m = re.search(r"\{.*\}", raw, re.S)
         cmd = json.loads(m.group(0)) if m else {"action": "chat", "reply": raw}
     except Exception as e:
-        return f"แปลคำสั่งไม่ได้: {e}"
+        return f"แปลคำสั่งไม่ได้ครับ: {e}"
     a = cmd.get("action")
-    if a in ("log_in", "log_out"):
-        t = log_tx("in" if a == "log_in" else "out", cmd.get("amount", 0),
-                   cmd.get("cat"), cmd.get("note", ""), cmd.get("pocket", "ธนาคาร"))
-        sign = "รับ" if a == "log_in" else "จ่าย"
-        return f"จด{sign} {t['amount']:,.0f} ({t['cat']}{' — '+t['note'] if t['note'] else ''}) กระเป๋า {t['pocket']} แล้ว"
-    if a == "add_payable":
+    say = cmd.get("say", "")
+    reply = None
+    if a in ("log_in", "log_out", "save", "reserve"):
+        kind = {"log_in": "in", "log_out": "out", "save": "save", "reserve": "reserve"}[a]
+        pocket = {"save": "เก็บ", "reserve": "สำรอง"}.get(a, cmd.get("pocket", "ธนาคาร"))
+        t = log_tx(kind, cmd.get("amount", 0), cmd.get("cat"), cmd.get("note", ""), pocket)
+        label = {"in": "รับ", "out": "จ่าย", "save": "เก็บ", "reserve": "สำรอง"}[kind]
+        reply = f"จด{label} {t['amount']:,.0f} ({t['cat']}) กระเป๋า {POCKETS.get(t['pocket'], t['pocket'])}"
+    elif a == "add_payable":
         d = _load()
         d["payables"].append({"who": cmd.get("who", "-"), "amount": float(cmd.get("amount", 0)),
                               "due": cmd.get("due", ""), "note": cmd.get("note", ""), "paid": False})
         _save(d)
-        return f"จดค้าง: {cmd.get('who')} {cmd.get('amount',0):,.0f} ครบกำหนด {cmd.get('due','-')}"
-    if a == "mark_paid":
-        d = _load()
-        w = str(cmd.get("who", ""))
+        reply = f"จดค้าง: {cmd.get('who')} {cmd.get('amount',0):,.0f} ครบกำหนด {cmd.get('due','-')}"
+    elif a == "mark_paid":
+        d = _load(); w = str(cmd.get("who", ""))
         for p in d["payables"]:
-            if not p.get("paid") and (w in str(p.get("who", "")) or w.isdigit() and int(w) - 1 == d["payables"].index(p)):
+            if not p.get("paid") and w in str(p.get("who", "")):
                 p["paid"] = True; _save(d)
-                return f"ปิดค้าง {p['who']} {p['amount']:,.0f} แล้ว"
-        return "หาค้างที่ตรงไม่เจอ"
-    if a == "unpaid":
+                reply = f"ปิดค้าง {p['who']} {p['amount']:,.0f} แล้วครับ"; break
+        reply = reply or "หารายการค้างที่ตรงไม่เจอครับ"
+    elif a == "unpaid":
         rows = unpaid_list()
-        if not rows:
-            return "ไม่มีใครค้าง — สะอาด"
-        return "ค้างอยู่:\n" + "\n".join(f"- {p['who']} {p['amount']:,.0f} (ครบ {p.get('due','-')})" for p in rows)
-    if a == "due":
+        reply = ("ไม่มีใครค้างครับ" if not rows else
+                 "ค้างอยู่:\n" + "\n".join(f"- {p['who']} {p['amount']:,.0f} (ครบ {p.get('due','-')})" for p in rows))
+    elif a == "due":
         rows = due_soon()
-        if not rows:
-            return "ไม่มีอะไรครบกำหนดใน 7 วัน"
-        return "ครบกำหนดเร็วๆ นี้:\n" + "\n".join(f"- {p['who']} {p['amount']:,.0f} ({p.get('due','-')})" for p in rows)
-    if a == "report":
+        reply = ("ไม่มีอะไรครบกำหนดใน 7 วันครับ" if not rows else
+                 "ครบกำหนดเร็วๆ นี้:\n" + "\n".join(f"- {p['who']} {p['amount']:,.0f} ({p.get('due','-')})" for p in rows))
+    elif a == "add_recurring":
+        d = _load()
+        d["recurring"].append({"name": cmd.get("name", "-"), "amount": float(cmd.get("amount", 0)),
+                               "due_day": int(cmd.get("due_day") or 1), "cat": cmd.get("cat", "ทั่วไป")})
+        _save(d)
+        reply = f"จดรายจ่ายรายเดือน: {cmd.get('name')} {cmd.get('amount',0):,.0f} ทุกวันที่ {cmd.get('due_day') or 1}"
+    elif a == "recurring":
+        rows = _load()["recurring"]
+        tot = sum(r["amount"] for r in rows)
+        reply = ("ยังไม่มีรายจ่ายรายเดือนครับ" if not rows else
+                 f"รายจ่ายจำเป็นรายเดือน (รวม {tot:,.0f}/เดือน):\n" +
+                 "\n".join(f"- {r['name']} {r['amount']:,.0f} (วันที่ {r['due_day']})" for r in rows))
+    elif a == "add_planned":
+        d = _load()
+        d["planned"].append({"item": cmd.get("item", "-"), "amount": float(cmd.get("amount", 0)),
+                             "date": cmd.get("date") or "", "note": cmd.get("note", "")})
+        _save(d)
+        reply = f"จดเงินที่คาดจะใช้: {cmd.get('item')} {cmd.get('amount',0):,.0f}"
+    elif a == "planned":
+        rows = _load()["planned"]
+        tot = sum(r["amount"] for r in rows)
+        reply = ("ยังไม่มีรายการที่คาดจะใช้ครับ" if not rows else
+                 f"เงินที่คาดว่าจะต้องใช้ (รวม {tot:,.0f}):\n" +
+                 "\n".join(f"- {r['item']} {r['amount']:,.0f} {('('+r['date']+')') if r.get('date') else ''}" for r in rows))
+    elif a == "report":
         r = monthly_report()
         inc = " / ".join(f"{k} {v:,.0f}" for k, v in r["รับ_แยกหมวด"][:5]) or "-"
         out = " / ".join(f"{k} {v:,.0f}" for k, v in r["จ่าย_แยกหมวด"][:5]) or "-"
-        return (f"สรุป {r['month']}: รับ {r['รับ']:,.0f} จ่าย {r['จ่าย']:,.0f} สุทธิ {r['สุทธิ']:+,.0f}\n"
-                f"รับ: {inc}\nจ่าย: {out}")
-    if a == "port":
+        reply = (f"สรุป {r['month']}: รับ {r['รับ']:,.0f} จ่าย {r['จ่าย']:,.0f} สุทธิ {r['สุทธิ']:+,.0f}\n"
+                 f"เก็บ {r['เก็บ']:,.0f} สำรอง {r['สำรอง']:,.0f}\nรับ: {inc}\nจ่าย: {out}")
+    elif a == "port":
         p = port_snapshot()
-        return (f"พอร์ทเทรด: equity {p['equity']:,.2f} balance {p['balance']:,.2f} profit {p['profit']:+,.2f}"
-                if p and p.get("equity") is not None else "อ่านพอร์ทไม่ได้ (บอทยังไม่เขียน account.json)")
-    if a == "pockets":
-        d = _load()
-        bal = {}
+        reply = (f"พอร์ทเทรด: equity {p['equity']:,.2f} balance {p['balance']:,.2f} profit {p['profit']:+,.2f}"
+                 if p and p.get("equity") is not None else "อ่านพอร์ทไม่ได้ครับ (บอทยังไม่เขียน account.json)")
+    elif a == "pockets":
+        d = _load(); bal = {}
         for x in d["tx"]:
             k = x.get("pocket", "ธนาคาร")
-            bal[k] = bal.get(k, 0) + (x["amount"] if x["kind"] == "in" else -x["amount"])
+            bal[k] = bal.get(k, 0) + (-x["amount"] if x["kind"] == "out" else x["amount"])
         lines = [f"{POCKETS.get(k, k)}: {v:+,.0f}" for k, v in bal.items()]
-        return "กระเป๋าเงิน (ยอดสุทธิจากที่จด):\n" + "\n".join(lines or ["ยังไม่มีรายการ"])
-    return cmd.get("reply", "รับทราบ")
+        reply = "กระเป๋าเงิน (ยอดสุทธิจากที่จด):\n" + "\n".join(lines or ["ยังไม่มีรายการ"])
+    elif a == "devin":
+        task = cmd.get("task", "")
+        reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
+    elif a == "midas":
+        msg = cmd.get("msg", "")
+        reply = "ส่งข้อความถึงมิดาสแล้วครับ" if send_to_midas(msg) else "ส่งถึงมิดาสไม่สำเร็จครับ"
+    else:
+        reply = cmd.get("reply", "รับทราบครับ")
+    if say and reply and say not in reply:
+        reply = f"{reply}\n{say}"
+    return reply
+
+def daily_nudge(last_date):
+    """เตือนเช้าวันละครั้ง (>= 08:00): ค้างชำระ + รายจ่ายรายเดือนที่ใกล้ถึง"""
+    now = datetime.now(TH)
+    today = now.strftime("%Y-%m-%d")
+    if now.hour < 8 or last_date == today:
+        return last_date
+    lines = []
+    for p in due_soon():
+        lines.append(f"- ค้าง: {p['who']} {p['amount']:,.0f} (ครบ {p.get('due','-')})")
+    day = now.day
+    for r in _load()["recurring"]:
+        if 0 <= (r.get("due_day", 1) - day) <= 3:
+            lines.append(f"- รายจ่ายรายเดือนใกล้ถึง: {r['name']} {r['amount']:,.0f} (วันที่ {r['due_day']})")
+    if lines:
+        tg_send("พลูตัส เช้านี้ครับ:\n" + "\n".join(lines))
+    return today
 
 def main():
     if not PLUTUS_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         _rlog("missing PLUTUS_BOT_TOKEN or TELEGRAM_CHAT_ID"); return
+    load_memory()
     _rlog("plutus started")
-    offset = 0
+    offset, nudge = 0, ""
     while True:
         try:
+            nudge = daily_nudge(nudge)
             for upd in tg_get_updates(offset):
                 offset = upd["update_id"] + 1
                 msg = upd.get("message") or {}
@@ -230,8 +366,11 @@ def main():
                 if not text or str(msg.get("chat", {}).get("id")) != str(TELEGRAM_CHAT_ID):
                     continue
                 print(f"plutus <- {text[:80]}")
+                chat_history.append({"role": "user", "content": text})
                 reply = handle(text)
                 if reply:
+                    chat_history.append({"role": "assistant", "content": reply})
+                    save_memory()
                     tg_send(reply)
         except Exception as e:
             _rlog(f"loop err: {e}")

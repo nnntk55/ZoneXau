@@ -10,3 +10,6 @@ ff_calendar_cache.json*
 devin_work/
 _telegram/
 devin_bridge_state.json
+charts/
+*_memory*.json
+plutus_ledger.json

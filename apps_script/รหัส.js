@@ -40,6 +40,79 @@ function getLogSheet() {
   return sheet;
 }
 
+// ==== PLUTUS FINANCE — ชีทการเงินแยกของนิน ===
+const FIN_SS_PROP = "FIN_SS_ID";
+const FIN_TABS = {
+  "Transactions": ["time","date","kind","amount","cat","note","pocket"],
+  "Payables":     ["who","amount","due","note","paid"],
+  "Recurring":    ["name","amount","due_day","cat"],
+  "Planned":      ["item","amount","date","note"]
+};
+
+function finSS() {
+  const p = PropertiesService.getScriptProperties();
+  const id = p.getProperty(FIN_SS_PROP);
+  if (id) {
+    try { return SpreadsheetApp.openById(id); } catch (e) { /* ชีทหาย/สิทธิ์หลุด สร้างใหม่ */ }
+  }
+  const ss = SpreadsheetApp.create("Ninin Finance");
+  p.setProperty(FIN_SS_PROP, ss.getId());
+  return ss;
+}
+
+function finTab(ss, name) {
+  let s = ss.getSheetByName(name);
+  if (!s) s = ss.insertSheet(name);
+  const heads = FIN_TABS[name];
+  if (heads && (s.getLastRow() === 0 || s.getRange(1, 1).getValue() !== heads[0])) {
+    s.getRange(1, 1, 1, heads.length).setValues([heads]);
+  }
+  return s;
+}
+
+function finWrite(sheet, rows) {
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+  }
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+function financeSync(data) {
+  const ss = finSS();
+  const d = data.ledger || {};
+  finWrite(finTab(ss, "Transactions"), (d.tx || []).map(function (x) {
+    return [x.t || "", x.date || "", x.kind || "", x.amount != null ? x.amount : "",
+            x.cat || "", x.note || "", x.pocket || ""];
+  }));
+  finWrite(finTab(ss, "Payables"), (d.payables || []).map(function (x) {
+    return [x.who || "", x.amount != null ? x.amount : "", x.due || "", x.note || "", !!x.paid];
+  }));
+  finWrite(finTab(ss, "Recurring"), (d.recurring || []).map(function (x) {
+    return [x.name || "", x.amount != null ? x.amount : "", x.due_day != null ? x.due_day : "", x.cat || ""];
+  }));
+  finWrite(finTab(ss, "Planned"), (d.planned || []).map(function (x) {
+    return [x.item || "", x.amount != null ? x.amount : "", x.date || "", x.note || ""];
+  }));
+  return {status: "success", type: "finance_sync", url: ss.getUrl()};
+}
+
+function finRead() {
+  const ss = finSS();
+  const out = {url: ss.getUrl()};
+  for (const name in FIN_TABS) {
+    const s = finTab(ss, name);
+    const vals = s.getLastRow() > 1 ? s.getRange(2, 1, s.getLastRow() - 1, FIN_TABS[name].length).getValues() : [];
+    out[name] = vals.map(function (r) {
+      const o = {};
+      FIN_TABS[name].forEach(function (h, i) { o[h] = r[i]; });
+      return o;
+    });
+  }
+  return out;
+}
+
 function normBool(v, def) {
   if (v === true || v === false) return v;
   if (v === null || v === undefined || v === "") return def;
@@ -84,6 +157,12 @@ function doPost(e) {
       });
       if (rows.length) ls.getRange(ls.getLastRow() + 1, 1, rows.length, LOG_HEADERS.length).setValues(rows);
       return ContentService.createTextOutput(JSON.stringify({status:"success",type:"log",n:rows.length}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // === พลูตัส: ซิงก์ ledger การเงินทั้งก้อนขึ้นชีทแยก ===
+    if (data && data.type === "finance_sync") {
+      return ContentService.createTextOutput(JSON.stringify(financeSync(data)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -135,6 +214,10 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  if (e && e.parameter && e.parameter.finance) {
+    return ContentService.createTextOutput(JSON.stringify(finRead()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   if (e && e.parameter && e.parameter.logs) {
     const ls = getLogSheet();
     const n = Math.min(Number(e.parameter.logs) || 100, 500);
