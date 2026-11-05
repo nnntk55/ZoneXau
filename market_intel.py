@@ -257,6 +257,7 @@ LAYERS = {"macro": "เศรษฐกิจโลก ดอกเบี้ย �
 LINKS = {"FedWatch (CME)": "https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html",
          "COT Report (CFTC)": "https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm",
          "GLD Holdings (SPDR)": "https://www.spdrgoldshares.com/usa/",
+         "ETF Flows / CB Gold (WGC)": "https://www.gold.org/goldhub",
          "DXY (TradingView)": "https://www.tradingview.com/symbols/TVC-DXY/",
          "Economic Calendar (FF)": "https://www.forexfactory.com/calendar"}
 
