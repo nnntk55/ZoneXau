@@ -26,6 +26,10 @@ def call(url, key=None, data=None, timeout=60):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # คอนโซล Windows cp1252 พิมพ์ไทยล้ม
+    except Exception:
+        pass
     key = os.getenv("RENDER_API_KEY")
     if not key:
         sys.exit("ไม่มี RENDER_API_KEY บนเครื่องนี้ (ตั้งด้วย setx RENDER_API_KEY ... แล้วเปิดหน้าต่างใหม่)")
