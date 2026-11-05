@@ -176,7 +176,7 @@ def route(st):
     mode = st.get("mode") or "auto"
     if mode in ("local", "cloud"):
         return mode
-    return "cloud" if time.time() < st.get("cloud_until", 0) else "local"
+    return "cloud" if st.get("cloud_active") and time.time() < st.get("cloud_until", 0) else "local"
 
 def deliver(st, text, force_cloud=False):
     """ส่งข้อความถึงวินใน session เดิมเสมอ (session ที่หลับ ส่งข้อความเข้าไปแล้วตื่นเอง)
@@ -203,7 +203,7 @@ def deliver(st, text, force_cloud=False):
 
 # ---------- โหมด local: ส่งงานให้ Devin CLI บนเครื่องนี้ (คิดแค่ token ถูกกว่า cloud) ----------
 LOCAL_DIR = os.getenv("DEVIN_WORKDIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_work", "ZoneXau")
-LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "smart")
+LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "bypass")  # อนุญาตทุกอย่างไม่ต้องกดยืนยัน (deny ใน .devin/config.json ยังกันอยู่)
 LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "2400"))
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
@@ -235,9 +235,19 @@ def local_prepare():
         subprocess.run([git, "pull", "--ff-only", "-q"], cwd=LOCAL_DIR, capture_output=True, timeout=120)
     return ""
 
+def cloud_back(st):
+    """cloud ทำงานที่ส่งต่อเสร็จ -> กลับไปใช้ local พร้อมส่งสรุปของ cloud ให้ local รู้เรื่อง"""
+    log = "\n".join(st.pop("cloud_log", []) or [])[-3000:]
+    st["cloud_active"] = False; st["cloud_until"] = 0
+    if log:
+        st["local_note"] = "[วินฝั่ง cloud ทำงานที่ local ส่งต่อไปเสร็จแล้ว สิ่งที่ cloud ตอบนิน:\n" + log + "]"
+    send("วินฝั่ง cloud ทำงานนี้เสร็จแล้ว กลับมาใช้วิน local ต่อ (ส่งสรุปให้ local แล้ว)")
+
 def escalate(st, text, why):
     """โหมด auto: ส่งงานต่อให้ Devin Cloud (main loop ส่งให้ผ่าน cloud_q)"""
-    st.setdefault("cloud_q", []).append(f"[ส่งต่อจากวินฝั่ง local บน VPS — เหตุผล: {why}]\nงานของนิน: {text}")
+    st.setdefault("cloud_q", []).append(f"[ส่งต่อจากวินฝั่ง local บน VPS — เหตุผล: {why}] "
+                                        "(ทำงานนี้ให้จบ ทำเสร็จแล้วจบข้อความสุดท้ายถึงนินด้วย [[DONE]] bridge จะสลับกลับไปใช้วิน local "
+                                        "พร้อมส่งสรุปของคุณให้ — ถ้าแค่ถามนินระหว่างทางไม่ต้องใส่)\nงานของนิน: {text}")
 
 def local_run(st, text):
     """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก
@@ -258,6 +268,9 @@ def local_run(st, text):
             fail("โหมด local เตรียมโฟลเดอร์งานไม่ได้: " + err)
             return
         first = not st.get("local_started")
+        note = st.pop("local_note", "")
+        if note:
+            text = note + "\n\n" + text
         if first:
             prompt = CONTEXT + LOCAL_CONTEXT + LOCAL_AUTO_RULE + CONTEXT_TAIL + text
         elif st.get("local_rules_v") != LOCAL_RULES_V:
@@ -399,10 +412,9 @@ def main():
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
     st = load_state()
-    if st.get("mode_v") != 2:  # ย้ายโหมด local/ว่างเดิมให้เป็น auto (นินให้วินเลือก local/cloud เอง)
-        if st.get("mode") in (None, "local"):
-            st["mode"] = "auto"
-        st["mode_v"] = 2
+    if st.get("mode_v") != 3:  # ย้ายโหมดเดิมให้เป็น auto (นินให้วินเลือก local/cloud เอง)
+        st["mode"] = "auto"; st["cloud_active"] = False
+        st["mode_v"] = 3
         save_state(st)
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = last_rem = retry_at = cloud_retry = 0
@@ -431,11 +443,11 @@ def main():
                 if not text:
                     continue
                 if text == "/new":
-                    st["session_id"] = None; st["seen"] = 0; st["local_started"] = False; st["cloud_until"] = 0
+                    st["session_id"] = None; st["seen"] = 0; st["local_started"] = False; st["cloud_until"] = 0; st["cloud_active"] = False
                     send("เปิดบทสนทนาใหม่ — พิมพ์งานมาได้เลย")
                     continue
                 if text in ("/local", "/cloud", "/auto"):
-                    st["mode"] = text[1:]; st["cloud_until"] = 0
+                    st["mode"] = text[1:]; st["cloud_until"] = 0; st["cloud_active"] = False
                     save_state(st)
                     send({"/local": "บังคับโหมด local: ใช้ Devin CLI บน VPS อย่างเดียว (คิดแค่ token) กลับเป็นอัตโนมัติพิมพ์ /auto",
                           "/cloud": "บังคับโหมด cloud: ใช้ Devin Cloud session เดิมอย่างเดียว กลับเป็นอัตโนมัติพิมพ์ /auto",
@@ -461,6 +473,9 @@ def main():
                         send("โควต้า Devin หมด วินยังเข้ามาไม่ได้ตอนนี้ ข้อความเก็บไว้แล้ว จะส่งให้เองเมื่อเข้าได้" if quota_err(err)
                              else "ส่งข้อความเข้า session เดิมยังไม่ได้ ข้อความเก็บไว้แล้ว จะลองส่งใหม่ทุก 1 นาที (ไม่เปิด session ใหม่)")
                 save_state(st)
+            if st.get("cloud_active") and time.time() >= st.get("cloud_until", 0):
+                cloud_back(st)  # cloud เงียบเกิน 30 นาทีโดยไม่บอกว่าเสร็จ -> กลับ local
+                save_state(st)
             local_tick(st)
             # งานที่ local ส่งต่อให้ cloud (โหมด auto)
             if st.get("cloud_q") and time.time() >= cloud_retry:
@@ -468,6 +483,7 @@ def main():
                 ok, url, err = deliver(st, "\n\n".join(q), force_cloud=True)
                 if ok:
                     st["cloud_until"] = time.time() + CLOUD_HOLD
+                    st["cloud_active"] = True; st["cloud_log"] = []
                     send("งานนี้ต้องใช้ cloud วินส่งต่อให้วินฝั่ง cloud แล้ว ข้อความถัดไปช่วงนี้จะคุยกับฝั่ง cloud ต่อ"
                          + (f"\n{url}" if url else ""))
                 else:
@@ -485,11 +501,20 @@ def main():
                 if s:
                     msgs = [m for m in (s.get("messages") or []) if m.get("type") == "devin_message"]
                     if len(msgs) > st["seen"]:
+                        done = False
                         for m in msgs[st["seen"]:]:
-                            send(m.get('message', ''))
+                            t = m.get('message', '')
+                            if st.get("cloud_active") and "[[DONE]]" in t:
+                                done = True; t = t.replace("[[DONE]]", "").strip()
+                            if t:
+                                send(t)
+                            if st.get("cloud_active"):
+                                st.setdefault("cloud_log", []).append(t)
                         st["seen"] = len(msgs)
-                        if time.time() < st.get("cloud_until", 0):
+                        if st.get("cloud_active"):
                             st["cloud_until"] = time.time() + CLOUD_HOLD
+                        if done or (st.get("cloud_active") and session_dead(s)):
+                            cloud_back(st)
                         save_state(st)
                     # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
             if time.time() - last_rem > 60:
