@@ -1596,7 +1596,8 @@ def main():
                     continue
                 print(f"📩 {text or '[รูป]'}")
                 img = tg_download_photo(photo[-1]["file_id"]) if photo else None
-                reply = run_agent(text, chat_id, img)
+                live = _live_price_line()  # แนบราคาสดทุกเทิร์น กันเล่าเลขเก่าจาก memory
+                reply = run_agent(text + ("\n" + live if live else ""), chat_id, img)
                 if reply:
                     tg_send(reply)
         except Exception as e:
