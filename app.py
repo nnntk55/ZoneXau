@@ -738,6 +738,7 @@ HTML_TEMPLATE = """
             <span style="font-size: 0.75rem; color: #9b8477;">{{ bot_last }}</span>
             <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500;">ข่าว / Macro Intel ↗</a>
             <a href="{{ url_for('analyst_page') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500; margin-right: 12px;">Analyst ↗</a>
+            <a href="{{ url_for('technical_page') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500; margin-right: 12px;">Technical ↗</a>
         </div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -971,6 +972,7 @@ HTML_TEMPLATE = """
                 <a href="{{ url_for('send_test') }}" class="btn">🔔 ทดสอบส่งข้อความ</a>
                 <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" class="btn">📊 ข่าว / Macro Intel</a>
                 <a href="{{ url_for('analyst_page') }}" target="_blank" rel="noopener" class="btn">🧠 Analyst</a>
+                <a href="{{ url_for('technical_page') }}" target="_blank" rel="noopener" class="btn">📈 Technical</a>
             </div>
         </div>
         <div class="status-footer">
@@ -1096,7 +1098,7 @@ NEWS_TEMPLATE = """
         <h1>MARKET INTEL — วิเคราะห์ทองแบบมาโคร</h1>
         <a class="back" href="{{ url_for('home') }}">← กลับแดชบอร์ด</a>
     </div>
-    <div class="sub">ข้อมูลจริงจากแหล่ง: Yahoo Finance / FRED / ForexFactory / Google News — อัปเดต {{ d.fetched_thai }} (ไทย) รีเฟรชอัตโนมัติทุก 2 นาที · <a href="{{ url_for('analyst_page') }}" style="color:#8a5a44;font-weight:600">ดูชั้นตีความ /analyst →</a></div>
+    <div class="sub">ข้อมูลจริงจากแหล่ง: Yahoo Finance / FRED / ForexFactory / Google News — อัปเดต {{ d.fetched_thai }} (ไทย) รีเฟรชอัตโนมัติทุก 2 นาที · <a href="{{ url_for('analyst_page') }}" style="color:#8a5a44;font-weight:600">ดูชั้นตีความ /analyst →</a> <a href="{{ url_for('technical_page') }}" style="color:#8a5a44;font-weight:600">/technical →</a></div>
 
     {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
 
@@ -1217,7 +1219,7 @@ ANALYST_BODY = """
         <h1>ANALYST — ชั้นตีความตลาด</h1>
         <a class="back" href="{{ url_for('home') }}">← แดชบอร์ด</a>
     </div>
-    <div class="sub">สมองวิเคราะห์จากข้อมูลจริงชุดเดียวกับหน้า /news — อัปเดต {{ d.fetched_thai }} (ไทย) · <a href="{{ url_for('market_news') }}" style="color:#9b8477">ดูข้อมูลดิบ /news →</a></div>
+    <div class="sub">สมองวิเคราะห์จากข้อมูลจริงชุดเดียวกับหน้า /news — อัปเดต {{ d.fetched_thai }} (ไทย) · <a href="{{ url_for('market_news') }}" style="color:#9b8477">ดูข้อมูลดิบ /news →</a> <a href="{{ url_for('technical_page') }}" style="color:#9b8477">/technical →</a></div>
 
     {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
 
@@ -1245,43 +1247,6 @@ ANALYST_BODY = """
         {% for x in wm.drivers or [] %}<div class="layer">· {{ x }}</div>{% endfor %}
         <div class="err" style="color:#b0563f">ยืนยันไม่ได้: {{ (wm.cannot_confirm or [])|join(' · ') }}</div>
     </div>
-    {% endif %}
-
-    {% set tech = d.tech or {} %}
-    {% if tech.get('tfs') %}
-    <div class="card">
-        <h2>TECHNICAL INTELLIGENCE — Multi-TF (คำนวณบน VPS จากแท่ง MT5 จริง · {{ tech.fetched_thai }})</h2>
-        <div class="sigsum">Daily Bias: {{ (tech.daily_bias or {}).get('label') }} (score {{ (tech.daily_bias or {}).get('score') }})</div>
-        <table><tr><th>TF</th><th>เทรนด์</th><th>EMA</th><th>โครงสร้าง</th><th>Stoch K/D</th><th>เหตุผล</th></tr>
-        {% for tf, v in tech.tfs.items() %}
-        <tr><td>{{ tf.upper() }}</td><td>{{ v.trend }}</td><td>{{ v.ema_align }}</td>
-            <td>{{ (v.structure or {}).get('dir') }}</td>
-            <td>{{ v.stoch_k }}/{{ v.stoch_d }} {{ v.stoch_zone }}</td>
-            <td>{{ v.trend_why }}</td></tr>
-        {% endfor %}</table>
-        {% if tech.missing_tfs %}<div class="err" style="color:#b0563f">TF ที่ขาดข้อมูล: {{ tech.missing_tfs|join(', ') }}</div>{% endif %}
-        {% for r in (tech.daily_bias or {}).get('reasons') or [] %}<div class="err" style="color:#9b8477">· {{ r }}</div>{% endfor %}
-    </div>
-
-    {% if tech.get('setups') %}
-    <div class="card">
-        <h2>Entry Setups (แผน — ไม่ใช่คำสั่งเทรด)</h2>
-        {% for s in tech.setups %}
-        <div class="layer"><b>{{ s.สถานะ }}</b> — {{ s.direction }} {{ s.type }}
-            <div class="err" style="color:#9b8477">zone: {{ s.entry_zone }} | ยืนยัน: {{ s.confirmation }} | หักล้าง: {{ s.invalidation }} | T1: {{ s.target1 }} | macro {{ s.macro }}</div></div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if tech.get('levels') %}
-    <div class="card">
-        <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>
-        <table><tr><th>แนว</th><th>ราคา</th><th>TF</th><th>ชนิด</th><th>ห่าง</th></tr>
-        {% for l in tech.levels %}
-        <tr><td>{{ l.name }}</td><td>{{ '{:,.2f}'.format(l.price) }}</td><td>{{ l.tf }}</td><td>{{ l.kind }}</td><td>{{ l.dist_pct }}%</td></tr>
-        {% endfor %}</table>
-    </div>
-    {% endif %}
     {% endif %}
 
     {% if d.alerts or d.divergences or d.thesis_invalidated %}
@@ -1388,6 +1353,66 @@ ANALYST_BODY = """
 """
 
 ANALYST_TEMPLATE = NEWS_TEMPLATE[:NEWS_TEMPLATE.index("<body>")] + "<body>\n<div class=\"container\">" + ANALYST_BODY + "\n</div>\n</body>\n</html>\n"
+
+# ---------- หน้า /technical — นักวิเคราะห์เทคนิคของระบบ (แยกจาก stage engine ของนิน ห้ามปน) ----------
+TECH_BODY = """
+    <div class="head">
+        <h1>TECHNICAL INTELLIGENCE</h1>
+        <a class="back" href="{{ url_for('home') }}">← แดชบอร์ด</a>
+    </div>
+    <div class="sub">นักวิเคราะห์เทคนิคของระบบ — คำนวณบน VPS จากแท่ง MT5 จริง · แยกจาก stage engine/กฎเทรดของนินโดยสิ้นเชิง (read-only) ·
+        <a href="{{ url_for('analyst_page') }}" style="color:#9b8477">/analyst →</a> <a href="{{ url_for('market_news') }}" style="color:#9b8477">/news →</a></div>
+
+    {% if not t or not t.get('tfs') %}
+    <div class="card"><h2>ยังไม่มีข้อมูล</h2>
+        <div class="layer">บอทยังไม่ push ผลวิเคราะห์ขึ้นมา — รอบอท self-update + รอบคำนวณแรก (~15 นาที)</div></div>
+    {% else %}
+
+    <div class="card">
+        <h2>Daily Bias</h2>
+        <div class="sigsum">{{ (t.daily_bias or {}).get('label') }} <span style="color:#9b8477;font-weight:400">(score {{ (t.daily_bias or {}).get('score') }} · คำนวณ {{ t.fetched_thai }})</span></div>
+        {% for r in (t.daily_bias or {}).get('reasons') or [] %}<div class="layer">· {{ r }}</div>{% endfor %}
+        <div class="err" style="color:#9b8477">{{ (t.daily_bias or {}).get('note') }}</div>
+    </div>
+
+    <div class="card">
+        <h2>เทรนด์ทุกไทม์เฟรม (top-down MN→M1)</h2>
+        <table><tr><th>TF</th><th>เทรนด์</th><th>EMA</th><th>โครงสร้าง</th><th>Stoch K/D</th><th>เหตุผล</th></tr>
+        {% for tf, v in t.tfs.items() %}
+        <tr><td>{{ tf.upper() }}</td><td>{{ v.trend }}</td><td>{{ v.ema_align }}</td>
+            <td>{{ (v.structure or {}).get('dir') }}</td>
+            <td>{{ v.stoch_k }}/{{ v.stoch_d }} {{ v.stoch_zone }}</td>
+            <td>{{ v.trend_why }}</td></tr>
+        {% endfor %}</table>
+        {% if t.missing_tfs %}<div class="err" style="color:#b0563f">TF ที่ขาดข้อมูล: {{ t.missing_tfs|join(', ') }}</div>{% endif %}
+        {% if t.volatility %}<div class="err" style="color:#9b8477">Volatility (H1 ATR): {{ t.volatility }}% ต่อแท่ง</div>{% endif %}
+    </div>
+
+    {% if t.get('setups') %}
+    <div class="card">
+        <h2>Entry Setups (แผนของระบบ — ไม่ใช่คำสั่งเทรด ไม่ยิงออเดอร์)</h2>
+        {% for s in t.setups %}
+        <div class="layer"><b>{{ s.สถานะ }}</b> — {{ s.direction }} {{ s.type }}
+            <div class="err" style="color:#9b8477">zone: {{ s.entry_zone }} | ยืนยัน: {{ s.confirmation }} | หักล้าง: {{ s.invalidation }} | T1: {{ s.target1 }} | macro {{ s.macro }}</div></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if t.get('levels') %}
+    <div class="card">
+        <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>
+        <table><tr><th>แนว</th><th>ราคา</th><th>TF</th><th>ชนิด</th><th>ห่าง</th></tr>
+        {% for l in t.levels %}
+        <tr><td>{{ l.name }}</td><td>{{ '{:,.2f}'.format(l.price) }}</td><td>{{ l.tf }}</td><td>{{ l.kind }}</td><td>{{ l.dist_pct }}%</td></tr>
+        {% endfor %}</table>
+    </div>
+    {% endif %}
+
+    <div class="foot">{{ t.note }}</div>
+    {% endif %}
+"""
+
+TECH_TEMPLATE = NEWS_TEMPLATE[:NEWS_TEMPLATE.index("<body>")] + "<body>\n<div class=\"container\">" + TECH_BODY + "\n</div>\n</body>\n</html>\n"
 # ==========================================
 # NOTIFICATION & HELPER FUNCTIONS
 # ==========================================
@@ -1714,6 +1739,10 @@ def analyst_page():
         except Exception as e:
             err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
     return render_template_string(ANALYST_TEMPLATE, d=d, err=err)
+
+@app.route("/technical", strict_slashes=False)
+def technical_page():
+    return render_template_string(TECH_TEMPLATE, t=_tech_state())
 
 @app.route("/")
 def home():
