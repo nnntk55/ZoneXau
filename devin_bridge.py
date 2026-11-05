@@ -399,6 +399,11 @@ def main():
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
     st = load_state()
+    if st.get("mode_v") != 2:  # ย้ายโหมด local/ว่างเดิมให้เป็น auto (นินให้วินเลือก local/cloud เอง)
+        if st.get("mode") in (None, "local"):
+            st["mode"] = "auto"
+        st["mode_v"] = 2
+        save_state(st)
     send("วินพร้อมแล้ว — สั่งงานมาได้เลยครับ (แก้บั๊ก/feature ได้เลย เดี๋ยว push ให้เอง)")
     last_poll = last_rem = retry_at = cloud_retry = 0
     last_in = time.time()

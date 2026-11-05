@@ -1,6 +1,17 @@
 {
   "permissions": {
-    "allow": ["Read(**)", "Exec(git)", "Exec(python)", "Exec(py)"],
+    "allow": [
+      "Read(**)",
+      "Exec(git)",
+      "Exec(python)",
+      "Exec(py)",
+      "Exec(curl)",
+      "Exec(curl.exe)",
+      "Exec(Invoke-WebRequest)",
+      "Exec(Invoke-RestMethod)",
+      "Fetch(https://*/*)",
+      "Fetch(http://*/*)"
+    ],
     "deny": ["Exec(taskkill)", "Exec(shutdown)", "Exec(Stop-Process)", "Exec(wmic)"]
   }
 }
