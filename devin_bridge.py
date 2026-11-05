@@ -251,11 +251,27 @@ def escalate(st, text, why):
                                         "พร้อมส่งสรุปของคุณให้ — ถ้าแค่ถามนินระหว่างทางไม่ต้องใส่)\n"
                                         f"งานของนิน: {text}")
 
-def local_run(st, text):
+MIDAS_INBOX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "midas_inbox.txt")
+MIDAS_TAG = "[งานจากมิดาสผ่านคิว local]"
+
+def _midas_report(ok, detail):
+    """งานจากมิดาสจบ -> เขียน [EVENT] กลับเข้า midas_inbox.txt ให้น้องรายงานพี่ต่อ (ทั้งเสร็จและติดขัด)"""
+    try:
+        os.makedirs(os.path.dirname(MIDAS_INBOX), exist_ok=True)
+        ev = ("[EVENT] วินทำงานจากมิดาสเสร็จแล้ว — ผล:\n" if ok else
+              "[EVENT] วินทำงานจากมิดาสไม่สำเร็จ/ติดขัด — เหตุ:\n") + str(detail)[:1200] + "\nสรุปรายงานพี่สั้นๆ"
+        with open(MIDAS_INBOX, "a", encoding="utf-8") as f:
+            f.write(ev + "\n")
+    except Exception as e:
+        print(f"midas report err: {e}")
+
+def local_run(st, text, midas=False):
     """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก
-    โหมด auto: local พัง หรือวิน local ขอ [[CLOUD: ...]] -> ส่งต่อให้ cloud เอง"""
+    โหมด auto: local พัง หรือวิน local ขอ [[CLOUD: ...]] -> ส่งต่อให้ cloud เอง — midas=True คืองานจากคิวมิดาส จบแล้วรายงานกลับ"""
     auto = (st.get("mode") or "auto") == "auto"
     def fail(msg):
+        if midas:
+            _midas_report(False, msg)
         if auto:
             escalate(st, text, "local ใช้ไม่ได้: " + msg[:200])
         else:
@@ -288,6 +304,8 @@ def local_run(st, text):
             r = subprocess.run(cmd, cwd=LOCAL_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                stdin=subprocess.DEVNULL, timeout=LOCAL_TIMEOUT)
         except subprocess.TimeoutExpired:
+            if midas:
+                _midas_report(False, f"ทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ถูกตัดกลางคัน")
             send(f"วินทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ตัดรอบนี้ไปก่อน สั่งต่อได้เลย")
             st["local_started"] = True
             return
@@ -306,7 +324,11 @@ def local_run(st, text):
             out = _CLOUD_TAG.sub("", out).strip()
         if out:
             send(out)
+        if midas:
+            _midas_report(True, out or "(ไม่มีคำตอบจากวิน)")
         if m:
+            if midas:
+                _midas_report(False, "local ทำไม่ได้ — ส่งต่อให้ cloud: " + (m.group(1).strip() or "")[:300])
             if auto:
                 escalate(st, text, m.group(1).strip() or "ต้องใช้เครื่องมือฝั่ง cloud")
             else:
@@ -330,7 +352,8 @@ def local_tick(st):
     st["local_q"] = []
     save_state(st)
     LOCAL["busy"] = True; LOCAL["started"] = time.time()
-    threading.Thread(target=local_run, args=(st, "\n\n".join(q)), daemon=True).start()
+    midas = any(MIDAS_TAG in x for x in q)
+    threading.Thread(target=local_run, args=(st, "\n\n".join(q), midas), daemon=True).start()
 
 CLOUD_HOLD = 1800  # วิ: หลังส่งงานต่อให้ cloud ข้อความถัดไปไปฝั่ง cloud จนเงียบ 30 นาที แล้วกลับมา local
 BATCH_WAIT = 6  # วิ: รอข้อความถัดไปก่อนส่ง ถ้านินพิมพ์หลายข้อความติดกัน
@@ -394,7 +417,7 @@ def check_midas_tasks(st):
             except Exception:
                 pass
             if task:
-                st.setdefault("local_q", []).append("[งานจากมิดาสผ่านคิว local] " + task)
+                st.setdefault("local_q", []).append(MIDAS_TAG + " " + task)
         if files:
             save_state(st)
     except Exception as e:
