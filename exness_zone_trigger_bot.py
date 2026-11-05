@@ -1498,14 +1498,15 @@ def announce_morning_intel():
                 "— ใช้เฉพาะข้อมูล tool คืนจริง ห้ามเดา ลงท้ายบอกว่าไม่ใช่คำสั่งเทรด")
 
 MI_WATCH = {"t": 0, "sent": {}}
-TECH_WATCH = {"t": 0, "data": None}
+TECH_WATCH = {}  # แยก cache ต่อ symbol — กัน tech ของ US30/BTC ปนไปแสดงบนหน้าทอง
 
 def tech_refresh(symbol):
     """สมองเทคนิค multi-TF (tech_intel.py) คำนวณจากแท่ง MT5 จริงทุก ~5 นาที — แนบขึ้น dashboard
     นี่คือชั้น Technical Intelligence ของ Midas: read-only ไม่ยิงออเดอร์ ไม่แตะกฎเทรด"""
-    if time.time() - TECH_WATCH["t"] < 300:
-        return TECH_WATCH["data"]
-    TECH_WATCH["t"] = time.time()
+    tw = TECH_WATCH.setdefault(symbol, {"t": 0, "data": None})
+    if time.time() - tw["t"] < 300:
+        return tw["data"]
+    tw["t"] = time.time()
     try:
         import tech_intel
         frames = {}
@@ -1514,20 +1515,20 @@ def tech_refresh(symbol):
             if df is not None and not df.empty:
                 frames[tf] = df
         if not frames:
-            return TECH_WATCH["data"]
+            return tw["data"]
         try:
             import market_intel
             mi = market_intel.get_market_intel()
         except Exception:
             mi = None
-        TECH_WATCH["data"] = tech_intel.analyze(frames, mi)
+        tw["data"] = tech_intel.analyze(frames, mi)
         try:
-            TECH_WATCH["data"]["call_stats"] = tech_intel.track_calls(TECH_WATCH["data"], CHART_DIR)
+            tw["data"]["call_stats"] = tech_intel.track_calls(tw["data"], CHART_DIR, tag="_" + symbol)
         except Exception as ce:
             print(f"call track error: {ce}")
     except Exception as e:
         print(f"tech intel error: {e}")
-    return TECH_WATCH["data"]
+    return tw["data"]
 
 def macro_confluence_note(side):
     """P4/P5: macro หนุนทิศทะลุแนวไหม — side 'r'=ต้าน(ทะลุขึ้นต้องการแรงซื้อ) / 's'=รับ(ทะลุลงต้องการแรงขาย)

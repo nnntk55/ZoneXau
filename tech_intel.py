@@ -402,13 +402,14 @@ def _trade_read(tfs, zones, price):
 
 CALL_MAX_AGE_H = 72   # คำทำนายเกิน 72 ชม. = expired ไม่นับถูก/ผิด
 
-def track_calls(tech, chart_dir="charts"):
+def track_calls(tech, chart_dir="charts", tag=""):
     """วงจรพิสูจน์: จดคำทำนายจาก flow_read แล้วให้คะแนนกับราคาจริงทุกรอบ
     hit = ราคาถึงโซนเป้าหมาย / miss = ราคาหลุดกลับไปชนโซนฝั่งตรงข้ามก่อน / flipped = บทอ่านสลับทิศก่อนถึงเป้า
-    คืน call_stats สรุป accuracy จริง — เลขนี้คือตัววัดว่าบทวิเคราะห์ของระบบแม่นแค่ไหน"""
-    import os, json, time
+    คืน call_stats สรุป accuracy จริง — เลขนี้คือตัววัดว่าบทวิเคราะห์ของระบบแม่นแค่ไหน
+    tag = แยกไฟล์ต่อ symbol (กันราคาคนละตัวปนกันให้คะแนน)"""
+    import os, json, time, re
     from datetime import datetime, timezone, timedelta
-    fp = os.path.join(chart_dir, "call_log.json")
+    fp = os.path.join(chart_dir, f"call_log{re.sub(r'[^A-Za-z0-9_-]', '_', tag)}.json")
     try:
         with open(fp, encoding="utf-8") as f:
             rows = json.load(f)

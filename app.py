@@ -1459,11 +1459,25 @@ TECH_BODY = """
 
     {% if t.get('levels') %}
     <div class="card">
-        <h2>แนวสำคัญ (จัดอันดับตามความใกล้ราคา)</h2>
+        <h2>แนวสำคัญ (แยกตามไทม์เฟรม)</h2>
+        {% for g in ['MN', 'W1', 'D1', 'H4'] %}
+        {% set rows = t.levels | selectattr('tf', 'equalto', g) | list %}
+        {% if rows %}
+        <h3 style="margin:10px 0 4px;color:#9b8477">{{ g }}</h3>
+        <table><tr><th>แนว</th><th>ราคา</th><th>ชนิด</th><th>ห่าง</th></tr>
+        {% for l in rows | sort(attribute='dist_pct') %}
+        <tr><td>{{ l.name }}</td><td>{{ '{:,.2f}'.format(l.price) }}</td><td>{{ l.kind }}</td><td>{{ l.dist_pct }}%</td></tr>
+        {% endfor %}</table>
+        {% endif %}
+        {% endfor %}
+        {% set rest = t.levels | rejectattr('tf', 'in', ['MN','W1','D1','H4']) | list %}
+        {% if rest %}
+        <h3 style="margin:10px 0 4px;color:#9b8477">อื่นๆ</h3>
         <table><tr><th>แนว</th><th>ราคา</th><th>TF</th><th>ชนิด</th><th>ห่าง</th></tr>
-        {% for l in t.levels %}
+        {% for l in rest %}
         <tr><td>{{ l.name }}</td><td>{{ '{:,.2f}'.format(l.price) }}</td><td>{{ l.tf }}</td><td>{{ l.kind }}</td><td>{{ l.dist_pct }}%</td></tr>
         {% endfor %}</table>
+        {% endif %}
     </div>
     {% endif %}
 
