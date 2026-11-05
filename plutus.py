@@ -35,7 +35,8 @@ TH = timezone(timedelta(hours=7))
 def _rlog(msg):
     try:
         requests.post("https://zonexau.onrender.com/api/remote_log",
-                      json={"msg": str(msg)[:400], "source": "plutus"}, timeout=10)
+                      json={"source": "plutus", "lines": [{"time": datetime.now(timezone.utc).isoformat(),
+                                                           "msg": str(msg)[:400]}]}, timeout=10)
     except Exception:
         pass
 
