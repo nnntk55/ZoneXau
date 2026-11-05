@@ -2,6 +2,7 @@
 ใช้: python render_deploy.py   (ต้องมี env RENDER_API_KEY — ตั้งบน VPS ด้วย setx ห้ามใส่ใน repo)"""
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -28,7 +29,8 @@ def main():
     key = os.getenv("RENDER_API_KEY")
     if not key:
         sys.exit("ไม่มี RENDER_API_KEY บนเครื่องนี้ (ตั้งด้วย setx RENDER_API_KEY ... แล้วเปิดหน้าต่างใหม่)")
-    head = call(f"https://api.github.com/repos/{REPO}/commits/main")["sha"][:7]
+    head = subprocess.run(["git", "ls-remote", f"https://github.com/{REPO}.git", "refs/heads/main"],
+                          capture_output=True, text=True, timeout=60).stdout.split()[0][:7]
     live = call(f"{SITE}/healthz", timeout=120)
     if live == f"ok {head}":
         print(f"Render รัน {head} อยู่แล้ว ไม่ต้อง deploy")
