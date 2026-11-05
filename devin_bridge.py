@@ -397,6 +397,44 @@ def check_reminders(st):
         del fired[:-50]
         save_state(st)
 
+MIDAS_REMIND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "midas_reminders.json")
+
+def check_midas_reminders(st):
+    """เตือนของมิดาส (tool set_reminder เขียน charts/midas_reminders.json) — ถึงเวลาแล้วส่ง Telegram นิน แล้วลบออก
+    รูปแบบเดียวกับ reminders.json: {"id","at","text","devin"?} — ไฟล์ local ลบได้เลยไม่ต้องจำ fired id"""
+    from datetime import datetime, timezone, timedelta
+    try:
+        with open(MIDAS_REMIND, encoding="utf-8") as f:
+            items = json.load(f)
+    except Exception:
+        return
+    if not isinstance(items, list) or not items:
+        return
+    now = datetime.now(timezone.utc)
+    keep, changed = [], False
+    for it in items:
+        try:
+            at = datetime.fromisoformat(str(it["at"]))
+        except Exception:
+            changed = True
+            continue
+        if at > now:
+            keep.append(it)
+            continue
+        changed = True
+        if now - at > timedelta(hours=12):  # เกิน 12 ชม. = หมดอายุ ลบทิ้งไม่ยิง
+            continue
+        send(it.get("text") or "มิดาสเตือน: ถึงเวลาที่นินนัดไว้แล้ว")
+        if it.get("devin"):
+            deliver(st, "[REMINDER มิดาส] " + it["devin"])
+    if changed:
+        try:
+            os.makedirs(os.path.dirname(MIDAS_REMIND), exist_ok=True)
+            with open(MIDAS_REMIND, "w", encoding="utf-8") as f:
+                json.dump(keep, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            print(f"midas reminders write err: {e}")
+
 MIDAS_TASK_DIR = os.getenv("DEVIN_TASK_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_tasks")
 
 def check_midas_tasks(st):
@@ -572,6 +610,7 @@ def main():
             if time.time() - last_rem > 60:
                 last_rem = time.time()
                 check_reminders(st)
+                check_midas_reminders(st)
             time.sleep(2)
         except Exception as e:
             print(f"loop err: {e}")

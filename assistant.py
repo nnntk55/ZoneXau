@@ -111,6 +111,7 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - [EVENT] MORNING_INTEL → เรียก get_market_intel + get_news แล้วส่ง "GOLD INTELLIGENCE REPORT" ให้พี่ตามโครงในอีเวนต์ — ใช้เฉพาะข้อมูลที่ tool คืนจริง ห้ามเดา ลงท้ายบอกว่าไม่ใช่คำสั่งเทรด
 - [EVENT] สรุปสัปดาห์ → เรียก get_stats แล้วสรุปผลสัปดาห์นี้ให้พี่: win rate กำไรสุทธิ และข้อคิดสั้นๆ
 - [EVENT] SR_NEAR (ราคาเข้าใกล้แนวที่พี่ตั้ง) → เรียก get_news (ข่าวแรงวันนี้) และ get_sr_stats ของ asset นั้น แล้วสรุปให้พี่ในข้อความเดียวสั้นๆ: ราคาอยู่ตรงไหนเทียบแนว, เทรนด์, stoch แต่ละ TF อยู่โซนไหน, มีข่าวแรงใกล้ๆ ไหม, สถิติแนวที่ผ่านมาเด้ง/ทะลุกี่ครั้ง — ถ้าอีเวนต์มี BREAKOUT RISK ELEVATED ให้เน้นบอกพี่ว่า macro หนุนทิศทะลุแนวนั้น (ความเสี่ยง ไม่ใช่การยืนยัน) — ห้ามฟันธงว่าจะเด้งหรือทะลุ ห้ามแนะนำให้เข้าออเดอร์ ห้ามแก้ค่าใดๆ บนแดชบอร์ด บอทจะตามผลเองแล้วแจ้งพี่ทีหลัง
+- พี่บอกเวลานัด/ขอให้เตือน/ปลุก (เช่น "เดี๋ยวจะมาดูกราฟตอนสี่ทุ่ม", "เตือนตอน 6 โมงเย็น", "อีก 2 ชม. เตือนที") → เรียก set_reminder แปลงเวลาที่พี่พูดเป็น ISO8601 +07:00 แล้วตอบยืนยันเวลาที่ตั้ง — เวลาปัจจุบันดูจาก get_status ถ้าไม่แน่ใจว่าตอนนี้กี่โมง
 - เมื่อคำนวณ lot: ใช้ tool calc_lot เสมอ (สูตร equity×risk%/(SL×pip_value)) อย่าคิดเอง — พี่กำหนด risk% และ SL ให้แต่ละสัปดาห์
 - พี่วางแผนรายสัปดาห์/รายวัน — คุณคือผู้ปฏิบัติ: เช็คเงื่อนไข ปรับค่า และรายงานผลกลับ
 - หลังทำงาน: รายงานสั้นๆ ว่าตั้งอะไรไปบ้าง พร้อมรสชาติปิศาจของคุณ
@@ -733,6 +734,36 @@ def tool_get_market_intel():
     except Exception as e2:
         return {"error": f"ดึงข้อมูลตลาดไม่ได้ — dashboard: {err}, local: {str(e2)[:150]}"}
 
+def tool_set_reminder(text, at):
+    """ตั้งเตือนปลุกพี่ผ่าน Telegram — เขียน charts/midas_reminders.json ให้ bridge ยิงข้อความตอนถึงเวลา
+    at = ISO8601 รวม timezone เวลาไทย เช่น 2026-11-05T22:00:00+07:00"""
+    import json
+    from datetime import datetime, timezone, timedelta
+    try:
+        dt = datetime.fromisoformat(str(at).strip())
+    except Exception:
+        return {"ผล": "รูปแบบเวลาไม่ถูก — ใช้ ISO เช่น 2026-11-05T22:00:00+07:00"}
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=7)))
+    fp = os.path.join(CHART_DIR, "midas_reminders.json")
+    try:
+        with open(fp, encoding="utf-8") as f:
+            items = json.load(f)
+        if not isinstance(items, list):
+            items = []
+    except Exception:
+        items = []
+    items.append({"id": f"midas-{int(dt.timestamp())}-{len(items)}", "at": dt.isoformat(),
+                  "text": str(text)})
+    try:
+        os.makedirs(CHART_DIR, exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        return {"ผล": f"เขียนไฟล์เตือนไม่ได้: {e}"}
+    return {"ผล": f"ตั้งเตือนแล้ว {dt.strftime('%d/%m %H:%M')} (เวลาไทย) — จะส่งข้อความปลุกพี่ตอนนั้น",
+            "รอส่ง": len(items)}
+
 def tool_get_sr_stats(asset=None):
     """อ่านบันทึกผลหลังเตือนแนว (บอทเทรดเขียน charts/sr_touches.json) แล้วนับ เด้ง/ทะลุ/ไม่ชัด"""
     try:
@@ -845,6 +876,7 @@ TOOL_IMPL = {
     "get_market_intel": lambda a: tool_get_market_intel(),
     "get_sr_stats": lambda a: tool_get_sr_stats(a.get("asset")),
     "get_hour_stats": lambda a: tool_get_hour_stats(a.get("asset")),
+    "set_reminder": lambda a: tool_set_reminder(a["text"], a["at"]),
 }
 
 # actions ที่กระทบเงิน — ถ้า REQUIRE_CONFIRM=on จะขอยืนยันก่อน
@@ -946,6 +978,11 @@ GEMINI_TOOLS = [{
          "parameters": {"type": "object", "properties": {}}},
         {"name": "get_sr_stats", "description": "สถิติผลหลังเตือนแนวรับ/ต้านที่พี่ตั้ง: เด้งกี่ครั้ง ทะลุกี่ครั้ง ไม่ชัดกี่ครั้ง + รายการล่าสุด — ใช้เมื่อพี่ถามว่าแนวแม่นไหม หรือตอน [EVENT] SR_NEAR",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
+        {"name": "set_reminder", "description": "ตั้งเตือนปลุกพี่ผ่าน Telegram ตอนเวลาที่กำหนด — พี่บอก 'เดี๋ยวจะมาดูกราฟตอนสี่ทุ่ม' หรือ 'เตือนตอน X' ให้เรียก tool นี้ แปลงเวลาที่พี่พูดเป็น ISO8601 +07:00",
+         "parameters": {"type": "object", "properties": {
+             "text": {"type": "string", "description": "ข้อความที่จะส่งปลุกพี่"},
+             "at": {"type": "string", "description": "เวลา ISO8601 รวม +07:00 เช่น 2026-11-05T22:00:00+07:00"}},
+            "required": ["text", "at"]}},
         {"name": "get_hour_stats", "description": "สถิติไม้ที่บอทปิดแล้ว แยกตามช่วงเวลาเข้า (เวลาไทย): ช่วงตลาด เอเชีย/ลอนดอน/นิวยอร์ก/ดึก, รายชั่วโมง, รายวัน — ใช้เมื่อพี่ถามว่าเทรดช่วงไหนดี หรือจะตั้ง/ปรับ window",
          "parameters": {"type": "object", "properties": {"asset": asset_param()}}},
         {"name": "view_chart", "description": "ขอดูรูปกราฟจริงจาก MT5 (ราคา+EMA10/50/100/200+Stoch) — ใช้เมื่อพี่ขอวิเคราะห์กราฟหรืออยากเห็นหน้ากราฟ",
