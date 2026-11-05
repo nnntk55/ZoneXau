@@ -305,8 +305,26 @@ def status_recap(asset, set_key):
     return f"{label}: " + " | ".join(parts)
 
 def _live_price_line():
-    """ราคาสดจากแดชบอร์ด ณ ตอนนี้ — แนบเข้าอีเวนต์กันมิดาสเอาเลขเก่าจาก memory มาเล่า"""
+    """ข้อมูลสดจาก /api/market ณ ตอนนี้ — แนบเข้าอีเวนต์กันมิดาสเอาเลข/บทวิเคราะห์เก่าจาก memory มาเล่า"""
     try:
+        d = requests.get(f"{RENDER_DASHBOARD_URL}/api/market", headers=_dash_headers(), timeout=30).json() or {}
+        pr = d.get("prices") or {}
+        parts = []
+        for k, label in (("xauusd", "ทอง"), ("dxy", "DXY"), ("us10y", "US10Y")):
+            v = pr.get(k) or {}
+            if isinstance(v, dict) and v.get("price"):
+                parts.append(f"{label} {v['price']} ({v.get('chg_pct',0):+.2f}%)")
+        det = (d.get("regime") or {}).get("detail") or {}
+        regs = [f"{k} {v['label']}" for k, v in det.items() if isinstance(v, dict) and v.get("label")]
+        if regs:
+            parts.append("regime: " + ", ".join(regs[:4]))
+        if d.get("fetched_thai"):
+            parts.append(f"อัปเดต {d['fetched_thai']}")
+        if parts:
+            return "ข้อมูลสดจากแดชบอร์ด: " + " | ".join(parts) + " — ใช้ข้อมูลชุดนี้เท่านั้น ห้ามเอาเลข/บทวิเคราะห์จากความจำเก่ามาเล่า"
+    except Exception:
+        pass
+    try:  # fallback เฉพาะราคา
         m = dash_get_market().get("xau") or {}
         if m.get("price"):
             return f"ข้อมูลสดจากแดชบอร์ด: ราคาทอง {m['price']} (อัปเดต {m.get('last_check','-')}) — ใช้เลขนี้เท่านั้น ห้ามเอาราคาจากความจำเก่า"
