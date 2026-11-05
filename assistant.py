@@ -582,8 +582,19 @@ def poll_devin_sessions(inbox_path):
         except Exception:
             pass
 
+DEVIN_TASK_DIR = os.getenv("DEVIN_TASK_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_tasks")
+
 def tool_send_to_devin(task):
-    """ส่งงานให้ Devin — ถ้ามี DEVIN_API_KEY เปิด Cloud session ตรง (ทำได้แม้พี่ปิดเครื่อง) ไม่งั้นตกลงคิว Render"""
+    """ส่งงานให้ Devin — local บน VPS ก่อนเสมอ: เขียนคิวไฟล์ให้ devin_bridge หยิบเข้า local_q (ถูกกว่า cloud)
+    เขียนไฟล์ไม่ได้ค่อย fallback เปิด cloud session / คิว Render ตามเดิม"""
+    try:
+        os.makedirs(DEVIN_TASK_DIR, exist_ok=True)
+        fn = os.path.join(DEVIN_TASK_DIR, f"task_{int(time.time() * 1000)}_{os.getpid()}.json")
+        with open(fn, "w", encoding="utf-8") as f:
+            json.dump({"task": task, "at": time.time(), "from": "midas"}, f, ensure_ascii=False)
+        return {"ok": True, "แจ้ง": "ส่งงานให้วินบนเครื่องนี้แล้ว (local queue) — เดี๋ยววินหยิบไปทำ"}
+    except Exception:
+        pass
     if DEVIN_API_KEY:
         try:
             res = requests.post("https://api.devin.ai/v1/sessions",

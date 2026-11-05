@@ -374,6 +374,32 @@ def check_reminders(st):
         del fired[:-50]
         save_state(st)
 
+MIDAS_TASK_DIR = os.getenv("DEVIN_TASK_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_tasks")
+
+def check_midas_tasks(st):
+    """งานจากมิดาส (assistant.tool_send_to_devin เขียนไฟล์ละงานใน charts/devin_tasks/) -> local_q เสมอ
+    ไม่ผ่าน cloud — ไฟล์เขียน atomic ทีละไฟล์ อ่านแล้วลบ"""
+    try:
+        if not os.path.isdir(MIDAS_TASK_DIR):
+            return
+        files = sorted(f for f in os.listdir(MIDAS_TASK_DIR) if f.endswith(".json"))
+        for f in files:
+            fp = os.path.join(MIDAS_TASK_DIR, f)
+            try:
+                task = (json.load(open(fp, encoding="utf-8")) or {}).get("task", "")
+            except Exception:
+                task = ""
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+            if task:
+                st.setdefault("local_q", []).append("[งานจากมิดาสผ่านคิว local] " + task)
+        if files:
+            save_state(st)
+    except Exception as e:
+        print(f"midas tasks err: {e}")
+
 SELF_UPDATE_REPO = "nnntk55/ZoneXau"
 SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
@@ -478,6 +504,7 @@ def main():
             if st.get("cloud_active") and time.time() >= st.get("cloud_until", 0):
                 cloud_back(st)  # cloud เงียบเกิน 30 นาทีโดยไม่บอกว่าเสร็จ -> กลับ local
                 save_state(st)
+            check_midas_tasks(st)
             local_tick(st)
             # งานที่ local ส่งต่อให้ cloud (โหมด auto)
             if st.get("cloud_q") and time.time() >= cloud_retry:
