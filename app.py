@@ -737,6 +737,7 @@ HTML_TEMPLATE = """
             </span>
             <span style="font-size: 0.75rem; color: #9b8477;">{{ bot_last }}</span>
             <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500;">ข่าว / Macro Intel ↗</a>
+            <a href="{{ url_for('analyst_page') }}" target="_blank" rel="noopener" style="float: right; font-size: 0.8rem; color: #8a5a44; font-weight: 500; margin-right: 12px;">Analyst ↗</a>
         </div>
         {% if flash_msg %}
             <div class="alert-box {% if flash_type == 'success' %}alert-success{% else %}alert-error{% endif %}">
@@ -969,6 +970,7 @@ HTML_TEMPLATE = """
             <div class="btn-container">
                 <a href="{{ url_for('send_test') }}" class="btn">🔔 ทดสอบส่งข้อความ</a>
                 <a href="{{ url_for('market_news') }}" target="_blank" rel="noopener" class="btn">📊 ข่าว / Macro Intel</a>
+                <a href="{{ url_for('analyst_page') }}" target="_blank" rel="noopener" class="btn">🧠 Analyst</a>
             </div>
         </div>
         <div class="status-footer">
@@ -1094,7 +1096,7 @@ NEWS_TEMPLATE = """
         <h1>MARKET INTEL — วิเคราะห์ทองแบบมาโคร</h1>
         <a class="back" href="{{ url_for('home') }}">← กลับแดชบอร์ด</a>
     </div>
-    <div class="sub">ข้อมูลจริงจากแหล่ง: Yahoo Finance / FRED / ForexFactory / Google News — อัปเดต {{ d.fetched_thai }} (ไทย) รีเฟรชอัตโนมัติทุก 2 นาที</div>
+    <div class="sub">ข้อมูลจริงจากแหล่ง: Yahoo Finance / FRED / ForexFactory / Google News — อัปเดต {{ d.fetched_thai }} (ไทย) รีเฟรชอัตโนมัติทุก 2 นาที · <a href="{{ url_for('analyst_page') }}" style="color:#8a5a44;font-weight:600">ดูชั้นตีความ /analyst →</a></div>
 
     {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
 
@@ -1128,9 +1130,9 @@ NEWS_TEMPLATE = """
     <div class="card">
         <h2>สภาวะตลาด / จุดผิดปกติ</h2>
         <div class="sigsum">{{ (d.regime.tags or [])|join(' · ') }}</div>
-        {% for w in d.regime.why %}<div class="layer">· {{ w }}</div>{% endfor %}
-        {% for a in d.alerts %}<div class="qrow"><div class="dot {{ 'warn' if a.level=='critical' else 'bear' if a.level=='high' else 'mid' }}"></div><div class="q">{{ a.msg }}</div><div class="a">{{ a.level }}</div></div>{% endfor %}
-        {% for v in d.divergences %}<div class="layer" style="color:#b0563f">· {{ v }}</div>{% endfor %}
+        {% for w in d.regime.why or [] %}<div class="layer">· {{ w }}</div>{% endfor %}
+        {% for a in d.alerts or [] %}<div class="qrow"><div class="dot {{ 'warn' if a.level=='critical' else 'bear' if a.level=='high' else 'mid' }}"></div><div class="q">{{ a.msg }}</div><div class="a">{{ a.level }}</div></div>{% endfor %}
+        {% for v in d.divergences or [] %}<div class="layer" style="color:#b0563f">· {{ v }}</div>{% endfor %}
         {% if d.thesis %}<div class="layer" style="margin-top:8px"><b>Thesis วันนี้:</b> {{ d.thesis }}</div>{% endif %}
     </div>
     {% endif %}
@@ -1138,7 +1140,7 @@ NEWS_TEMPLATE = """
     <div class="card">
         <h2>ตอบ 5 คำถามก่อนตีความราคาทอง</h2>
         <div class="sigsum">{{ d.signal_summary }}</div>
-        {% for q in d.five_questions %}
+        {% for q in d.five_questions or [] %}
         <div class="qrow"><div class="dot {{ q.sig }}"></div><div class="q">{{ q.q }}</div><div class="a">{{ q.a }}</div></div>
         {% endfor %}
         <div class="err" style="color:#9b8477">เขียว=หนุนทอง แดง=กดทอง ส้ม=นิ่ง เทา=ต้องดูเองที่ลิงก์ — นี่คือข้อมูลประกอบ ไม่ใช่คำสั่งเทรด</div>
@@ -1209,6 +1211,95 @@ NEWS_TEMPLATE = """
 </body>
 </html>
 """
+# ---------- หน้า /analyst — ชั้นตีความข้อมูล (regime/thesis/scenario/change/COT) ----------
+ANALYST_BODY = """
+    <div class="head">
+        <h1>ANALYST — ชั้นตีความตลาด</h1>
+        <a class="back" href="{{ url_for('home') }}">← แดชบอร์ด</a>
+    </div>
+    <div class="sub">สมองวิเคราะห์จากข้อมูลจริงชุดเดียวกับหน้า /news — อัปเดต {{ d.fetched_thai }} (ไทย) · <a href="{{ url_for('market_news') }}" style="color:#9b8477">ดูข้อมูลดิบ /news →</a></div>
+
+    {% if err %}<div class="card"><h2>โมดูลข้อมูลมีปัญหา</h2><div class="err">{{ err }}</div></div>{% else %}
+
+    <div class="card">
+        <h2>Market Regime</h2>
+        <div class="sigsum">{{ ((d.regime or {}).get('tags') or [])|join(' · ') }}</div>
+        {% for w in (d.regime or {}).get('why') or [] %}<div class="layer">· {{ w }}</div>{% endfor %}
+        <div class="err" style="color:#9b8477">{{ (d.regime or {}).get('หมายเหตุ') }}</div>
+    </div>
+
+    {% if d.alerts or d.divergences or d.thesis_invalidated %}
+    <div class="card">
+        <h2>จุดผิดปกติ / เตือน</h2>
+        {% if d.thesis_invalidated %}<div class="qrow"><div class="dot warn"></div><div class="q">{{ d.thesis_invalidated }}</div><div class="a">critical</div></div>{% endif %}
+        {% for a in d.alerts or [] %}<div class="qrow"><div class="dot {{ 'warn' if a.level=='critical' else 'bear' if a.level=='high' else 'mid' }}"></div><div class="q">{{ a.msg }}</div><div class="a">{{ a.level }}</div></div>{% endfor %}
+        {% for v in d.divergences or [] %}<div class="layer" style="color:#b0563f">· {{ v }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Market Thesis (ติดตามสมมติฐาน)</h2>
+        <div class="sigsum">{{ d.thesis }}</div>
+        <table><tr><th>วันที่</th><th>สมมติฐาน</th></tr>
+        {% for t in d.thesis_log or [] %}<tr><td>{{ t.date }}</td><td>{{ t.thesis }}</td></tr>{% endfor %}
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Scenario Engine (สถานการณ์จำลอง)</h2>
+        {% for key, label in (('A_bullish','A — Bullish'),('B_bearish','B — Bearish'),('C_neutral','C — Neutral')) %}
+        {% set s = (d.scenario or {}).get(key) or {} %}
+        <div class="layer"><b>{{ label }}:</b> {{ (s.get('หลักฐาน') or [])|join('; ') or '—' }}
+            <div class="err" style="color:#9b8477">หักล้างเมื่อ: {{ s.get('หักล้างเมื่อ') }}</div></div>
+        {% endfor %}
+        <div class="err" style="color:#9b8477">{{ (d.scenario or {}).get('หมายเหตุ') }}</div>
+    </div>
+
+    {% if d.change_detection %}
+    <div class="card">
+        <h2>Macro Change Detection (เทียบย้อนหลัง)</h2>
+        <table><tr><th>ช่วง</th><th>ทอง %</th><th>DXY %</th><th>US10Y</th><th>Real Yield</th></tr>
+        {% for lbl, c in (d.change_detection or {}).items() %}
+        <tr><td>{{ lbl }} (ตั้งแต่ {{ c.since }})</td>
+            <td>{{ '%+.1f'|format(c.fields.gold) if c.fields.gold is not none else '-' }}%</td>
+            <td>{{ '%+.2f'|format(c.fields.dxy) if c.fields.dxy is not none else '-' }}%</td>
+            <td>{{ '%+.2f'|format(c.fields.us10y) if c.fields.us10y is not none else '-' }}</td>
+            <td>{{ '%+.2f'|format(c.fields.real_yield) if c.fields.real_yield is not none else '-' }}</td></tr>
+        {% endfor %}</table>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>COT — สถานะกองทุนใน Gold Futures (CFTC รายสัปดาห์)</h2>
+        {% if d.cot and d.cot.mm_net is not none %}
+        <div class="pxgrid">
+            <div class="px"><div class="lbl">Managed Money Net</div>
+                <div class="val {{ 'up' if d.cot.mm_net>0 else 'dn' }}">{{ '{:,}'.format(d.cot.mm_net) }}</div>
+                <div class="chg mid">สัญญา ({{ 'long' if d.cot.mm_net>0 else 'short' }})</div></div>
+            <div class="px"><div class="lbl">MM Long / Short</div>
+                <div class="val" style="font-size:1rem">{{ '{:,}'.format(d.cot.mm_long) }} / {{ '{:,}'.format(d.cot.mm_short) }}</div></div>
+            <div class="px"><div class="lbl">Open Interest</div>
+                <div class="val" style="font-size:1rem">{{ '{:,}'.format(d.cot.open_interest) }}</div></div>
+            <div class="px"><div class="lbl">ข้อมูลล่าสุด</div>
+                <div class="val" style="font-size:1rem">{{ d.cot.date }}</div>
+                <div class="chg mid">{{ 'WoW {:+,} สัญญา'.format(d.cot.mm_net_chg_wow) if d.cot.mm_net_chg_wow is not none else 'WoW เทียบได้สัปดาห์หน้า' }}</div></div>
+        </div>
+        {% else %}<div class="layer">ยังไม่มีข้อมูล COT</div>{% endif %}
+    </div>
+
+    <div class="card">
+        <h2>เช็คลิสต์ 5 คำถาม (ย่อ)</h2>
+        {% for q in d.five_questions or [] %}
+        <div class="qrow"><div class="dot {{ q.sig }}"></div><div class="q">{{ q.q }}</div><div class="a">{{ q.a }}</div></div>
+        {% endfor %}
+        <div class="err" style="color:#9b8477">สรุป: {{ d.signal_summary }}</div>
+    </div>
+
+    <div class="foot">ชั้นนี้คือการตีความข้อมูลจริง — ไม่ใช่คำทำนายราคาและไม่ใช่คำสั่งเทรด</div>
+    {% endif %}
+"""
+
+ANALYST_TEMPLATE = NEWS_TEMPLATE[:NEWS_TEMPLATE.index("<body>")] + "<body>\n<div class=\"container\">" + ANALYST_BODY + "\n</div>\n</body>\n</html>\n"
 # ==========================================
 # NOTIFICATION & HELPER FUNCTIONS
 # ==========================================
@@ -1516,6 +1607,18 @@ def market_news():
         except Exception as e:
             err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
     return render_template_string(NEWS_TEMPLATE, d=d, err=err)
+
+@app.route("/analyst")
+def analyst_page():
+    d, err = {}, None
+    if market_intel is None:
+        err = "โมดูล market_intel โหลดไม่ได้บน server (ไฟล์อาจยังไม่ deploy)"
+    else:
+        try:
+            d = market_intel.get_market_intel()
+        except Exception as e:
+            err = f"ดึงข้อมูลตลาดไม่สำเร็จ: {str(e)[:300]}"
+    return render_template_string(ANALYST_TEMPLATE, d=d, err=err)
 
 @app.route("/")
 def home():
