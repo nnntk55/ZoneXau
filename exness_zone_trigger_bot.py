@@ -1012,13 +1012,14 @@ def run_asset_radar(asset_key):
                         if dist <= SR_PROX_PCT and not al.get("hit"):
                             al["hit"] = True
                             side_txt = "แนวรับ 🟢" if al.get("side") == "s" else "แนวต้าน 🔴"
+                            conf = macro_confluence_note(al.get("side"))
                             send_telegram_notification(f"📍 *{name}*: ราคา `{current_price:.2f}` เข้าใกล้{side_txt} `{px_lv:.2f}` (ห่าง {dist:.2f}%) — เตรียมดูกลับตัว/ทะลุ")
                             ctx = {k: round(stoch_payload[k], 1) for k in ("k_4h", "k_1h", "k_15m", "k_5m") if k in stoch_payload}
                             ctx.update(trend=stoch_payload.get("trend"), trend_tf=stoch_payload.get("trend_tf"))
                             sr_log_open(asset_key, al, current_price, ctx)
                             stoch_txt = " ".join(f"{k[2:]}={v}" for k, v in ctx.items() if k.startswith("k_"))
-                            midas_inbox(f"[EVENT] SR_NEAR {name} ({asset_key}): ราคา {current_price:.2f} เข้าใกล้{_no_emoji(side_txt).strip()} {px_lv:.2f} "
-                                        f"(ห่าง {dist:.2f}%) | เทรนด์ {ctx.get('trend_tf')} = {ctx.get('trend')} | stoch {stoch_txt}")
+                            midas_inbox(f"[EVENT] SR_NEAR {name} ({asset_key}) [BREAKOUT WATCH — STAGE 1]: ราคา {current_price:.2f} เข้าใกล้{_no_emoji(side_txt).strip()} {px_lv:.2f} "
+                                        f"(ห่าง {dist:.2f}%) | เทรนด์ {ctx.get('trend_tf')} = {ctx.get('trend')} | stoch {stoch_txt} {conf}")
                             push_config_to_render(asset_key)
                         elif dist > SR_REARM_PCT and al.get("hit"):
                             al["hit"] = False
@@ -1481,11 +1482,32 @@ def announce_morning_intel():
     if today in NEWS_CACHE["announced"]:
         return
     NEWS_CACHE["announced"].add(today)
-    midas_inbox("[EVENT] MORNING_INTEL: สรุป Market Intelligence เช้าให้พี่ — เรียก get_market_intel + get_news แล้วรายงานตามโครง: "
-                "1) ภาพรวมตลาด (ทอง/DXY/ยีลด์/real yield ขยับยังไง) 2) ข่าววันนี้ 3) headline ทอง+ภูมิรัฐศาสตร์ "
-                "4) เช็คลิสต์ 5 คำถาม+สรุปสัญญาณ 5) regime/divergence/alerts ที่ระบบตรวจเจอ 6) thesis วันนี้เทียบวันก่อน 7) มุมมองล่วงหน้า 1-7 วัน — ห้ามเดาข่าวเอง")
+    midas_inbox("[EVENT] MORNING_INTEL: ทำ GOLD INTELLIGENCE REPORT ให้พี่ — เรียก get_market_intel + get_news แล้วรายงานตามโครง: "
+                "1) สรุปผู้บริหาร 2) ทำไมทองขยับข้ามคืน (ใช้ why_moved: timeline/ตัวขับ/สิ่งที่ยืนยันไม่ได้) 3) ภาพรวม macro "
+                "4) ดอลลาร์+ยีลด์+real yield 5) โครงสร้างเทคนิค (เทรนด์/stoch/แนว) 6) macro เทียบ technical (confluence หรือขัดกัน) "
+                "7) มุมมองระยะสั้น 8) มุมมอง swing 1-3 สัปดาห์ 9) มุมมองระยะยาว 10) ความเสี่ยงทะลุ/กลับตัว (alerts/divergence) "
+                "11) ข่าววันนี้+ล่วงหน้า 12) thesis วันนี้เทียบวันก่อน 13) อะไรเปลี่ยนมุมมองได้ 14) ข้อมูลที่ขาด/ยืนยันไม่ได้ "
+                "— ใช้เฉพาะข้อมูล tool คืนจริง ห้ามเดา ลงท้ายบอกว่าไม่ใช่คำสั่งเทรด")
 
 MI_WATCH = {"t": 0, "sent": {}}
+
+def macro_confluence_note(side):
+    """P4/P5: macro หนุนทิศทะลุแนวไหม — side 'r'=ต้าน(ทะลุขึ้นต้องการแรงซื้อ) / 's'=รับ(ทะลุลงต้องการแรงขาย)
+    คืนข้อความสั้นใส่ท้ายแจ้งเตือน — ย้ำว่าเป็น 'ความเสี่ยง' ไม่ใช่การยืนยันทะลุ"""
+    try:
+        import market_intel
+        d = market_intel.get_market_intel()
+        qs = d.get("five_questions") or []
+        bull = sum(1 for q in qs if q.get("sig") == "bull")
+        bear = sum(1 for q in qs if q.get("sig") == "bear")
+        up_risk = side == "r" and bull >= 2
+        dn_risk = side == "s" and bear >= 2
+        if up_risk or dn_risk:
+            return (f"| BREAKOUT RISK ELEVATED (STAGE 2): macro หนุนทิศ{'ขึ้น' if up_risk else 'ลง'} "
+                    f"({bull} หนุน/{bear} กด) — แนวเสี่ยงโดนทะลุ ยังไม่ใช่ยืนยัน")
+        return f"| macro ขณะนี้ {bull} หนุน/{bear} กด"
+    except Exception:
+        return "| macro confluence ดึงไม่ได้"
 
 def market_intel_watch():
     """เฝ้า macro ระหว่างวัน (ทุก ~5 นาที) — มี alerts/regime/divergence/thesis flip ใหม่จริงค่อยแจ้งเข้า inbox มิดาส

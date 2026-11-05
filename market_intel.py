@@ -605,6 +605,21 @@ def get_market_intel():
           for n, v, s in (("Yahoo prices", prices, p_st), ("FRED yields", fred, f_st),
                           ("FF calendar", cal, c_st), ("headlines", heads, h_st),
                           ("intraday 15m", intr, i_st), ("CFTC COT", cot, ct_st))]
+    why = _why_gold_moved(intr, cal, heads)
+    moves = []  # P9: จดเหตุการณ์ขยับใหญ่พร้อมตัวขับไว้ทบทวน — เหตุการณ์เดิม (เวลาเริ่มเดียวกัน) ไม่ซ้ำ
+    if why.get("status") == "ok" and abs(why.get("move_pct") or 0) >= 0.8:
+        c = _load()
+        moves = c.setdefault("moves", [])
+        key = f"{why.get('start_thai')}|{why.get('move_pct')}"
+        if not any(m.get("key") == key for m in moves):
+            moves.append({"key": key, "date": datetime.now(_TH).strftime("%Y-%m-%d"),
+                          "window": f"{why.get('start_thai')} → {why.get('end_thai')}",
+                          "move_pct": why["move_pct"], "direction": why["direction"],
+                          "drivers": why["drivers"][:5], "cannot": why["cannot_confirm"][:3]})
+            del moves[:-30]
+            _save(c)
+    else:
+        moves = (_load().get("moves") or [])
     return {"fetched_thai": _thai(time.time()),
             "prices": prices or {},
             "symbol_names": SYMBOL_NAMES,
@@ -623,7 +638,8 @@ def get_market_intel():
             "alerts": _alerts(prices or {}, qs),
             "thesis": thesis,
             "thesis_log": thesis_log,
-            "why_moved": _why_gold_moved(intr, cal, heads),
+            "why_moved": why,
+            "movement_log": moves[-10:],
             "data_quality": dq,
             "watchlist": WATCHLIST, "layers": LAYERS, "links": LINKS,
             "errors": errors,

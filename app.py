@@ -1327,6 +1327,16 @@ ANALYST_BODY = """
         <div class="err" style="color:#9b8477">สรุป: {{ d.signal_summary }}</div>
     </div>
 
+    {% if d.movement_log %}
+    <div class="card">
+        <h2>เหตุการณ์ขยับใหญ่ที่ระบบจดไว้ (ทบทวนย้อนหลัง)</h2>
+        {% for m in d.movement_log %}
+        <div class="layer">· {{ m.date }} · {{ m.window }} — ทอง{{ m.direction }} {{ '%+.2f'|format(m.move_pct) }}%
+            <div class="err" style="color:#9b8477">ตัวขับที่จับได้: {{ (m.drivers or [])|join('; ') }}</div></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="card">
         <h2>Data Quality / ข้อมูลที่ขาด</h2>
         {% for s in d.data_quality or [] %}
