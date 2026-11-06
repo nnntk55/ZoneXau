@@ -54,9 +54,9 @@ def init_mt5():
         print("MT5 init fail"); return False
     info = mt5.account_info()
     print("terminal account:", info.login if info else "none")
-    if ACCOUNT and PASSWORD and SERVER:
+    if os.environ.get("SNIPER_MT5_LOGIN"):      # opt-in เท่านั้น — shadow อ่านอย่างเดียว login อาจบล็อก
         try:
-            mt5.login(ACCOUNT, password=PASSWORD, server=SERVER)  # best-effort — อ่านแท่งได้แม้ login ไม่ผ่าน
+            mt5.login(ACCOUNT, password=PASSWORD, server=SERVER)
         except Exception as e:
             print("login skip:", e)
     sym = resolve_symbol()
