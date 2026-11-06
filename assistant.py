@@ -1559,7 +1559,7 @@ def main():
                     ev = open(inbox_path, encoding="utf-8").read().strip()
                     os.remove(inbox_path)
                     if ev:
-                        if "ออเดอร์" in ev or "ปิดแล้ว" in ev:
+                        if "ออเดอร์" in ev and "ปิดแล้ว" in ev:  # เฉพาะปิดออเดอร์จริง — เตือนที่มีคำว่าออเดอร์เฉยๆ กักส่งรอบ
                             print(f"📨 urgent event: {ev[:100]}")
                             live = _live_price_line()
                             reply = run_agent(ev + ("\n" + live if live else ""), TELEGRAM_CHAT_ID, None)
