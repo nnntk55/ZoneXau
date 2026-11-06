@@ -196,6 +196,59 @@ def sched_table():
         return None
     return "\n".join(" | ".join(str(c) for c in row).rstrip(" |") for row in (r.get("values") or []))
 
+def sched_rows():
+    """แถวนักเรียนจากชีท: {row, time, name, price, x, y} — x/y = คาบที่เรียน/ความยาวคอร์ส"""
+    r = sched_op(op="read")
+    if not r or r.get("status") != "success":
+        return []
+    out = []
+    for i, row in enumerate(r.get("values") or [], start=1):
+        if len(row) < 4 or not str(row[1]).strip():
+            continue
+        m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", str(row[3]))
+        if not m:
+            continue
+        try:
+            price = float(str(row[4] if len(row) > 4 and row[4] != "" else row[2]) or 0)
+        except ValueError:
+            price = 0.0
+        out.append({"row": i, "time": str(row[0]), "name": str(row[1]).strip(),
+                    "price": price, "x": int(m.group(1)), "y": int(m.group(2))})
+    return out
+
+def sched_tick(who="all"):
+    """ติ๊กคาบ +1 ให้นักเรียน (who=all หรือชื่อ) — ครบ y สร้างใบเรียกเก็บอัตโนมัติ"""
+    rows = sched_rows()
+    if not rows:
+        return "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์/สคริปต์เข้าถึงไม่ได้"
+    who_l = str(who).lower()
+    done, billed = [], []
+    for s in rows:
+        if who_l not in ("all", "ทุกคน") and who_l not in s["name"].lower():
+            continue
+        if s["x"] >= s["y"]:
+            continue
+        nx = s["x"] + 1
+        r = sched_op(op="write", cell=f"D{s['row']}", value=f"{nx}/{s['y']}")
+        if not (r and r.get("status") == "success"):
+            return f"เขียน D{s['row']} ไม่สำเร็จครับ ({(r or {}).get('message','no response')})"
+        done.append(f"{s['name']} {nx}/{s['y']}")
+        if nx == s["y"]:
+            d = _load()
+            if not any(p.get("who") == s["name"] and "ครบรอบคอร์ส" in p.get("note", "") and not p.get("paid")
+                       for p in d["payables"]):
+                d["payables"].append({"who": s["name"], "amount": s["price"],
+                                      "due": datetime.now(TH).strftime("%Y-%m-%d"),
+                                      "note": f"ครบรอบคอร์ส {s['y']} ครั้ง", "paid": False})
+                _save(d)
+            billed.append(f"{s['name']} {s['price']:,.0f}")
+    if not done:
+        return "ไม่มีแถวที่ติ๊กได้ครับ (เช็กชื่อ/ทุกคนเรียนครบรอบแล้ว)"
+    rep = "ติ๊กคาบแล้วครับ:\n" + "\n".join(f"- {x}" for x in done)
+    if billed:
+        rep += "\n\nถึงรอบเรียกเก็บ (จดค้างชำระไว้แล้ว):\n" + "\n".join(f"- {x}" for x in billed)
+    return rep
+
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
 chat_history = []
 
@@ -381,6 +434,7 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - sched_link: นินส่งลิงก์ชีทตารางสอนมาให้ผูก {"action":"sched_link","url":"ลิงก์เต็ม","say":"..."}
 - sched_read: อ่านตารางสอนจริงจากชีท (นับคาบ x/y, ยอดค้าง, รอบชำระ) {"action":"sched_read","say":"..."}
 - sched_set: เขียนแก้ช่องในชีทสอน (เช่น นับคาบ D7 เป็น 5/12, สถานะจ่าย) {"action":"sched_set","cell":"D7","value":"5/12","say":"..."}
+- sched_tick: ติ๊กคาบเรียน +1 (เสาร์สอนเสร็จ) {"action":"sched_tick","who":"ชื่อ หรือ all","say":"..."} — ครบรอบคอร์สระบบจดค้างชำระให้เอง
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -549,6 +603,8 @@ def handle(text):
         ok = bool(r and r.get("status") == "success")
         reply = (f"อัปเดตชีท {cell} = {val} เรียบร้อยครับ" if ok
                  else f"เขียนชีท {cell} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
+    elif a == "sched_tick":
+        reply = sched_tick(cmd.get("who", "all"))
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
@@ -586,14 +642,18 @@ def saturday_round():
     conf = _sched_conf()
     if conf.get("last_sat") == now.strftime("%Y-%m-%d") or not students_ssid():
         return
-    tbl = sched_table()
-    if not tbl:
+    rows = sched_rows()
+    if not rows:
         _rlog("sat sched read fail"); return
     conf["last_sat"] = now.strftime("%Y-%m-%d"); _sched_save(conf)
-    chat_history.append({"role": "user", "content": f"[ระบบ] ตารางสอนจากชีทเสาร์นี้:\n{tbl[:3000]}"})
+    summary = "\n".join(f"- {s['name']} {s['x']}/{s['y']} ยอด {s['price']:,.0f}" for s in rows)
+    done = [s for s in rows if s["x"] >= s["y"]]
+    due = [s for s in rows if s["y"] - s["x"] <= 1 and s["x"] < s["y"]]
+    chat_history.append({"role": "user", "content": f"[ระบบ] ตารางสอนจากชีทเสาร์นี้:\n{summary}"})
     save_memory()
-    reply = handle("ตัดรอบวันเสาร์: สรุปจากตารางในข้อความก่อน — ใครเรียนครบรอบคอร์ส (x/y เต็ม) "
-                   "ใครถึงรอบชำระคอร์สใหม่ ยอดที่ควรเข้ารอบนี้ และใครเหลือกี่ครั้ง — ตอบสั้นเป็นหมวดชัด")
+    reply = handle("ตัดรอบวันเสาร์: สรุปจากตารางในข้อความก่อน — ใครเรียนครบรอบคอร์ส (ถึงรอบเรียกเก็บ "
+                   f"{', '.join(s['name'] for s in done) or 'ไม่มี'}) ใครเหลือครั้งเดียวจะถึงรอบถัดไป "
+                   f"({', '.join(s['name'] for s in due) or 'ไม่มี'}) และใครเหลือกี่ครั้ง — ตอบสั้นเป็นหมวดชัด")
     if reply:
         chat_history.append({"role": "assistant", "content": reply})
         save_memory()
