@@ -32,7 +32,26 @@ SCORE_FULL, SCORE_HALF = 75, 60   # เพดานโหมด C
 ZONE_TOL_PCT = 0.0025        # ความหนา "ชิดโซน" ~0.25%
 
 NEWS_CACHE = {"t": 0, "events": []}
+DASH_URL = os.environ.get("RENDER_DASHBOARD_URL", "https://zonexau.onrender.com")
+DASH_KEY = os.environ.get("DASH_API_KEY", "")
+PUSH = {"t": 0}
 now_th = lambda: (datetime.now(timezone.utc) + timedelta(hours=7)).replace(tzinfo=None)
+
+
+def push_dash(st_led):
+    """ส่งผลงาน shadow ขึ้น /midas บนแดชบอร์ด ทุก ~2 นาที"""
+    if time.time() - PUSH["t"] < 120:
+        return
+    PUSH["t"] = time.time()
+    try:
+        import requests
+        payload = {"sniper": {"updated": now_th().strftime("%Y-%m-%d %H:%M"), "modes": st_led,
+                              "spec": {"risk_pct": RISK_PCT, "quota": QUOTA_DAY, "rr": "1:2",
+                                       "sl_max": SL_MAX, "score_full": SCORE_FULL}}}
+        headers = {"X-Api-Key": DASH_KEY} if DASH_KEY else {}
+        requests.post(f"{DASH_URL}/api/update_market_data", json=payload, timeout=20, headers=headers)
+    except Exception as e:
+        print("push dash err", e)
 
 
 def resolve_symbol():
@@ -362,6 +381,7 @@ def main():
                                     "sl_max": SL_MAX, "score_full": SCORE_FULL}},
                           fo, ensure_ascii=False, indent=1)
             os.replace(tmp, STATE_PATH)   # atomic — กันไฟล์พังตอนอ่านชนเขียน
+            push_dash(st_led)
         except Exception as e:
             print(f"[{now_th():%H:%M}] loop err: {e}")
         time.sleep(30)

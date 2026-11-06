@@ -1818,6 +1818,60 @@ def analyst_page():
 def technical_page():
     return render_template_string(TECH_TEMPLATE, t=_tech_state())
 
+MIDAS_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8"><title>Midar Sniper — Performance</title>
+<meta http-equiv="refresh" content="60"><style>
+body{font-family:system-ui,sans-serif;background:#faf6f2;color:#3d2e24;margin:0;padding:24px}
+h1{font-size:1.3rem;color:#5d4037} .sub{color:#8a7365;font-size:.8rem;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:#fff;border:1px solid #e8ddd4;border-radius:14px;padding:16px}
+.card h2{font-size:1rem;margin:0 0 2px;color:#5d4037}.mode-sub{font-size:.72rem;color:#a08b7d;margin-bottom:10px}
+.bal{font-size:1.6rem;font-weight:700}.up{color:#2e7d32}.dn{color:#c62828}
+.stat{display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0;border-bottom:1px dashed #f0e6de}
+.stat b{color:#5d4037}.open{margin-top:8px;font-size:.75rem;background:#fff8e1;border-radius:8px;padding:6px 8px}
+table{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:16px;background:#fff;border-radius:12px;overflow:hidden}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid #f0e6de}th{background:#f5ede6;color:#5d4037}
+.w{color:#2e7d32;font-weight:700}.l{color:#c62828;font-weight:700}.badge{font-size:.65rem;padding:1px 6px;border-radius:8px;background:#f0e6de}
+</style></head><body>
+<h1>🎯 Midas Sniper — Shadow Performance</h1>
+<div class="sub">จำลองเทรดเงา 3 โหมดขนาน (เงื่อนไขเดียวกัน ต่างกันที่ตัวตัดสิน) — อัปเดต {{ s.updated or '—' }} · risk {{ spec.risk_pct }}%/ไม้ · quota {{ spec.quota }}/วัน · RR 1:2 · SL≤{{ spec.sl_max }} จุด</div>
+{% if not modes %}<div class="card">ยังไม่มีข้อมูล — midas_sniper ยังไม่ push ขึ้นมา</div>{% endif %}
+<div class="grid">
+{% for m,v in modes %}
+<div class="card"><h2>โหมด {{ m }}</h2><div class="mode-sub">{{ desc[m] }}</div>
+<div class="bal {{ 'up' if v.bal>=100 else 'dn' }}">{{ v.bal }}</div>
+<div class="stat"><span>ไม้</span><b>{{ v.trades }} (ชนะ {{ v.wins }} / แพ้ {{ v.losses }})</b></div>
+<div class="stat"><span>Winrate</span><b>{{ v.wr }}%</b></div>
+<div class="stat"><span>Streak / สูงสุด</span><b>{{ v.streak }} / {{ v.max_streak }}</b></div>
+<div class="stat"><span>Profit Factor</span><b>{{ v.pf }}</b></div>
+<div class="stat"><span>Max Drawdown</span><b>{{ v.max_dd }}%</b></div>
+<div class="stat"><span>แผนล้าน (จาก $20)</span><b>รอบ {{ v.plan_round }} · ${{ v.plan_bal }} · ไกลสุด {{ v.max_plan_round }}</b></div>
+{% if v.open %}<div class="open">เปิดอยู่: {{ v.open.side }} @ {{ v.open.entry }} · SL {{ v.open.sl }} · TP {{ v.open.tp }} · ไม้{{ 'เต็ม' if v.open.size>=1 else 'ครึ่ง' }}</div>{% endif %}
+</div>{% endfor %}
+</div>
+<h1 style="margin-top:24px">ไม้ล่าสุด</h1>
+<table><tr><th>โหมด</th><th>เข้า</th><th>ทิศ</th><th>ขนาด</th><th>คะแนน</th><th>SL จุด</th><th>ผล</th><th>เวลา</th></tr>
+{% for r in log %}<tr><td><span class="badge">{{ r.mode }}</span></td><td>{{ r.t }}</td><td>{{ r.side }}</td><td>{{ r.size }}</td><td>{{ r.score }}</td><td>{{ r.sl }}</td><td class="{{ 'w' if r.win else 'l' }}">{{ 'ชนะ' if r.win else 'แพ้' }} {{ r.pct }}%</td><td>{{ r.close }}</td></tr>{% endfor %}
+</table></body></html>"""
+
+@app.route("/midas")
+def midas_page():
+    modes = []
+    log = []
+    desc = {"A": "เช็กลิสต์บังคับครบทุกข้อ", "B": "เกตบังคับ + เครดิตเสริม", "C": "คะแนนเกินเพดาน"}
+    for m in ("A", "B", "C"):
+        v = SNIPER_STATE.get("modes", {}).get(m)
+        if not v:
+            continue
+        wins, losses, gw, gl = v.get("wins", 0), v.get("losses", 0), v.get("gross_w", 0), v.get("gross_l", 0)
+        tot = wins + losses
+        modes.append((m, {**v, "wr": round(wins / tot * 100, 1) if tot else 0,
+                          "pf": round(gw / gl, 2) if gl else ("∞" if gw else 0)}))
+        for r in v.get("log", []):
+            log.append({**r, "mode": m})
+    log.sort(key=lambda r: r.get("close", ""), reverse=True)
+    return render_template_string(MIDAS_TEMPLATE, s=SNIPER_STATE, modes=modes,
+                                  desc=desc, spec=SNIPER_STATE.get("spec", {}), log=log[:30])
+
 @app.route("/")
 def home():
     global global_flash
@@ -1998,12 +2052,16 @@ def toggle_status(asset_key, action_type):
     return jsonify({"status": "success", "new_val": new_val, "current_stage": tgt.get("current_stage", 1)})
 
 _market_data_lock = threading.Lock()
+SNIPER_STATE = {}   # ผลงาน shadow ของมิดาส (3 โหมด) push ขึ้นมาจาก VPS
 
 def process_market_data(data):
     """ประมวลผลข้อมูลตลาดจาก MT5 ใน background (แยกออกจาก request เพื่อกัน timeout)
     lock ไว้ให้ทำทีละคู่ — กัน matplotlib วาดกราฟพร้อมกันหลายตัวจน memory ล้นบน free tier"""
     with _market_data_lock:
       for asset_key, payload in data.items():
+        if asset_key == "sniper":        # midas_sniper shadow engine (VPS) — ไม่ใช่ asset
+            SNIPER_STATE.clear(); SNIPER_STATE.update(payload)
+            continue
         if asset_key in ASSETS:
             st = ASSETS[asset_key]["state"]
             print(f"📊 Processing {asset_key}: price={payload.get('price')}, k_5m={payload.get('k_5m')}")
