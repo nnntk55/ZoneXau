@@ -119,6 +119,10 @@ function sheetOp(d) {
     const ss = SpreadsheetApp.openById(d.ssid);
     const s = d.sheet ? ss.getSheetByName(d.sheet) : ss.getSheets()[0];
     if (!s) return {status: "error", message: "no sheet " + d.sheet};
+    if (d.op === "del" && d.row) {
+      s.deleteRow(Number(d.row));
+      return {status: "success", type: "sheet_op"};
+    }
     if (d.op === "write") {
       if (d.cell) s.getRange(d.cell).setValue(d.value);
       else if (Array.isArray(d.rows) && d.rows.length)

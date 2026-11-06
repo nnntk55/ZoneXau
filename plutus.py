@@ -209,12 +209,47 @@ def sched_rows():
         if not m:
             continue
         try:
-            price = float(str(row[4] if len(row) > 4 and row[4] != "" else row[2]) or 0)
+            price = float(str(row[2]) or 0)
         except ValueError:
             price = 0.0
         out.append({"row": i, "time": str(row[0]), "name": str(row[1]).strip(),
-                    "price": price, "x": int(m.group(1)), "y": int(m.group(2))})
+                    "price": price, "x": int(m.group(1)), "y": int(m.group(2)),
+                    "paid": str(row[4]) if len(row) > 4 else ""})
     return out
+
+def _sched_raw():
+    r = sched_op(op="read")
+    return (r.get("values") or []) if r and r.get("status") == "success" else []
+
+def sched_add(time_str, name, price, xy="0/12", note=""):
+    """เพิ่มนักเรียน — วางในแถวเวลาที่ตรง (col A เป็นเวลาไทย = UTC+7) หรือต่อท้าย"""
+    target = None
+    m = re.match(r"^\s*(\d{1,2})", str(time_str or ""))
+    if m:
+        want = int(m.group(1))
+        for i, row in enumerate(_sched_raw(), start=1):
+            if len(row) > 1 and str(row[1]).strip():
+                continue
+            mm = re.search(r"T(\d{2}):", str(row[0] if row else ""))
+            if mm and int(mm.group(1)) + 7 == want:
+                target = i; break
+    if target:
+        kw = {"op": "write", "row": target, "col": 2, "rows": [[name, price, xy, "", note]]}
+    else:
+        kw = {"op": "write", "rows": [[time_str, name, price, xy, "", note]]}
+    r = sched_op(**kw)
+    return (f"เพิ่มนักเรียน {name} เวลา {time_str} ราคา {float(price or 0):,.0f} ({xy}) แล้วครับ"
+            if r and r.get("status") == "success"
+            else f"เพิ่มนักเรียนไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
+
+def sched_del(name):
+    """ลบแถวนักเรียนตามชื่อ (col B)"""
+    for i, row in enumerate(_sched_raw(), start=1):
+        if len(row) > 1 and str(name).strip() and str(name).strip() in str(row[1]):
+            r = sched_op(op="del", row=i)
+            return (f"ลบนักเรียน {row[1]} (แถว {i}) แล้วครับ" if r and r.get("status") == "success"
+                    else f"ลบไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
+    return f"หา '{name}' ในชีทไม่เจอครับ"
 
 def sched_tick(who="all"):
     """ติ๊กคาบ +1 ให้นักเรียน (who=all หรือชื่อ) — ครบ y สร้างใบเรียกเก็บอัตโนมัติ"""
@@ -435,6 +470,8 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - sched_read: อ่านตารางสอนจริงจากชีท (นับคาบ x/y, ยอดค้าง, รอบชำระ) {"action":"sched_read","say":"..."}
 - sched_set: เขียนแก้ช่องในชีทสอน (เช่น นับคาบ D7 เป็น 5/12, สถานะจ่าย) {"action":"sched_set","cell":"D7","value":"5/12","say":"..."}
 - sched_tick: ติ๊กคาบเรียน +1 (เสาร์สอนเสร็จ) {"action":"sched_tick","who":"ชื่อ หรือ all","say":"..."} — ครบรอบคอร์สระบบจดค้างชำระให้เอง
+- sched_add: เพิ่มนักเรียนใหม่ {"action":"sched_add","time":"16:00","name":"ชื่อ","price":ตัวเลข,"xy":"0/12","note":""}
+- sched_del: เอานักเรียนออก {"action":"sched_del","name":"ชื่อ"}
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -605,6 +642,11 @@ def handle(text):
                  else f"เขียนชีท {cell} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
     elif a == "sched_tick":
         reply = sched_tick(cmd.get("who", "all"))
+    elif a == "sched_add":
+        reply = sched_add(cmd.get("time", ""), cmd.get("name", ""),
+                          cmd.get("price", 0), cmd.get("xy", "0/12"), cmd.get("note", ""))
+    elif a == "sched_del":
+        reply = sched_del(cmd.get("name", ""))
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
