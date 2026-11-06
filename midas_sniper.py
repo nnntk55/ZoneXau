@@ -231,7 +231,10 @@ def eval_setup(f, zones, price):
     h4 = f.get("4h") or {}
     h1 = f.get("1h") or {}
     h4_ok = (h4.get("trend") != ("bull" if sell else "bear"))
-    h1_ok = (h1.get("trend") != ("bull" if sell else "bear"))   # ลำดับนิน: D1→H4→H1→M15→M5
+    # H1 บล็อกถ้า trend สวน หรือมีสัญญาณกลับตัวสด: stoch หันสวนทิศเข้า + แท่งปิดสวน open แท่งก่อน
+    h1_rev = (h1.get("stoch_dir") == "ขึ้น" and h1.get("above_open_prev")) if sell \
+        else (h1.get("stoch_dir") == "ลง" and h1.get("below_open_prev"))
+    h1_ok = (h1.get("trend") != ("bull" if sell else "bear")) and not h1_rev   # ลำดับนิน: D1→H4→H1→M15→M5
     at_zone = zone is not None
     touches = zone_touch(f["15m_raw"], zone) if at_zone else 0
     # ฟอร์มบน M15: F1 = มีแท่งปิดสวน EMA10 หลังชนโซน, F2 = ทะลุ EMA50+EMA100
@@ -264,8 +267,8 @@ def eval_setup(f, zones, price):
         + (10 if f2 else 5 if f1 else 0) + (5 if retest_ok else 0) + (5 if stoch_hi else 0) \
         + (10 if (f.get("4h", {}).get("below_open_prev") if sell else f.get("4h", {}).get("above_open_prev")) else 0) \
         + (5 if (trig_candle and trig_ema and m5_align) else 0)
-    conds = {"bias": d is not None, "h4_ok": h4_ok, "h1_ok": h1_ok, "at_zone": at_zone,
-             "fresh_touch": fresh_touch, "retest": retest_ok,
+    conds = {"bias": d is not None, "h4_ok": h4_ok, "h1_ok": h1_ok, "h1_rev": h1_rev,
+             "at_zone": at_zone, "fresh_touch": fresh_touch, "retest": retest_ok,
              "f1": bool(f1), "f2": bool(f2), "trig_candle": bool(trig_candle), "trig_ema": bool(trig_ema),
              "m5_align": bool(m5_align), "stoch_hi": stoch_hi, "room_ok": room_ok}
     core = all([conds["bias"], h4_ok, h1_ok, at_zone, trigger, room_ok])
