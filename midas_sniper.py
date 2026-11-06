@@ -28,7 +28,7 @@ SL_MAX, SL_MIN = 500, 100    # เพดาน/พื้น SL (จุด) — �
 RISK_PCT = 10.0              # % ทุนต่อไม้เต็ม (เฟสปั้นพอร์ท)
 QUOTA_DAY = 3                # ไม้สูงสุดต่อวันต่อโหมด (นิน: เริ่มที่ 3)
 NEWS_BUF_MIN = 30            # เกตข่าว ±30 นาที
-SCORE_FULL, SCORE_HALF = 85, 70   # เพดานโหมด C (อัปหลังเพิ่มแต้ม H1 — รักษาระดับความเข้มเดิม)
+SCORE_FULL, SCORE_HALF = 90, 75   # เพดานโหมด C (อัปหลังเพิ่มแต้ม H1+h1_exhaust — รักษาระดับความเข้มเดิม)
 ZONE_TOL_PCT = 0.0025        # ความหนาโซนตอนนับ touches/range_bias (เหลื่อมกรอบ)
 ENTRY_TOL_PCT = 0.0005       # เกตเข้าไม้: ต้องชนโซนจริง ±0.05% (~$2) — กันยิงลอยก่อนถึงโซน
 
@@ -248,6 +248,9 @@ def eval_setup(f, zones, price):
     h1_rev = bool((h1.get("stoch_dir") == "ขึ้น" and h1.get("above_open_prev")) if sell
                   else (h1.get("stoch_dir") == "ลง" and h1.get("below_open_prev")))
     h1_ok = (h1.get("trend") != ("bull" if sell else "bear")) and not h1_rev   # ลำดับนิน: D1→H4→H1→M15→M5
+    # นิน: จังหวะของจริง = พูลแบ็ค H1 สุกงอม — stoch H1 อยู่ยอดฝั่งสวนทิศเข้า (sell: K≥70 / buy: K≤30)
+    h1_k = h1.get("stoch_k") or 50
+    h1_exhaust = bool(h1_k >= 70 if sell else h1_k <= 30)
     at_zone = zone is not None
     touches = zone_touch(f["15m_raw"], zone) if at_zone else 0
     # ฟอร์มบน M15: F1 = มีแท่งปิดสวน EMA10 หลังชนโซน, F2 = ทะลุ EMA50+EMA100
@@ -277,14 +280,16 @@ def eval_setup(f, zones, price):
         + (10 if h4_ok else 0) + (10 if h1_ok else 0) + (10 if at_zone else 0) \
         + (5 if (h4.get("stoch_dir") == ("ลง" if sell else "ขึ้น")) else 0) \
         + (5 if (h1.get("stoch_dir") == ("ลง" if sell else "ขึ้น")) else 0) \
+        + (10 if h1_exhaust else 0) \
         + (10 if f2 else 5 if f1 else 0) + (5 if retest_ok else 0) + (5 if stoch_hi else 0) \
         + (10 if (f.get("4h", {}).get("below_open_prev") if sell else f.get("4h", {}).get("above_open_prev")) else 0) \
         + (5 if (trig_candle and trig_ema and m5_align) else 0)
     conds = {"bias": d is not None, "h4_ok": h4_ok, "h1_ok": h1_ok, "h1_rev": h1_rev,
+             "h1_exhaust": h1_exhaust,
              "at_zone": at_zone, "fresh_touch": fresh_touch, "retest": retest_ok,
              "f1": bool(f1), "f2": bool(f2), "trig_candle": bool(trig_candle), "trig_ema": bool(trig_ema),
              "m5_align": bool(m5_align), "stoch_hi": stoch_hi, "room_ok": room_ok}
-    core = all([conds["bias"], h4_ok, h1_ok, at_zone, trigger, room_ok])
+    core = all([conds["bias"], h4_ok, h1_ok, h1_exhaust, at_zone, trigger, room_ok])
     extras = all([f2, retest_ok, stoch_hi])
     a_ok = core and extras and f1                   # บังคับครบ (h4/h1 อยู่ใน core แล้ว)
     b_size = 1.0 if (core and extras) else (0.5 if core else 0)   # core ผ่าน = เข้า (เครดิตเต็มถ้า extras ครบ)
