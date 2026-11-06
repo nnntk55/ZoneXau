@@ -40,6 +40,18 @@ PUSH = {"t": 0}
 now_th = lambda: (datetime.now(timezone.utc) + timedelta(hours=7)).replace(tzinfo=None)
 
 
+def _js(o):
+    """json fallback — numpy bool_/int_ จาก pandas serialize ตรงไม่ได้"""
+    try:
+        import numpy as np
+        if isinstance(o, np.bool_): return bool(o)
+        if isinstance(o, np.integer): return int(o)
+        if isinstance(o, np.floating): return float(o)
+    except Exception:
+        pass
+    return str(o)
+
+
 def push_dash(st_led):
     """ส่งผลงาน shadow ขึ้น /midas บนแดชบอร์ด ทุก ~2 นาที"""
     if time.time() - PUSH["t"] < 120:
@@ -223,6 +235,7 @@ def eval_setup(f, zones, price):
             fully_out = r["Low"] > zone["upper"] or r["High"] < zone["lower"]
             if fully_out: was_out = True
             elif inside and was_out: fresh_touch = True
+    fresh_touch = bool(fresh_touch)
     # โซนเป้าหมาย (ฝั่งเดียวกับทิศ = ที่ว่างทำกำไร)
     tgt = [z for z in zones if ("Demand" in z["kind"]) == sell and ((z["upper"] < price) if sell else (z["lower"] > price))]
     target = min(tgt, key=lambda z: abs((z["upper"] + z["lower"]) / 2 - price)) if tgt else None
@@ -232,8 +245,8 @@ def eval_setup(f, zones, price):
     h1 = f.get("1h") or {}
     h4_ok = (h4.get("trend") != ("bull" if sell else "bear"))
     # H1 บล็อกถ้า trend สวน หรือมีสัญญาณกลับตัวสด: stoch หันสวนทิศเข้า + แท่งปิดสวน open แท่งก่อน
-    h1_rev = (h1.get("stoch_dir") == "ขึ้น" and h1.get("above_open_prev")) if sell \
-        else (h1.get("stoch_dir") == "ลง" and h1.get("below_open_prev"))
+    h1_rev = bool((h1.get("stoch_dir") == "ขึ้น" and h1.get("above_open_prev")) if sell
+                  else (h1.get("stoch_dir") == "ลง" and h1.get("below_open_prev")))
     h1_ok = (h1.get("trend") != ("bull" if sell else "bear")) and not h1_rev   # ลำดับนิน: D1→H4→H1→M15→M5
     at_zone = zone is not None
     touches = zone_touch(f["15m_raw"], zone) if at_zone else 0
@@ -400,7 +413,7 @@ def main():
                 json.dump({"updated": now_th().strftime("%Y-%m-%d %H:%M"), "modes": st_led,
                            "spec": {"risk_pct": RISK_PCT, "quota": QUOTA_DAY, "rr": "1:2",
                                     "sl_max": SL_MAX, "score_full": SCORE_FULL}},
-                          fo, ensure_ascii=False, indent=1)
+                          fo, ensure_ascii=False, indent=1, default=_js)
             os.replace(tmp, STATE_PATH)   # atomic — กันไฟล์พังตอนอ่านชนเขียน
             push_dash(st_led)
             fails = 0
