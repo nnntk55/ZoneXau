@@ -196,6 +196,46 @@ def sched_table():
         return None
     return "\n".join(" | ".join(str(c) for c in row).rstrip(" |") for row in (r.get("values") or []))
 
+_SCHED_HDR = {"time": ("time", "เวลา"), "name": ("name", "student", "ชื่อ", "นักเรียน"),
+              "price": ("price", "ราคา", "ค่าเรียน", "fee"), "studied": ("studied", "เรียนไป", "เรียนแล้ว"),
+              "course": ("course", "คอร์ส"), "paid": ("paid", "pay", "ชำระ", "status", "สถานะ"),
+              "note": ("note", "โน้ต", "หมายเหตุ")}
+_LEGACY_COLS = {"time": 0, "name": 1, "price": 2, "xy": 3, "paid": 4, "note": 5, "hdr": -1}
+RED, GREEN = "#ff0000", "#00ff00"
+
+def _sched_cols(vals):
+    """หาคอลัมน์จากหัวตาราง (Studied = เรียนไปแล้วกี่ครั้ง, Course = ครบกี่ครั้ง) — ไม่เจอใช้แบบเก่า D = x/y"""
+    for hi, row in enumerate(vals[:5]):
+        low = [str(c).strip().lower() for c in row]
+        cols = {}
+        for key, words in _SCHED_HDR.items():
+            for j, c in enumerate(low):
+                if c and j not in cols.values() and any(w in c for w in words):
+                    cols[key] = j; break
+        if "studied" in cols and "course" in cols:
+            cols["hdr"] = hi
+            return cols
+    return dict(_LEGACY_COLS)
+
+def _a1(j, i):
+    return f"{chr(65 + j)}{i}"
+
+def _cv(row, j):
+    return str(row[j]).strip() if j is not None and j < len(row) else ""
+
+def _num(s):
+    try:
+        return int(float(str(s).replace(",", "").strip()))
+    except (ValueError, TypeError):
+        return None
+
+def _sched_read(with_bg=False):
+    r = sched_op(op="read", with_bg=1) if with_bg else sched_op(op="read")
+    if not r or r.get("status") != "success":
+        return None
+    vals = r.get("values") or []
+    return vals, r.get("bgs") or [], _sched_cols(vals)
+
 def _is_green(hexbg):
     try:
         h = str(hexbg).lstrip("#")
@@ -204,102 +244,175 @@ def _is_green(hexbg):
     except Exception:
         return False
 
-def sched_rows():
-    """แถวนักเรียนจากชีท: {row, time, name, price, x, y, paid} — x/y = คาบที่เรียน/ความยาวคอร์ส"""
-    r = sched_op(op="read", with_bg=1)
-    if not r or r.get("status") != "success":
+def sched_rows(data=None):
+    """แถวนักเรียนจากชีท: {row, time, name, price, x, y, paid} — x = Studied (เรียนไปแล้ว), y = Course (ครบกี่ครั้ง)"""
+    data = data or _sched_read(with_bg=True)
+    if not data:
         return []
+    vals, bgs, cols = data
     out = []
-    for i, row in enumerate(r.get("values") or [], start=1):
-        if len(row) < 4 or not str(row[1]).strip():
+    for i, row in enumerate(vals, start=1):
+        name = _cv(row, cols.get("name"))
+        if i - 1 <= cols["hdr"] or not name:
             continue
-        m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", str(row[3]))
-        if not m:
-            continue
-        try:
-            price = float(str(row[2]) or 0)
-        except ValueError:
-            price = 0.0
-        bgs = r.get("bgs") or []
-        bg_e = bgs[i - 1][4] if len(bgs) >= i and len(bgs[i - 1]) > 4 else ""
-        out.append({"row": i, "time": str(row[0]), "name": str(row[1]).strip(),
-                    "price": price, "x": int(m.group(1)), "y": int(m.group(2)),
-                    "paid": _is_green(bg_e) or ("ชำระ" in str(row[4]) and "ยัง" not in str(row[4]))
-                    if len(row) > 4 else _is_green(bg_e)})
+        if "xy" in cols:
+            m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", _cv(row, cols["xy"]))
+            if not m:
+                continue
+            x, y = int(m.group(1)), int(m.group(2))
+        else:
+            x, y = _num(_cv(row, cols["studied"])) or 0, _num(_cv(row, cols["course"]))
+            if not y:
+                continue
+        price = float(_num(_cv(row, cols.get("price"))) or 0)
+        pj = cols.get("paid")
+        bg = bgs[i - 1][pj] if pj is not None and len(bgs) >= i and len(bgs[i - 1]) > pj else ""
+        ptxt = _cv(row, pj)
+        out.append({"row": i, "time": _cv(row, cols.get("time")), "name": name, "price": price,
+                    "x": x, "y": y, "paid": _is_green(bg) or ("ชำระ" in ptxt and "ยัง" not in ptxt)})
     return out
 
+def _find_row(vals, cols, name):
+    """หาแถวตามชื่อ — ตรงทั้งชื่อก่อน ไม่เจอค่อยหาแบบบางส่วน (ต้องเจอคนเดียว)"""
+    key = str(name).strip().lower()
+    if not key:
+        return None, None
+    cand = [(i, _cv(row, cols.get("name"))) for i, row in enumerate(vals, start=1)
+            if i - 1 > cols["hdr"] and _cv(row, cols.get("name"))]
+    exact = [c for c in cand if c[1].lower() == key]
+    if exact:
+        return exact[0]
+    part = [c for c in cand if key in c[1].lower()]
+    if len(part) > 1:
+        return -1, ", ".join(c[1] for c in part)
+    return part[0] if part else (None, None)
+
+def _status_cell(cols, i):
+    """ช่องที่ใช้แสดงสถานะชำระด้วยสี — คอลัมน์ชำระถ้ามี ไม่งั้นช่อง Studied"""
+    j = cols.get("paid", cols.get("studied", cols.get("xy")))
+    return _a1(j, i)
+
 def sched_pay(name, paid=True):
-    """เปลี่ยนสถานะชำระ + สีเซลล์ E (เขียว=จ่ายแล้ว/แดง=ยัง) และปิด/เปิดค้างใน ledger"""
-    vals = _sched_raw()
-    for i, row in enumerate(vals, start=1):
-        if len(row) > 1 and str(name).strip() and str(name).strip() in str(row[1]):
-            r = sched_op(op="write", cell=f"E{i}",
-                         value="ชำระแล้ว" if paid else "ยังไม่ชำระ",
-                         bg="#00ff00" if paid else "#ff0000")
-            if not (r and r.get("status") == "success"):
-                return f"เขียนสถานะชำระ E{i} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})"
-            d = _load(); changed = False
-            for p in d["payables"]:
-                if p.get("who") == row[1] and not p.get("paid") and paid:
-                    p["paid"] = True; changed = True
-            if changed:
-                _save(d)
-            return (f"{row[1]} ปรับเป็น 'ชำระแล้ว' (เขียว) ปิดใบเรียกเก็บให้แล้วครับ" if paid
-                    else f"{row[1]} ปรับเป็น 'ยังไม่ชำระ' (แดง) แล้วครับ")
-    return f"หา '{name}' ในชีทไม่เจอครับ"
+    """เปลี่ยนสถานะชำระด้วยสี (เขียว=จ่ายแล้ว/แดง=รอชำระ) และปิดใบค้างใน ledger"""
+    data = _sched_read()
+    if not data:
+        return "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์/สคริปต์เข้าถึงไม่ได้"
+    vals, _, cols = data
+    i, who = _find_row(vals, cols, name)
+    if i == -1:
+        return f"ชื่อ '{name}' ตรงหลายคน ({who}) ระบุชื่อเต็มครับ"
+    if not i:
+        return f"หา '{name}' ในชีทไม่เจอครับ"
+    cell = _status_cell(cols, i)
+    kw = {"op": "write", "cell": cell, "bg": GREEN if paid else RED}
+    if "xy" in cols:
+        kw["value"] = "ชำระแล้ว" if paid else "ยังไม่ชำระ"
+    r = sched_op(**kw)
+    if not (r and r.get("status") == "success"):
+        return f"เขียนสถานะชำระ {cell} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})"
+    if paid:
+        d = _load(); changed = False
+        for p in d["payables"]:
+            if p.get("who") == who and not p.get("paid"):
+                p["paid"] = True; changed = True
+        if changed:
+            _save(d)
+    return (f"{who} ปรับเป็นชำระแล้ว (เขียว {cell}) ปิดใบเรียกเก็บให้แล้วครับ" if paid
+            else f"{who} ปรับเป็นรอชำระ (แดง {cell}) แล้วครับ")
 
 def _sched_raw():
-    r = sched_op(op="read")
-    return (r.get("values") or []) if r and r.get("status") == "success" else []
+    data = _sched_read()
+    return data[0] if data else []
 
-def sched_add(time_str, name, price, xy="0/12", note=""):
-    """เพิ่มนักเรียน — วางในแถวเวลาที่ตรง (col A เป็นเวลาไทย = UTC+7) หรือต่อท้าย"""
+def _slot_hour(v):
+    s = str(v or "")
+    mm = re.search(r"T(\d{2}):", s)
+    if mm:
+        return (int(mm.group(1)) + 7) % 24
+    mm = re.match(r"^\s*(\d{1,2})\s*[:.]", s)
+    return int(mm.group(1)) if mm else None
+
+def sched_add(time_str, name, price, xy="0/12", note="", course=None):
+    """เพิ่มนักเรียน — วางในแถวเวลาที่ตรงและยังว่าง (col เวลาเป็นเวลาไทย) หรือต่อท้าย"""
+    data = _sched_read()
+    if not data:
+        return "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์/สคริปต์เข้าถึงไม่ได้"
+    vals, _, cols = data
+    m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", str(xy or ""))
+    x, y = (int(m.group(1)), int(m.group(2))) if m else (0, 12)
+    if course:
+        y = _num(course) or y
+    tj, nj = cols.get("time", 0), cols["name"]
+    width = max(v for k, v in cols.items() if k != "hdr") + 1
+    arr = [""] * width
+    arr[tj] = time_str; arr[nj] = name
+    if cols.get("price") is not None:
+        arr[cols["price"]] = price
+    if "xy" in cols:
+        arr[cols["xy"]] = f"{x}/{y}"
+    else:
+        arr[cols["studied"]] = x; arr[cols["course"]] = y
+    if cols.get("note") is not None:
+        arr[cols["note"]] = note
     target = None
     m = re.match(r"^\s*(\d{1,2})", str(time_str or ""))
     if m:
         want = int(m.group(1))
-        for i, row in enumerate(_sched_raw(), start=1):
-            if len(row) > 1 and str(row[1]).strip():
+        for i, row in enumerate(vals, start=1):
+            if i - 1 <= cols["hdr"] or _cv(row, nj):
                 continue
-            mm = re.search(r"T(\d{2}):", str(row[0] if row else ""))
-            if mm and int(mm.group(1)) + 7 == want:
+            if _slot_hour(_cv(row, tj)) == want:
                 target = i; break
     if target:
-        kw = {"op": "write", "row": target, "col": 2, "rows": [[name, price, xy, "", note]]}
+        kw = {"op": "write", "row": target, "col": nj + 1, "rows": [arr[nj:]]}
     else:
-        kw = {"op": "write", "rows": [[time_str, name, price, xy, "", note]]}
+        kw = {"op": "write", "rows": [arr]}
     r = sched_op(**kw)
-    return (f"เพิ่มนักเรียน {name} เวลา {time_str} ราคา {float(price or 0):,.0f} ({xy}) แล้วครับ"
+    return (f"เพิ่มนักเรียน {name} เวลา {time_str} ราคา {float(price or 0):,.0f} (เรียนแล้ว {x}/{y}) แล้วครับ"
             if r and r.get("status") == "success"
             else f"เพิ่มนักเรียนไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
 
 def sched_del(name):
-    """ลบแถวนักเรียนตามชื่อ (col B)"""
-    for i, row in enumerate(_sched_raw(), start=1):
-        if len(row) > 1 and str(name).strip() and str(name).strip() in str(row[1]):
-            r = sched_op(op="del", row=i)
-            return (f"ลบนักเรียน {row[1]} (แถว {i}) แล้วครับ" if r and r.get("status") == "success"
-                    else f"ลบไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
-    return f"หา '{name}' ในชีทไม่เจอครับ"
+    """ลบแถวนักเรียนตามชื่อ"""
+    data = _sched_read()
+    if not data:
+        return "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์/สคริปต์เข้าถึงไม่ได้"
+    vals, _, cols = data
+    i, who = _find_row(vals, cols, name)
+    if i == -1:
+        return f"ชื่อ '{name}' ตรงหลายคน ({who}) ระบุชื่อเต็มครับ"
+    if not i:
+        return f"หา '{name}' ในชีทไม่เจอครับ"
+    r = sched_op(op="del", row=i)
+    return (f"ลบนักเรียน {who} (แถว {i}) แล้วครับ" if r and r.get("status") == "success"
+            else f"ลบไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
 
 def sched_tick(who="all"):
-    """ติ๊กคาบ +1 ให้นักเรียน (who=all หรือชื่อ) — ครบ y สร้างใบเรียกเก็บอัตโนมัติ"""
-    rows = sched_rows()
+    """ติ๊กคาบ +1 (Studied) ให้นักเรียน (who=all หรือชื่อ) — ครบ Course แล้วจดรอชำระ + ทาสีแดง"""
+    data = _sched_read(with_bg=True)
+    rows = sched_rows(data)
     if not rows:
         return "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์/สคริปต์เข้าถึงไม่ได้"
-    who_l = str(who).lower()
+    cols = data[2]
+    who_l = str(who).strip().lower()
+    if who_l not in ("all", "ทุกคน"):
+        exact = [s for s in rows if s["name"].lower() == who_l]
+        rows = exact or [s for s in rows if who_l in s["name"].lower()]
     done, billed = [], []
     for s in rows:
-        if who_l not in ("all", "ทุกคน") and who_l not in s["name"].lower():
-            continue
         if s["x"] >= s["y"]:
             continue
         nx = s["x"] + 1
-        r = sched_op(op="write", cell=f"D{s['row']}", value=f"{nx}/{s['y']}")
+        if "xy" in cols:
+            cell, val = _a1(cols["xy"], s["row"]), f"{nx}/{s['y']}"
+        else:
+            cell, val = _a1(cols["studied"], s["row"]), nx
+        r = sched_op(op="write", cell=cell, value=val)
         if not (r and r.get("status") == "success"):
-            return f"เขียน D{s['row']} ไม่สำเร็จครับ ({(r or {}).get('message','no response')})"
+            return f"เขียน {cell} ไม่สำเร็จครับ ({(r or {}).get('message','no response')})"
         done.append(f"{s['name']} {nx}/{s['y']}")
         if nx == s["y"]:
+            sched_op(op="write", cell=_status_cell(cols, s["row"]), bg=RED)
             d = _load()
             if not any(p.get("who") == s["name"] and "ครบรอบคอร์ส" in p.get("note", "") and not p.get("paid")
                        for p in d["payables"]):
@@ -312,7 +425,7 @@ def sched_tick(who="all"):
         return "ไม่มีแถวที่ติ๊กได้ครับ (เช็กชื่อ/ทุกคนเรียนครบรอบแล้ว)"
     rep = "ติ๊กคาบแล้วครับ:\n" + "\n".join(f"- {x}" for x in done)
     if billed:
-        rep += "\n\nถึงรอบเรียกเก็บ (จดค้างชำระไว้แล้ว):\n" + "\n".join(f"- {x}" for x in billed)
+        rep += "\n\nครบคอร์ส รอชำระ (ทาสีแดง + จดค้างชำระไว้แล้ว):\n" + "\n".join(f"- {x}" for x in billed)
     return rep
 
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
@@ -498,12 +611,12 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - planned: ดูรายการที่คาดจะใช้
 - report: สรุปเดือนนี้ | pockets: สรุปกระเป๋าเงิน | port: พอร์ทเทรด
 - sched_link: นินส่งลิงก์ชีทตารางสอนมาให้ผูก {"action":"sched_link","url":"ลิงก์เต็ม","say":"..."}
-- sched_read: อ่านตารางสอนจริงจากชีท (นับคาบ x/y, ยอดค้าง, รอบชำระ) {"action":"sched_read","say":"..."}
-- sched_set: เขียนแก้ช่องในชีทสอน (เช่น นับคาบ D7 เป็น 5/12, สถานะจ่าย) {"action":"sched_set","cell":"D7","value":"5/12","say":"..."}
-- sched_tick: ติ๊กคาบเรียน +1 (เสาร์สอนเสร็จ) {"action":"sched_tick","who":"ชื่อ หรือ all","say":"..."} — ครบรอบคอร์สระบบจดค้างชำระให้เอง
-- sched_add: เพิ่มนักเรียนใหม่ {"action":"sched_add","time":"16:00","name":"ชื่อ","price":ตัวเลข,"xy":"0/12","note":""}
+- sched_read: อ่านตารางสอนจริงจากชีท (Studied = เรียนไปแล้วกี่ครั้ง, Course = ครบกี่ครั้ง, สีช่องชำระ เขียว=จ่ายแล้ว แดง=รอชำระ) {"action":"sched_read","say":"..."}
+- sched_set: เขียนแก้ช่องในชีทสอน (เช่น แก้ Studied/โน้ต ของแถวนั้น — ดูตัวอักษรคอลัมน์จาก sched_read ก่อน) {"action":"sched_set","cell":"D7","value":"5/12","say":"..."}
+- sched_tick: ติ๊กคาบเรียน +1 (เสาร์สอนเสร็จ) {"action":"sched_tick","who":"ชื่อ หรือ all","say":"..."} — ครบ Course ระบบทาสีแดง + จดรอชำระให้เอง
+- sched_add: เพิ่มนักเรียนใหม่ {"action":"sched_add","time":"16:00","name":"ชื่อ","price":ตัวเลข,"course":12,"note":""} (Studied เริ่ม 0)
 - sched_del: เอานักเรียนออก {"action":"sched_del","name":"ชื่อ"}
-- sched_pay: เปลี่ยนสถานะชำระ+สีเซลล์ (เขียว=จ่ายแล้ว/แดง=ยัง) {"action":"sched_pay","name":"ชื่อ","paid":true|false}
+- sched_pay: เปลี่ยนสถานะชำระ+สีเซลล์ (เขียว=จ่ายแล้ว/แดง=ยัง) {"action":"sched_pay","name":"ชื่อ","paid":true|false} (true=จ่ายแล้ว ทาเขียว, false=รอชำระ ทาแดง)
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -676,11 +789,12 @@ def handle(text):
         reply = sched_tick(cmd.get("who", "all"))
     elif a == "sched_add":
         reply = sched_add(cmd.get("time", ""), cmd.get("name", ""),
-                          cmd.get("price", 0), cmd.get("xy", "0/12"), cmd.get("note", ""))
+                          cmd.get("price", 0), cmd.get("xy", "0/12"), cmd.get("note", ""),
+                          cmd.get("course"))
     elif a == "sched_del":
         reply = sched_del(cmd.get("name", ""))
     elif a == "sched_pay":
-        reply = sched_pay(cmd.get("name", ""), bool(cmd.get("paid", True)))
+        reply = sched_pay(cmd.get("name", ""), str(cmd.get("paid", True)).strip().lower() not in ("false", "0", "no", "ยัง", "ยังไม่จ่าย"))
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
