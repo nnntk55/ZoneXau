@@ -58,6 +58,31 @@ def tg_get_updates(offset):
     except Exception:
         return []
 
+def save_attachment(msg):
+    """รูป/เอกสารจากนิน → ดาวน์โหลดเก็บ charts/plutus_files/<วันที่>/<เวลา>_<ชื่อ> คืน path หรือ None"""
+    try:
+        photos, doc, fid, name = msg.get("photo") or [], msg.get("document") or {}, None, "file"
+        if photos:
+            fid, name = photos[-1]["file_id"], "photo.jpg"        # ไซซ์ใหญ่สุดอยู่ท้ายลิสต์
+        elif doc.get("file_id"):
+            fid, name = doc["file_id"], doc.get("file_name") or "doc.bin"
+        if not fid:
+            return None
+        fp = requests.get(f"https://api.telegram.org/bot{PLUTUS_BOT_TOKEN}/getFile",
+                          params={"file_id": fid}, timeout=15).json().get("result", {}).get("file_path")
+        if not fp:
+            return None
+        th = datetime.now(timezone(timedelta(hours=7)))
+        d = os.path.join("charts", "plutus_files", th.strftime("%Y-%m-%d"))
+        os.makedirs(d, exist_ok=True)
+        dest = os.path.join(d, f"{th.strftime('%H%M%S')}_{name}")
+        open(dest, "wb").write(requests.get(
+            f"https://api.telegram.org/file/bot{PLUTUS_BOT_TOKEN}/{fp}", timeout=30).content)
+        return dest
+    except Exception as e:
+        _rlog(f"attach err: {e}")
+        return None
+
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
 chat_history = []
 
@@ -450,7 +475,16 @@ def main():
                 offset = upd["update_id"] + 1
                 msg = upd.get("message") or {}
                 text = (msg.get("text") or "").strip()
-                if not text or str(msg.get("chat", {}).get("id")) != str(TELEGRAM_CHAT_ID):
+                if str(msg.get("chat", {}).get("id")) != str(TELEGRAM_CHAT_ID):
+                    continue
+                if not text:
+                    saved = save_attachment(msg)
+                    if saved:
+                        note = f"[ไฟล์จากนิน] {saved}"
+                        print(f"plutus <- {note}")
+                        chat_history.append({"role": "user", "content": note})
+                        save_memory()
+                        tg_send(f"รับไฟล์เก็บเรียบร้อยนะนิน — {saved}")
                     continue
                 print(f"plutus <- {text[:80]}")
                 chat_history.append({"role": "user", "content": text})
