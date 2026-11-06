@@ -332,10 +332,13 @@ def main():
                 elif st["side"] and blocked:
                     print(f"[{now_th():%H:%M}] setup {st['side']} แต่ข่าว {blocked['title']} บล็อก")
             os.makedirs(CHART_DIR, exist_ok=True)
-            json.dump({"updated": now_th().strftime("%Y-%m-%d %H:%M"), "modes": st_led,
-                       "spec": {"risk_pct": RISK_PCT, "quota": QUOTA_DAY, "rr": "1:2",
-                                "sl_max": SL_MAX, "score_full": SCORE_FULL}},
-                      open(STATE_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            tmp = STATE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fo:
+                json.dump({"updated": now_th().strftime("%Y-%m-%d %H:%M"), "modes": st_led,
+                           "spec": {"risk_pct": RISK_PCT, "quota": QUOTA_DAY, "rr": "1:2",
+                                    "sl_max": SL_MAX, "score_full": SCORE_FULL}},
+                          fo, ensure_ascii=False, indent=1)
+            os.replace(tmp, STATE_PATH)   # atomic — กันไฟล์พังตอนอ่านชนเขียน
         except Exception as e:
             print(f"[{now_th():%H:%M}] loop err: {e}")
         time.sleep(30)
