@@ -10,9 +10,11 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import MetaTrader5 as mt5
 
-ACCOUNT = int(os.environ.get("MT5_ACCOUNT", "128792936"))
-PASSWORD = os.environ.get("MT5_PASSWORD", "Mm.1572537")
-SERVER = os.environ.get("MT5_SERVER", "Exness-MT5Real7")
+_MT5_SET = os.environ.get("SNIPER_MT5_SET", "")   # ใส่ "2"/"3" ใน secrets.env เพื่อใช้แอคเคาท์ชุดนั้น
+_SFX = f"_{_MT5_SET}" if _MT5_SET else ""
+ACCOUNT = int(os.environ.get(f"MT5_ACCOUNT{_SFX}", os.environ.get("MT5_ACCOUNT", "128792936")))
+PASSWORD = os.environ.get(f"MT5_PASSWORD{_SFX}", os.environ.get("MT5_PASSWORD", "Mm.1572537"))
+SERVER = os.environ.get(f"MT5_SERVER{_SFX}", os.environ.get("MT5_SERVER", "Exness-MT5Real7"))
 SYMBOL = os.environ.get("SNIPER_SYMBOL", "XAUUSDm")
 CHART_DIR = "charts"
 STATE_PATH = os.path.join(CHART_DIR, "midas_shadow.json")
