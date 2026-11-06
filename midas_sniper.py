@@ -31,6 +31,7 @@ NEWS_BUF_MIN = 30            # เกตข่าว ±30 นาที
 SCORE_FULL, SCORE_HALF = 75, 60   # เพดานโหมด C
 ZONE_TOL_PCT = 0.0025        # ความหนา "ชิดโซน" ~0.25%
 
+PLAN_START = float(os.environ.get("PLAN_START", "1000"))   # ทุนเริ่มแผนล้าน — นิน: $1,000 (lot 1.0 ทวีทุกรอบ)
 NEWS_CACHE = {"t": 0, "events": []}
 DASH_URL = os.environ.get("RENDER_DASHBOARD_URL", "https://zonexau.onrender.com")
 DASH_KEY = os.environ.get("DASH_API_KEY", "")
@@ -273,7 +274,7 @@ def inbox(msg):
 def new_ledger():
     return {"bal": 100.0, "open": None, "trades": 0, "wins": 0, "losses": 0,
             "streak": 0, "max_streak": 0, "gross_w": 0.0, "gross_l": 0.0, "peak": 100.0,
-            "max_dd": 0.0, "plan_bal": 20.0, "plan_round": 1, "max_plan_round": 1,
+            "max_dd": 0.0, "plan_bal": PLAN_START, "plan_round": 1, "max_plan_round": 1,
             "quota_day": "", "quota_used": 0, "log": []}
 
 
