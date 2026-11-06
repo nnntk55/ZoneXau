@@ -23,6 +23,7 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+VISION_MODEL = os.environ.get("VISION_MODEL", "google/gemini-2.5-flash")  # วิชั่นผ่าน OpenRouter
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CHART_DIR = os.path.join(BASE, "charts")
@@ -112,7 +113,7 @@ def describe_image(path):
             try:
                 r = requests.post("https://openrouter.ai/api/v1/chat/completions",
                                   headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-                                  json={"model": "google/gemini-2.0-flash-001", "messages": [
+                                  json={"model": VISION_MODEL, "messages": [
                                       {"role": "user", "content": [
                                           {"type": "text", "text": ask},
                                           {"type": "image_url",
@@ -126,6 +127,33 @@ def describe_image(path):
                 _rlog(f"vision openrouter err: {e}")
     except Exception as e:
         _rlog(f"vision err: {e}")
+    return None
+
+DOC_EXTS = (".pdf", ".xlsx", ".xls", ".csv", ".docx", ".txt", ".md", ".json")
+
+def read_document(path):
+    """อ่านเนื้อเอกสาร (pdf/excel/csv/docx/txt) เป็นข้อความ คืน str หรือ None"""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".pdf":
+            from pypdf import PdfReader
+            txt = "\n".join((p.extract_text() or "") for p in PdfReader(path).pages).strip()
+            return txt or "[PDF สแกน — ไม่มีชั้นข้อความ ต้องส่งเป็นรูป]"
+        if ext in (".xlsx", ".xls"):
+            import pandas as pd
+            dfs = pd.read_excel(path, sheet_name=None, header=None)
+            return "\n".join(f"[ชีท {k}]\n{df.fillna('').to_string(index=False, header=False)}"
+                             for k, df in dfs.items())
+        if ext == ".csv":
+            import pandas as pd
+            return pd.read_csv(path, header=None).fillna("").to_string(index=False, header=False)
+        if ext == ".docx":
+            import docx
+            return "\n".join(p.text for p in docx.Document(path).paragraphs if p.text.strip())
+        if ext in (".txt", ".md", ".json"):
+            return open(path, encoding="utf-8", errors="replace").read()
+    except Exception as e:
+        _rlog(f"docread err: {e}")
     return None
 
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
@@ -526,25 +554,26 @@ def main():
                     saved = save_attachment(msg)
                     if saved:
                         note = f"[ไฟล์จากนิน] {saved}"
-                        desc = None
-                        if os.path.splitext(saved)[1].lower() in IMG_EXTS:
-                            desc = describe_image(saved)
-                            note += (f"\n[เนื้อภาพที่อ่านได้จริง]\n{desc}\n[จบเนื้อภาพ]"
-                                     if desc else "\n[วิชั่นอ่านภาพไม่สำเร็จ — ห้ามเดาเนื้อหา]")
+                        ext = os.path.splitext(saved)[1].lower()
+                        desc = describe_image(saved) if ext in IMG_EXTS else read_document(saved)
+                        if desc:
+                            note += f"\n[เนื้อไฟล์ที่อ่านได้จริง]\n{desc[:4000]}\n[จบเนื้อไฟล์]"
+                        elif ext in IMG_EXTS or ext in DOC_EXTS:
+                            note += "\n[อ่านเนื้อไฟล์ไม่สำเร็จ — ห้ามเดาเนื้อหา]"
                         print(f"plutus <- {note[:80]}")
                         chat_history.append({"role": "user", "content": note})
                         save_memory()
                         if desc:
-                            reply = handle("นินส่งภาพมา วิเคราะห์/ตอบจาก [เนื้อภาพที่อ่านได้จริง] "
-                                           "ในข้อความก่อนเท่านั้น ห้ามเดาข้อมูลนอกภาพ")
+                            reply = handle("นินส่งไฟล์มา วิเคราะห์/ตอบจาก [เนื้อไฟล์ที่อ่านได้จริง] "
+                                           "ในข้อความก่อนเท่านั้น ห้ามเดาข้อมูลนอกเนื้อไฟล์")
                             if reply:
                                 chat_history.append({"role": "assistant", "content": reply})
                                 save_memory()
-                            tg_send(reply or "อ่านภาพได้แล้วแต่สมองไม่ตอบครับ")
+                            tg_send(reply or "อ่านไฟล์ได้แล้วแต่สมองไม่ตอบครับ")
                         else:
                             tg_send(f"รับไฟล์เก็บเรียบร้อยนะนิน — {saved}"
-                                    + ("" if desc is None and os.path.splitext(saved)[1].lower()
-                                       not in IMG_EXTS else " (แต่วิชั่นอ่านเนื้อภาพไม่ได้ ส่งใหม่อีกที)"))
+                                    + ("" if ext not in IMG_EXTS + DOC_EXTS
+                                       else " (แต่อ่านเนื้อไฟล์ไม่ได้ ส่งใหม่อีกที)"))
                     elif msg.get("photo") or msg.get("document"):
                         keys = [k for k in ("photo", "document") if msg.get(k)]
                         _rlog(f"attachment seen but save failed: {keys}")
