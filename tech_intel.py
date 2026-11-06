@@ -96,6 +96,9 @@ def _tf_analyze(df):
     k, d = _stoch_rsi(df)
     kv = float(k.iloc[-1]) if k is not None else None
     dv = float(d.iloc[-1]) if d is not None else None
+    k_prev = float(k.iloc[-4]) if k is not None and len(k) >= 4 else None
+    sdir = ("ขึ้น" if kv - k_prev > 1.5 else "ลง" if kv - k_prev < -1.5 else "แบน") \
+        if kv is not None and k_prev is not None else None
     cross = None
     if k is not None and len(k) >= 2:
         cross = "bull cross" if k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2] else \
@@ -115,7 +118,11 @@ def _tf_analyze(df):
         trend, twhy = "mixed", "ข้อมูลขัดกัน"
     return {"price": round(price, 2), "trend": trend, "trend_why": twhy, "ema_align": align,
             "ema50_slope": slope, "ema50": round(e50, 2) if e50 else None,
+            "ema200": round(e200, 2) if e200 else None,
+            "vs_ema200": (f"{'เหนือ' if price > e200 else 'ใต้'} EMA200 ({(price - e200) / price * 100:+.2f}%)") if e200 else None,
             "structure": struct, "stoch_k": round(kv, 1) if kv is not None else None,
+            "stoch_k_prev": round(k_prev, 1) if k_prev is not None else None,
+            "stoch_dir": sdir,
             "stoch_d": round(dv, 1) if dv is not None else None, "stoch_zone": zone,
             "stoch_cross": cross, "atr_pct": _atr_pct(df)}
 
