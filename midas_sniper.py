@@ -15,7 +15,7 @@ _SFX = f"_{_MT5_SET}" if _MT5_SET else ""
 ACCOUNT = int(os.environ.get(f"MT5_ACCOUNT{_SFX}", os.environ.get("MT5_ACCOUNT", "128792936")))
 PASSWORD = os.environ.get(f"MT5_PASSWORD{_SFX}", os.environ.get("MT5_PASSWORD", "Mm.1572537"))
 SERVER = os.environ.get(f"MT5_SERVER{_SFX}", os.environ.get("MT5_SERVER", "Exness-MT5Real7"))
-SYMBOL = os.environ.get("SNIPER_SYMBOL", "XAUUSDm")
+SYMBOL = os.environ.get("SNIPER_SYMBOL", "")   # ว่าง = auto-detect จากเทอร์มินัล
 CHART_DIR = "charts"
 STATE_PATH = os.path.join(CHART_DIR, "midas_shadow.json")
 INBOX = os.path.join(CHART_DIR, "midas_inbox.txt")
@@ -35,12 +35,35 @@ NEWS_CACHE = {"t": 0, "events": []}
 now_th = lambda: (datetime.now(timezone.utc) + timedelta(hours=7)).replace(tzinfo=None)
 
 
+def resolve_symbol():
+    """หา symbol ทองที่เทอร์มินัลใช้จริง (เดโมอาจเป็น XAUUSD ไม่ใช่ XAUUSDm)"""
+    cands = ([SYMBOL] if SYMBOL else []) + ["XAUUSDm", "XAUUSD", "XAUUSD247"]
+    cands += [s.name for s in (mt5.symbols_get("XAUUSD*") or [])]
+    for s in cands:
+        try:
+            if mt5.symbol_select(s, True) and mt5.copy_rates_from_pos(s, mt5.TIMEFRAME_M5, 0, 3) is not None:
+                return s
+        except Exception:
+            pass
+    return None
+
+
 def init_mt5():
+    global SYMBOL
     if not mt5.initialize():
         print("MT5 init fail"); return False
-    if ACCOUNT and PASSWORD and SERVER and not mt5.login(ACCOUNT, password=PASSWORD, server=SERVER):
-        print("MT5 login fail", mt5.last_error()); return False
-    print("MT5 ok"); return True
+    info = mt5.account_info()
+    print("terminal account:", info.login if info else "none")
+    if ACCOUNT and PASSWORD and SERVER:
+        try:
+            mt5.login(ACCOUNT, password=PASSWORD, server=SERVER)  # best-effort — อ่านแท่งได้แม้ login ไม่ผ่าน
+        except Exception as e:
+            print("login skip:", e)
+    sym = resolve_symbol()
+    if not sym:
+        print("no gold symbol found"); return False
+    SYMBOL = sym
+    print("MT5 ok, symbol:", SYMBOL); return True
 
 
 def candles(tf, count=300):
