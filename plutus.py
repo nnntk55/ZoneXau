@@ -526,7 +526,7 @@ def log_tx(kind, amount, cat, note="", pocket="ธนาคาร", date=None, c
 def monthly_report(month=None):
     d = _load()
     month = month or datetime.now(TH).strftime("%Y-%m")
-    rows = [x for x in d["tx"] if x["date"].startswith(month)]
+    rows = [x for x in d["tx"] if x["date"].startswith(month) and not x.get("void")]
     def rows_of(k):
         return [x for x in rows if x["kind"] == k]
     def cat_sum(rs):
@@ -617,6 +617,7 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - sched_add: เพิ่มนักเรียนใหม่ {"action":"sched_add","time":"16:00","name":"ชื่อ","price":ตัวเลข,"course":12,"note":""} (Studied เริ่ม 0)
 - sched_del: เอานักเรียนออก {"action":"sched_del","name":"ชื่อ"}
 - sched_pay: เปลี่ยนสถานะชำระ+สีเซลล์ (เขียว=จ่ายแล้ว/แดง=ยัง) {"action":"sched_pay","name":"ชื่อ","paid":true|false} (true=จ่ายแล้ว ทาเขียว, false=รอชำระ ทาแดง)
+- void_tx: กากบาทรายการที่จดผิด (คืนยอด ไม่ลบทิ้ง เก็บเป็นหลักฐาน) {"action":"void_tx","amount":ตัวเลข,"kind":"in|out|save|reserve","match":"คำใน note/cat","say":"..."}
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -767,6 +768,8 @@ def handle(text):
     elif a == "pockets":
         d = _load(); bal = {}
         for x in d["tx"]:
+            if x.get("void"):
+                continue
             k = x.get("pocket", "ธนาคาร")
             bal[k] = bal.get(k, 0) + (-x["amount"] if x["kind"] == "out" else x["amount"])
         lines = [f"{POCKETS.get(k, k)}: {v:+,.0f}" for k, v in bal.items()]
@@ -795,6 +798,20 @@ def handle(text):
         reply = sched_del(cmd.get("name", ""))
     elif a == "sched_pay":
         reply = sched_pay(cmd.get("name", ""), str(cmd.get("paid", True)).strip().lower() not in ("false", "0", "no", "ยัง", "ยังไม่จ่าย"))
+    elif a == "void_tx":
+        d = _load(); amt = float(cmd.get("amount") or 0)
+        kind, match = cmd.get("kind", ""), str(cmd.get("match", "")).lower()
+        for x in reversed(d["tx"]):
+            if x.get("void"):
+                continue
+            ok = (not amt or x.get("amount") == amt) and (not kind or x.get("kind") == kind) and \
+                 (not match or match in str(x.get("note", "")).lower() or match in str(x.get("cat", "")).lower())
+            if ok:
+                x["void"] = True; x["void_note"] = "กากบาท — จดผิด/ไม่ใช่รายการจริง"
+                _save(d)
+                reply = f"กากบาทรายการ {x['kind']} {x['amount']:,.0f} ({x.get('cat','-')}) วันที่ {x['date']} แล้วครับ ยอดกระเป๋าคืนให้แล้ว"
+                break
+        reply = reply or "หารายการที่ตรงเงื่อนไขไม่เจอครับ บอกจำนวน/รายละเอียดเพิ่ม"
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
