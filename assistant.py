@@ -1546,6 +1546,19 @@ def main():
                 reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
                 if reply:
                     tg_send(reply)
+            # digest รายชั่วโมง — ต้นชม.ถ้ามีอีเวนต์กักอยู่ส่งรวมครั้งเดียว (ไม่มีก็เงียบ)
+            if now_th.minute < 4 and last_report_slot != now_th.strftime("%Y-%m-%d %H:00") + "digest" \
+                    and hhmm not in REPORT_SLOTS and os.path.exists(pending_path):
+                held = open(pending_path, encoding="utf-8").read().strip()
+                if held:
+                    os.remove(pending_path)
+                    last_report_slot = now_th.strftime("%Y-%m-%d %H:00") + "digest"
+                    live = _live_price_line()
+                    print(f"📨 hourly digest {now_th.hour}:00")
+                    reply = run_agent(f"[EVENT] อีเวนต์ชั่วโมงที่ผ่านมา (ส่งรวม):\n{held[:2500]}"
+                                      + ("\n" + live if live else ""), TELEGRAM_CHAT_ID, None)
+                    if reply:
+                        tg_send(reply)
             # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
                 last_weekly_report = now_th.date()
