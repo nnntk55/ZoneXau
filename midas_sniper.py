@@ -12,7 +12,7 @@ import MetaTrader5 as mt5
 ACCOUNT = int(os.environ.get("MT5_ACCOUNT", "128792936"))
 PASSWORD = os.environ.get("MT5_PASSWORD", "Mm.1572537")
 SERVER = os.environ.get("MT5_SERVER", "Exness-MT5Real7")
-SYMBOL = os.environ.get("SNIPER_SYMBOL", "XAUUSD")
+SYMBOL = os.environ.get("SNIPER_SYMBOL", "XAUUSDm")
 CHART_DIR = "charts"
 STATE_PATH = os.path.join(CHART_DIR, "midas_shadow.json")
 INBOX = os.path.join(CHART_DIR, "midas_inbox.txt")
@@ -23,7 +23,7 @@ TF_MAP = {"1w": mt5.TIMEFRAME_W1, "1d": mt5.TIMEFRAME_D1, "4h": mt5.TIMEFRAME_H4
 PTS_PER_USD = 100.0          # นิน: 1,000 จุด = $10 → 100 จุด = $1 (1 point = 0.01)
 SL_MAX, SL_MIN = 500, 100    # เพดาน/พื้น SL (จุด) — ตามสเปก SL ≤500 ตามโครงสร้าง
 RISK_PCT = 10.0              # % ทุนต่อไม้เต็ม (เฟสปั้นพอร์ท)
-QUOTA_DAY = 5                # ไม้สูงสุดต่อวันต่อโหมด
+QUOTA_DAY = 3                # ไม้สูงสุดต่อวันต่อโหมด (นิน: เริ่มที่ 3)
 NEWS_BUF_MIN = 30            # เกตข่าว ±30 นาที
 SCORE_FULL, SCORE_HALF = 75, 60   # เพดานโหมด C
 ZONE_TOL_PCT = 0.0025        # ความหนา "ชิดโซน" ~0.25%
@@ -170,17 +170,21 @@ def eval_setup(f, zones, price):
     tgt = [z for z in zones if ("Demand" in z["kind"]) == sell and ((z["upper"] < price) if sell else (z["lower"] > price))]
     target = min(tgt, key=lambda z: abs((z["upper"] + z["lower"]) / 2 - price)) if tgt else None
     m15 = f.get("15m") or {}
+    m5 = f.get("5m") or {}
     h4 = f.get("4h") or {}
     h4_ok = (h4.get("trend") != ("bull" if sell else "bear"))
     at_zone = zone is not None
     touches = zone_touch(f["15m_raw"], zone) if at_zone else 0
-    # ฟอร์ม: F1 = มีแท่งปิดสวน EMA10 หลังชนโซน, F2 = ทะลุ EMA50+EMA100
+    # ฟอร์มบน M15: F1 = มีแท่งปิดสวน EMA10 หลังชนโซน, F2 = ทะลุ EMA50+EMA100
     f1 = m15.get("below_ema10") if sell else m15.get("above_ema10")
     e50, e100 = m15.get("ema50"), m15.get("ema100")
     f2 = e50 and e100 and ((m15.get("c2_close") or 0) < min(e50, e100) if sell else (m15.get("c2_close") or 0) > max(e50, e100))
-    trig_candle = m15.get("below_open_prev") if sell else m15.get("above_open_prev")
-    trig_ema = m15.get("below_ema10") if sell else m15.get("above_ema10")
+    # M15 ตั้งสวย: stoch M15 อยู่ยอดฝั่งตรงข้ามทิศเข้า
     stoch_hi = (m15.get("stoch_k") or 50) >= 70 if sell else (m15.get("stoch_k") or 50) <= 30
+    # trigger บน M5 แท่งปิด: แท่งปิดสวน open ก่อน + ปิดสวน EMA10 + stoch M5 ไปทางเดียว M15
+    trig_candle = m5.get("below_open_prev") if sell else m5.get("above_open_prev")
+    trig_ema = m5.get("below_ema10") if sell else m5.get("above_ema10")
+    m5_align = m5.get("stoch_dir") == ("ลง" if sell else "ขึ้น")
     # SL ตามโครงสร้าง: หลังขอบโซนเข้า (สูงสุด/ต่ำสุดของโซน) + buffer, เพดาน 500
     if sell and zone:
         sl_pts = min(SL_MAX, max(SL_MIN, (zone["upper"] - price) * PTS_PER_USD + 80))
@@ -192,16 +196,16 @@ def eval_setup(f, zones, price):
     room_ok = room_pts >= 2 * sl_pts
     retest_ok = touches >= 2            # ลูกศรแรกเสี่ยง: ชนครั้งที่ 2+ คะแนนดีกว่า
     form = 2 if f2 else (1 if f1 else 0)
-    trigger = bool(trig_candle and trig_ema and stoch_hi and at_zone)
+    trigger = bool(trig_candle and trig_ema and m5_align and stoch_hi and at_zone)
     # --- คะแนนกลุ่ม C ---
     sc = min(35, b["pts"]) \
         + (10 if h4_ok else 0) + (10 if at_zone else 0) + (5 if (h4.get("stoch_dir") == ("ลง" if sell else "ขึ้น")) else 0) \
         + (10 if f2 else 5 if f1 else 0) + (5 if retest_ok else 0) + (5 if stoch_hi else 0) \
         + (10 if (f.get("4h", {}).get("below_open_prev") if sell else f.get("4h", {}).get("above_open_prev")) else 0) \
-        + (5 if (trig_candle and trig_ema) else 0)
+        + (5 if (trig_candle and trig_ema and m5_align) else 0)
     conds = {"bias": d is not None, "h4_ok": h4_ok, "at_zone": at_zone, "retest": retest_ok,
              "f1": bool(f1), "f2": bool(f2), "trig_candle": bool(trig_candle), "trig_ema": bool(trig_ema),
-             "stoch_hi": stoch_hi, "room_ok": room_ok}
+             "m5_align": bool(m5_align), "stoch_hi": stoch_hi, "room_ok": room_ok}
     core = all([conds["bias"], at_zone, trigger, room_ok])
     extras = all([f2, retest_ok, stoch_hi])
     a_ok = core and extras and f1 and h4_ok          # บังคับครบ
@@ -293,7 +297,7 @@ def main():
                     st_led[m].update(saved["modes"][m])
         except Exception:
             pass
-    last_m15 = None
+    last_sig = None
     print("midas_sniper shadow started", now_th())
     while True:
         try:
@@ -309,13 +313,14 @@ def main():
             # จัดการไม้เปิดด้วยแท่ง M5 ปิดล่าสุด
             for m, led in st_led.items():
                 manage_trade(led, frames["5m"].iloc[-2], m)
-            # ประเมินเข้าเฉพาะแท่ง M15 ปิดใหม่
-            cur_m15 = str(frames["15m"]["time"].iloc[-2])
-            if cur_m15 != last_m15:
-                last_m15 = cur_m15
+            # ประเมินเข้าทุกแท่ง M5 ปิดใหม่ (M15 = setup, M5 = trigger+เข้าที่ปิดแท่ง)
+            cur_m5 = str(frames["5m"]["time"].iloc[-2])
+            if cur_m5 != last_sig:
+                last_sig = cur_m5
                 import tech_intel
                 zones = tech_intel._zones(frames, price)
                 st = eval_setup(f, zones, price)
+                st["price"] = f["5m"].get("c2_close", price)  # เข้าที่ราคาปิดแท่ง M5
                 blocked = news_blocked()
                 if st["side"] and not blocked:
                     try_enter(st_led["A"], st, "A", 1.0 if st["a_ok"] else 0)
