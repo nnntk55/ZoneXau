@@ -401,12 +401,15 @@ def main():
                 st = eval_setup(f, zones, price)
                 st["price"] = f["5m"].get("c2_close", price)  # เข้าที่ราคาปิดแท่ง M5
                 blocked = news_blocked()
-                if st["side"] and not blocked:
+                veto = st["conds"].get("h1_rev")    # สัญญาณกลับตัว H1 = บล็อกแข็งเหมือนข่าว ครอบทุกโหมด
+                if st["side"] and not blocked and not veto:
                     try_enter(st_led["A"], st, "A", 1.0 if st["a_ok"] else 0)
                     try_enter(st_led["B"], st, "B", st["b_size"])
                     try_enter(st_led["C"], st, "C", st["c_size"])
                 elif st["side"] and blocked:
                     print(f"[{now_th():%H:%M}] setup {st['side']} แต่ข่าว {blocked['title']} บล็อก")
+                elif st["side"] and veto:
+                    print(f"[{now_th():%H:%M}] setup {st['side']} แต่ H1 กลับตัวสด บล็อก")
             os.makedirs(CHART_DIR, exist_ok=True)
             tmp = STATE_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fo:
