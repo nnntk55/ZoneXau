@@ -2078,9 +2078,26 @@ def _self_update_worker():
         except Exception as e:
             print(f"self-update check error: {e}")
 
+def resolve_symbols():
+    """เดโม/จริงใช้ชื่อ symbol ต่างกัน (XAUUSDm vs XAUUSD) — ลองชื่อเดิมก่อน แล้วค่อย variant"""
+    for key, asset in ASSETS.items():
+        want = asset.get("symbol", "")
+        base = want.rstrip("m")
+        cands = [want, base, base + "247"] + [s.name for s in (mt5.symbols_get(base + "*") or [])]
+        for s in dict.fromkeys(cands):
+            try:
+                if mt5.symbol_select(s, True) and mt5.copy_rates_from_pos(s, mt5.TIMEFRAME_M5, 0, 3) is not None:
+                    if s != want:
+                        print(f"symbol resolve: {asset.get('name')} {want} -> {s}")
+                    asset["symbol"] = s
+                    break
+            except Exception:
+                pass
+
 if __name__ == "__main__":
     threading.Thread(target=_self_update_worker, daemon=True).start()
     if init_mt5():
+        resolve_symbols()
         # รีเซ็ต pending_confirmation ทุก asset เมื่อเริ่มรันใหม่
         for key in ASSETS.keys():
             ASSETS[key]["pending_confirmation"] = None
