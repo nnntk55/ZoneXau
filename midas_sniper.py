@@ -363,6 +363,7 @@ def main():
         except Exception:
             pass
     last_sig = None
+    fails = 0
     print("midas_sniper shadow started", now_th())
     while True:
         try:
@@ -402,8 +403,18 @@ def main():
                           fo, ensure_ascii=False, indent=1)
             os.replace(tmp, STATE_PATH)   # atomic — กันไฟล์พังตอนอ่านชนเขียน
             push_dash(st_led)
+            fails = 0
         except Exception as e:
-            print(f"[{now_th():%H:%M}] loop err: {e}")
+            fails += 1
+            print(f"[{now_th():%H:%M}] loop err ({fails}): {e}")
+            if fails >= 5:                    # MT5 IPC ค้าง/เทอร์มินัลสลับพอร์ท — re-init ใหม่เอง
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+                print("re-init MT5…")
+                init_mt5()
+                fails = 0
         time.sleep(30)
 
 
