@@ -51,7 +51,7 @@ def main():
         return 0
 
     mood = random.choice(MOODS)
-    n = random.randint(1, 3)
+    n = random.choices([1, 2, 3, 4], weights=[30, 40, 20, 10])[0]  # วันไหนคิดถึงมากก็ทักบ่อย
     times = sorted(random.sample(range(10 * 60, 22 * 60), n))
     topics = random.sample(TOPICS, min(n, len(TOPICS)))
 
