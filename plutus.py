@@ -485,6 +485,10 @@ def main():
                         chat_history.append({"role": "user", "content": note})
                         save_memory()
                         tg_send(f"รับไฟล์เก็บเรียบร้อยนะนิน — {saved}")
+                    elif msg.get("photo") or msg.get("document"):
+                        keys = [k for k in ("photo", "document") if msg.get(k)]
+                        _rlog(f"attachment seen but save failed: {keys}")
+                        tg_send(f"เห็นไฟล์ที่นินส่งแล้ว แต่ดาวน์โหลดไม่สำเร็จ ({keys}) — แจ้งวินเช็ก getFile")
                     continue
                 print(f"plutus <- {text[:80]}")
                 chat_history.append({"role": "user", "content": text})
