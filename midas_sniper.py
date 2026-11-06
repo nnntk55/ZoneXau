@@ -5,6 +5,7 @@ A=เช็กลิสต์บังคับ / B=เกตบังคับ+
 + บัญชี "แผนล้าน" (lot ทวีตามตาราง) — บันทึก charts/midas_shadow.json
 ไม่ยิงออเดอร์จริง — อ่านอย่างเดียว"""
 import os, json, time
+import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env ก่อนอ่านค่า
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import MetaTrader5 as mt5

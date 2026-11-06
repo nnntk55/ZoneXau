@@ -13,6 +13,7 @@ Telegram (ภาษาคน) -> Gemini function calling -> Render Dashboard API
 """
 import os
 import sys
+import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env
 import json
 import re
 import time

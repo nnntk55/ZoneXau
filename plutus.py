@@ -7,6 +7,7 @@ env: PLUTUS_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_SCRIPT_URL
      + (GROQ_API_KEY|OPENROUTER_API_KEY|GEMINI_API_KEY ตัวเดียวกับมิดาส)
 """
 import os, re, sys, json, time, requests
+import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env
 from datetime import datetime, timezone, timedelta
 
 try:

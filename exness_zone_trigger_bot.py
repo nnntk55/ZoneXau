@@ -1,6 +1,7 @@
 import os
 import io
 import copy
+import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env ก่อนอ่านค่า (ไม่แตะลอจิกเทรด)
 import json
 import time
 import threading
