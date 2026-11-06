@@ -53,6 +53,13 @@ def tg_image_attachment(msg, local=False):
         fid, name = photos[-1]["file_id"], "photo.jpg"  # ไซซ์ใหญ่สุดอยู่ท้ายลิสต์เสมอ
     elif str(doc.get("mime_type", "")).startswith("image/"):
         fid, name = doc["file_id"], doc.get("file_name") or "image.jpg"
+    elif msg.get("video"):
+        v = msg["video"]
+        fid, name = v["file_id"], v.get("file_name") or "video.mp4"
+    elif msg.get("video_note"):
+        fid, name = msg["video_note"]["file_id"], "video_note.mp4"
+    elif str(doc.get("mime_type", "")).startswith("video/"):
+        fid, name = doc["file_id"], doc.get("file_name") or "video.mp4"
     elif msg.get("voice"):
         fid, name = msg["voice"]["file_id"], "voice.ogg"
     elif msg.get("audio"):
@@ -651,14 +658,19 @@ def main():
                     continue
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 is_voice = bool(msg.get("voice") or msg.get("audio"))
-                if is_voice or msg.get("photo") or str((msg.get("document") or {}).get("mime_type", "")).startswith("image/"):
+                is_video = bool(msg.get("video") or msg.get("video_note"))
+                mime = str((msg.get("document") or {}).get("mime_type", ""))
+                if is_voice or is_video or msg.get("photo") or mime.startswith(("image/", "video/")):
                     att = tg_image_attachment(msg, local=route(st) == "local")
-                    what = "เสียง" if is_voice else "รูป"
+                    what = "เสียง" if is_voice else "วิดีโอ" if is_video or mime.startswith("video/") else "รูป"
                     if att:
                         text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
+                                         else "นินส่งวิดีโอมา แตกเฟรมด้วย vidframes.py แล้ววิเคราะห์" if is_video or mime.startswith("video/")
                                          else "นินส่งรูปมา เปิดดูและวิเคราะห์")) + "\n" + att
                         send(att.split("\n")[0].replace("ถอดเสียงที่นินพูด:", "วินได้ยินว่า:") if att.startswith("ถอดเสียง")
-                         else "ได้เสียงแล้ว วินกำลังฟัง" if is_voice else "ได้รูปแล้ว วินกำลังดู")
+                         else "ได้เสียงแล้ว วินกำลังฟัง" if is_voice
+                         else "ได้วิดีโอแล้ว วินกำลังแตกเฟรมดู" if is_video or mime.startswith("video/")
+                         else "ได้รูปแล้ว วินกำลังดู")
                     else:
                         send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
                 if not text:
