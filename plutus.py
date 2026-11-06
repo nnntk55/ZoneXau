@@ -6,7 +6,7 @@
 env: PLUTUS_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_SCRIPT_URL
      + (GROQ_API_KEY|OPENROUTER_API_KEY|GEMINI_API_KEY ตัวเดียวกับมิดาส)
 """
-import os, re, sys, json, time, requests
+import os, re, sys, json, time, base64, requests
 import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env
 from datetime import datetime, timezone, timedelta
 
@@ -82,6 +82,51 @@ def save_attachment(msg):
     except Exception as e:
         _rlog(f"attach err: {e}")
         return None
+
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+
+def describe_image(path):
+    """ส่งภาพให้วิชั่นโมเดลอ่านเนื้อจริง (Gemini -> OpenRouter) คืนข้อความ หรือ None"""
+    try:
+        mime = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+                ".bmp": "image/bmp"}.get(os.path.splitext(path)[1].lower(), "image/jpeg")
+        b64 = base64.b64encode(open(path, "rb").read()).decode()
+        ask = ("นินส่งภาพนี้มา อ่านเนื้อหาทั้งหมดในภาพออกมาเป็นข้อความให้ละเอียด "
+               "โดยเฉพาะตาราง/ตัวเลข/ชื่อ/ราคา/วันที่ — ถ่ายทอดตรงๆ ทีละแถว ห้ามเดา "
+               "ช่องไหนอ่านไม่ชัดให้ระบุว่าไม่ชัด")
+        if GEMINI_API_KEY:
+            body = {}
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+                    json={"contents": [{"role": "user", "parts": [
+                        {"text": ask}, {"inline_data": {"mime_type": mime, "data": b64}}]}]},
+                    timeout=60)
+                body = r.json()
+                out = body["candidates"][0]["content"]["parts"][0]["text"]
+                if out:
+                    return out.strip()
+            except Exception as e:
+                _rlog(f"vision gemini err: {e} {str(body)[:200]}")
+        if OPENROUTER_API_KEY:
+            try:
+                r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                  headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                                  json={"model": "google/gemini-2.0-flash-001", "messages": [
+                                      {"role": "user", "content": [
+                                          {"type": "text", "text": ask},
+                                          {"type": "image_url",
+                                           "image_url": {"url": f"data:{mime};base64,{b64}"}}]}],
+                                        "max_tokens": 1000}, timeout=60)
+                out = _choices(r.json())
+                if out:
+                    return out
+                _rlog(f"vision openrouter http {r.status_code}")
+            except Exception as e:
+                _rlog(f"vision openrouter err: {e}")
+    except Exception as e:
+        _rlog(f"vision err: {e}")
+    return None
 
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
 chat_history = []
@@ -481,10 +526,25 @@ def main():
                     saved = save_attachment(msg)
                     if saved:
                         note = f"[ไฟล์จากนิน] {saved}"
-                        print(f"plutus <- {note}")
+                        desc = None
+                        if os.path.splitext(saved)[1].lower() in IMG_EXTS:
+                            desc = describe_image(saved)
+                            note += (f"\n[เนื้อภาพที่อ่านได้จริง]\n{desc}\n[จบเนื้อภาพ]"
+                                     if desc else "\n[วิชั่นอ่านภาพไม่สำเร็จ — ห้ามเดาเนื้อหา]")
+                        print(f"plutus <- {note[:80]}")
                         chat_history.append({"role": "user", "content": note})
                         save_memory()
-                        tg_send(f"รับไฟล์เก็บเรียบร้อยนะนิน — {saved}")
+                        if desc:
+                            reply = handle("นินส่งภาพมา วิเคราะห์/ตอบจาก [เนื้อภาพที่อ่านได้จริง] "
+                                           "ในข้อความก่อนเท่านั้น ห้ามเดาข้อมูลนอกภาพ")
+                            if reply:
+                                chat_history.append({"role": "assistant", "content": reply})
+                                save_memory()
+                            tg_send(reply or "อ่านภาพได้แล้วแต่สมองไม่ตอบครับ")
+                        else:
+                            tg_send(f"รับไฟล์เก็บเรียบร้อยนะนิน — {saved}"
+                                    + ("" if desc is None and os.path.splitext(saved)[1].lower()
+                                       not in IMG_EXTS else " (แต่วิชั่นอ่านเนื้อภาพไม่ได้ ส่งใหม่อีกที)"))
                     elif msg.get("photo") or msg.get("document"):
                         keys = [k for k in ("photo", "document") if msg.get(k)]
                         _rlog(f"attachment seen but save failed: {keys}")
