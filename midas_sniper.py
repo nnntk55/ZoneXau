@@ -29,7 +29,8 @@ RISK_PCT = 10.0              # % ทุนต่อไม้เต็ม (เฟ
 QUOTA_DAY = 3                # ไม้สูงสุดต่อวันต่อโหมด (นิน: เริ่มที่ 3)
 NEWS_BUF_MIN = 30            # เกตข่าว ±30 นาที
 SCORE_FULL, SCORE_HALF = 85, 70   # เพดานโหมด C (อัปหลังเพิ่มแต้ม H1 — รักษาระดับความเข้มเดิม)
-ZONE_TOL_PCT = 0.0025        # ความหนา "ชิดโซน" ~0.25%
+ZONE_TOL_PCT = 0.0025        # ความหนาโซนตอนนับ touches/range_bias (เหลื่อมกรอบ)
+ENTRY_TOL_PCT = 0.0005       # เกตเข้าไม้: ต้องชนโซนจริง ±0.05% (~$2) — กันยิงลอยก่อนถึงโซน
 
 PLAN_START = float(os.environ.get("PLAN_START", "1000"))   # ทุนเริ่มแผนล้าน — นิน: $1,000 (lot 1.0 ทวีทุกรอบ)
 NEWS_CACHE = {"t": 0, "events": []}
@@ -210,8 +211,18 @@ def eval_setup(f, zones, price):
     # หาโซนฝั่งตรงข้ามที่ราคากำลังชน (sell→supply บน, buy→demand ล่าง)
     if zone is None:
         cand = [z for z in zones if ("Supply" in z["kind"] or "ต้าน" in z["kind"]) == sell]
-        touch = [z for z in cand if z["lower"] - price * ZONE_TOL_PCT <= price <= z["upper"] + price * ZONE_TOL_PCT]
+        touch = [z for z in cand if z["lower"] - price * ENTRY_TOL_PCT <= price <= z["upper"] + price * ENTRY_TOL_PCT]
         zone = min(touch, key=lambda z: abs(z["upper"] + z["lower"]) / 2 - price) if touch else None
+    # retest จริง: ราคาเคยอยู่นอกโซนแล้วเพิ่งกลับมาชน (ไม่นับลากผ่าน/ค้างในโซน)
+    fresh_touch = False
+    if zone is not None:
+        seg = f["15m_raw"].tail(12)
+        was_out = False
+        for _, r in seg.iterrows():
+            inside = r["Low"] <= zone["upper"] and r["High"] >= zone["lower"]
+            fully_out = r["Low"] > zone["upper"] or r["High"] < zone["lower"]
+            if fully_out: was_out = True
+            elif inside and was_out: fresh_touch = True
     # โซนเป้าหมาย (ฝั่งเดียวกับทิศ = ที่ว่างทำกำไร)
     tgt = [z for z in zones if ("Demand" in z["kind"]) == sell and ((z["upper"] < price) if sell else (z["lower"] > price))]
     target = min(tgt, key=lambda z: abs((z["upper"] + z["lower"]) / 2 - price)) if tgt else None
@@ -244,7 +255,7 @@ def eval_setup(f, zones, price):
     room_ok = room_pts >= 2 * sl_pts
     retest_ok = touches >= 2            # ลูกศรแรกเสี่ยง: ชนครั้งที่ 2+ คะแนนดีกว่า
     form = 2 if f2 else (1 if f1 else 0)
-    trigger = bool(trig_candle and trig_ema and m5_align and stoch_hi and at_zone)
+    trigger = bool(trig_candle and trig_ema and m5_align and stoch_hi and at_zone and fresh_touch)
     # --- คะแนนกลุ่ม C ---
     sc = min(35, b["pts"]) \
         + (10 if h4_ok else 0) + (10 if h1_ok else 0) + (10 if at_zone else 0) \
@@ -254,7 +265,7 @@ def eval_setup(f, zones, price):
         + (10 if (f.get("4h", {}).get("below_open_prev") if sell else f.get("4h", {}).get("above_open_prev")) else 0) \
         + (5 if (trig_candle and trig_ema and m5_align) else 0)
     conds = {"bias": d is not None, "h4_ok": h4_ok, "h1_ok": h1_ok, "at_zone": at_zone,
-             "retest": retest_ok,
+             "fresh_touch": fresh_touch, "retest": retest_ok,
              "f1": bool(f1), "f2": bool(f2), "trig_candle": bool(trig_candle), "trig_ema": bool(trig_ema),
              "m5_align": bool(m5_align), "stoch_hi": stoch_hi, "room_ok": room_ok}
     core = all([conds["bias"], h4_ok, h1_ok, at_zone, trigger, room_ok])
