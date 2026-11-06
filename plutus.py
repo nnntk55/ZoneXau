@@ -156,6 +156,46 @@ def read_document(path):
         _rlog(f"docread err: {e}")
     return None
 
+# ---------- students schedule (ชีทตารางสอน — อ่าน/เขียนตรงผ่าน Apps Script) ----------
+SCHED_STATE = os.path.join(CHART_DIR, "plutus_sched.json")
+
+def _sched_conf():
+    try:
+        return json.load(open(SCHED_STATE, encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _sched_save(conf):
+    json.dump(conf, open(SCHED_STATE, "w", encoding="utf-8"))
+
+def students_ssid():
+    return os.environ.get("STUDENTS_SHEET_ID") or _sched_conf().get("ssid")
+
+def sched_link(url):
+    m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
+    if not m:
+        return None
+    conf = _sched_conf(); conf["ssid"] = m.group(1); _sched_save(conf)
+    return conf["ssid"]
+
+def sched_op(**kw):
+    if not GOOGLE_SCRIPT_URL:
+        return None
+    kw["type"] = "sheet_op"; kw.setdefault("ssid", students_ssid())
+    if not kw["ssid"]:
+        return {"status": "error", "message": "ยังไม่ได้ผูกชีท"}
+    try:
+        return requests.post(GOOGLE_SCRIPT_URL, json=kw, timeout=25).json()
+    except Exception as e:
+        _rlog(f"sched err: {e}")
+        return None
+
+def sched_table():
+    r = sched_op(op="read")
+    if not r or r.get("status") != "success":
+        return None
+    return "\n".join(" | ".join(str(c) for c in row).rstrip(" |") for row in (r.get("values") or []))
+
 # ---------- memory (จำบทสนทนาข้ามรีสตาร์ท) ----------
 chat_history = []
 
@@ -338,6 +378,9 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - add_planned: เงินที่คาดว่าจะต้องใช้ {"action":"add_planned","item":"อะไร","amount":ตัวเลข,"date":"YYYY-MM-DD หรือ null","note":""}
 - planned: ดูรายการที่คาดจะใช้
 - report: สรุปเดือนนี้ | pockets: สรุปกระเป๋าเงิน | port: พอร์ทเทรด
+- sched_link: นินส่งลิงก์ชีทตารางสอนมาให้ผูก {"action":"sched_link","url":"ลิงก์เต็ม","say":"..."}
+- sched_read: อ่านตารางสอนจริงจากชีท (นับคาบ x/y, ยอดค้าง, รอบชำระ) {"action":"sched_read","say":"..."}
+- sched_set: เขียนแก้ช่องในชีทสอน (เช่น นับคาบ D7 เป็น 5/12, สถานะจ่าย) {"action":"sched_set","cell":"D7","value":"5/12","say":"..."}
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -492,6 +535,20 @@ def handle(text):
             bal[k] = bal.get(k, 0) + (-x["amount"] if x["kind"] == "out" else x["amount"])
         lines = [f"{POCKETS.get(k, k)}: {v:+,.0f}" for k, v in bal.items()]
         reply = "กระเป๋าเงิน (ยอดสุทธิจากที่จด):\n" + "\n".join(lines or ["ยังไม่มีรายการ"])
+    elif a == "sched_link":
+        sid = sched_link(cmd.get("url", ""))
+        reply = (f"ผูกชีทตารางสอนแล้วครับ (id …{sid[-6:]}) เรียกอ่านได้เลย" if sid
+                 else "ลิงก์ชีทไม่ถูกต้องครับ ส่ง URL เต็มจาก Google Sheets มาใหม่")
+    elif a == "sched_read":
+        tbl = sched_table()
+        reply = ("ตารางสอนปัจจุบันจากชีท:\n" + tbl[:3500]) if tbl else \
+                "อ่านชีทไม่ได้ครับ — ยังไม่ได้ผูกลิงก์ (ส่งลิงก์ชีทมาให้ผูก) หรือสคริปต์เข้าถึงชีทไม่ได้"
+    elif a == "sched_set":
+        cell, val = str(cmd.get("cell", "")).strip(), cmd.get("value", "")
+        r = sched_op(op="write", cell=cell, value=val, sheet=cmd.get("sheet"))
+        ok = bool(r and r.get("status") == "success")
+        reply = (f"อัปเดตชีท {cell} = {val} เรียบร้อยครับ" if ok
+                 else f"เขียนชีท {cell} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})")
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
@@ -521,6 +578,27 @@ def daily_nudge(last_date):
         tg_send("พลูตัส เช้านี้ครับ:\n" + "\n".join(lines))
     return today
 
+def saturday_round():
+    """เสาร์หลัง 20:00 — อ่านชีทสอนแล้วให้พลูตัสตัดรอบสรุปให้นิน (วันละครั้ง)"""
+    now = datetime.now(TH)
+    if now.weekday() != 5 or now.hour < 20:
+        return
+    conf = _sched_conf()
+    if conf.get("last_sat") == now.strftime("%Y-%m-%d") or not students_ssid():
+        return
+    tbl = sched_table()
+    if not tbl:
+        _rlog("sat sched read fail"); return
+    conf["last_sat"] = now.strftime("%Y-%m-%d"); _sched_save(conf)
+    chat_history.append({"role": "user", "content": f"[ระบบ] ตารางสอนจากชีทเสาร์นี้:\n{tbl[:3000]}"})
+    save_memory()
+    reply = handle("ตัดรอบวันเสาร์: สรุปจากตารางในข้อความก่อน — ใครเรียนครบรอบคอร์ส (x/y เต็ม) "
+                   "ใครถึงรอบชำระคอร์สใหม่ ยอดที่ควรเข้ารอบนี้ และใครเหลือกี่ครั้ง — ตอบสั้นเป็นหมวดชัด")
+    if reply:
+        chat_history.append({"role": "assistant", "content": reply})
+        save_memory()
+        tg_send(reply)
+
 def main():
     if not PLUTUS_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         _rlog("missing PLUTUS_BOT_TOKEN or TELEGRAM_CHAT_ID"); return
@@ -530,6 +608,7 @@ def main():
     while True:
         try:
             nudge = daily_nudge(nudge)
+            saturday_round()
             # ผลงานที่วินทำเสร็จส่งกลับเข้า inbox — ให้พลูตัสรายงานนินต่อในบทบาทตัวเอง
             if os.path.exists(PLUTUS_INBOX):
                 try:

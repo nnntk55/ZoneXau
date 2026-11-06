@@ -114,6 +114,22 @@ function finRead() {
   return out;
 }
 
+function sheetOp(d) {
+  try {
+    const ss = SpreadsheetApp.openById(d.ssid);
+    const s = d.sheet ? ss.getSheetByName(d.sheet) : ss.getSheets()[0];
+    if (!s) return {status: "error", message: "no sheet " + d.sheet};
+    if (d.op === "write") {
+      if (d.cell) s.getRange(d.cell).setValue(d.value);
+      else if (Array.isArray(d.rows) && d.rows.length)
+        s.getRange(d.row || s.getLastRow() + 1, d.col || 1, d.rows.length, d.rows[0].length).setValues(d.rows);
+      return {status: "success", type: "sheet_op"};
+    }
+    const rng = d.range ? s.getRange(d.range) : s.getDataRange();
+    return {status: "success", type: "sheet_op", a1: rng.getA1Notation(), values: rng.getValues()};
+  } catch (e) { return {status: "error", message: String(e)}; }
+}
+
 function normBool(v, def) {
   if (v === true || v === false) return v;
   if (v === null || v === undefined || v === "") return def;
@@ -164,6 +180,12 @@ function doPost(e) {
     // === พลูตัส: ซิงก์ ledger การเงินทั้งก้อนขึ้นชีทแยก ===
     if (data && data.type === "finance_sync") {
       return ContentService.createTextOutput(JSON.stringify(financeSync(data)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // === พลูตัส: อ่าน/เขียนชีทใดๆ ที่สคริปต์เข้าถึงได้ (เช่น Students Schedule) ===
+    if (data && data.type === "sheet_op") {
+      return ContentService.createTextOutput(JSON.stringify(sheetOp(data)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
