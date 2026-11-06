@@ -4,7 +4,7 @@ loop 30 วิ: ดึงแท่ง MT5 หลาย TF → ประเมิ
 A=เช็กลิสต์บังคับ / B=เกตบังคับ+เครดิต / C=คะแนนเพดาน — จำลองไม้แยกบัญชีต่อโหมด
 + บัญชี "แผนล้าน" (lot ทวีตามตาราง) — บันทึก charts/midas_shadow.json
 ไม่ยิงออเดอร์จริง — อ่านอย่างเดียว"""
-import os, json, time
+import os, re, json, time
 import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env ก่อนอ่านค่า
 from datetime import datetime, timedelta, timezone
 import pandas as pd
@@ -136,7 +136,7 @@ def feat(df):
 
 
 def bias_eval(f):
-    """ชั้น 0: bias D1 (+W1 ประกอบ) → dir, mode, score A กลุ่มแรก"""
+    """ชั้น 0: เลือกทิศเองจาก D1 (+W1) + ประเมินความสุกของเทรนด์ → dir/mode/pts/late/mature"""
     d1, w1 = f.get("1d"), f.get("1w")
     if not d1:
         return {"dir": None, "mode": "none", "pts": 0, "why": "no D1"}
@@ -156,11 +156,27 @@ def bias_eval(f):
     if w1:  # W1 ประกอบครึ่งหนึ่ง
         if w1.get("trend") == "bull": bull += 5
         elif w1.get("trend") == "bear": bear += 5
+    # --- ความสุก/ความสายของเทรนด์ (นิน: ต้องไม่เข้าปลายเทรนด์) ---
+    m = re.search(r"(-?\d+\.?\d*)%", d1.get("vs_ema200") or "")
+    extend = abs(float(m.group(1))) if m else 0.0   # % ห่าง EMA200 D1
     if bull - bear >= 15:
-        return {"dir": "buy", "mode": "trend", "pts": bull, "why": f"D1 bull {bull} vs {bear}"}
-    if bear - bull >= 15:
-        return {"dir": "sell", "mode": "trend", "pts": bear, "why": f"D1 bear {bear} vs {bull}"}
-    return {"dir": None, "mode": "range", "pts": max(bull, bear), "why": f"D1 mixed {bull}/{bear}"}
+        d, pts, why = "buy", bull, f"D1 bull {bull} vs {bear}"
+    elif bear - bull >= 15:
+        d, pts, why = "sell", bear, f"D1 bear {bear} vs {bull}"
+    else:
+        return {"dir": None, "mode": "range", "pts": max(bull, bear),
+                "extend": extend, "why": f"D1 mixed {bull}/{bear}"}
+    # พูลแบ็คสุกงอมฝั่ง D1: sell→stoch D1 overbought หรือหันลงแล้ว / buy→oversold หรือหันขึ้น
+    d1_ready = (d1.get("stoch_zone") == "overbought" or d1.get("stoch_dir") == "ลง") if d == "sell" \
+        else (d1.get("stoch_zone") == "oversold" or d1.get("stoch_dir") == "ขึ้น")
+    # เทรนด์ยืดไกล EMA200 มากเกิน และยังไม่มีสัญญาณพูลแบ็คสุก = เข้าปลายเทรนด์เสี่ยงลากยาว
+    late = extend >= 6.0 and not d1_ready
+    if late:
+        why += f" | late:ยืด {extend:.1f}% จาก EMA200 ยังไม่สุก"
+    elif extend >= 6.0:
+        why += f" | ยืด {extend:.1f}% แต่พูลแบ็คสุก"
+    return {"dir": d, "mode": "trend", "pts": pts, "why": why,
+            "extend": extend, "mature": d1_ready, "late": late}
 
 
 def range_bias(price, zones):
@@ -295,6 +311,7 @@ def eval_setup(f, zones, price):
     b_size = 1.0 if (core and extras) else (0.5 if core else 0)   # core ผ่าน = เข้า (เครดิตเต็มถ้า extras ครบ)
     c_size = 1.0 if sc >= SCORE_FULL else (0.5 if sc >= SCORE_HALF else 0)
     return {"side": d, "why": b["why"], "mode": mode, "conds": conds, "form": form, "touches": touches,
+            "late": b.get("late", False),
             "zone": zone, "target": target, "sl_pts": round(sl_pts), "room_pts": round(room_pts),
             "score": sc, "a_ok": a_ok and room_ok, "b_size": b_size if room_ok else 0,
             "c_size": c_size if room_ok else 0, "price": price}
@@ -406,7 +423,7 @@ def main():
                 st = eval_setup(f, zones, price)
                 st["price"] = f["5m"].get("c2_close", price)  # เข้าที่ราคาปิดแท่ง M5
                 blocked = news_blocked()
-                veto = st["conds"].get("h1_rev")    # สัญญาณกลับตัว H1 = บล็อกแข็งเหมือนข่าว ครอบทุกโหมด
+                veto = st["conds"].get("h1_rev") or st.get("late")   # กลับตัว H1 / ปลายเทรนด์ = บล็อกแข็งครอบทุกโหมด
                 if st["side"] and not blocked and not veto:
                     try_enter(st_led["A"], st, "A", 1.0 if st["a_ok"] else 0)
                     try_enter(st_led["B"], st, "B", st["b_size"])
@@ -414,7 +431,7 @@ def main():
                 elif st["side"] and blocked:
                     print(f"[{now_th():%H:%M}] setup {st['side']} แต่ข่าว {blocked['title']} บล็อก")
                 elif st["side"] and veto:
-                    print(f"[{now_th():%H:%M}] setup {st['side']} แต่ H1 กลับตัวสด บล็อก")
+                    print(f"[{now_th():%H:%M}] setup {st['side']} แต่บล็อก ({'H1 กลับตัว' if st['conds'].get('h1_rev') else 'ปลายเทรนด์'})")
             os.makedirs(CHART_DIR, exist_ok=True)
             tmp = STATE_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fo:
