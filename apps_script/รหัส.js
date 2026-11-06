@@ -124,13 +124,19 @@ function sheetOp(d) {
       return {status: "success", type: "sheet_op"};
     }
     if (d.op === "write") {
-      if (d.cell) s.getRange(d.cell).setValue(d.value);
+      if (d.cell) {
+        const r = s.getRange(d.cell);
+        if (d.value !== undefined) r.setValue(d.value);
+        if (d.bg) r.setBackground(d.bg);
+      }
       else if (Array.isArray(d.rows) && d.rows.length)
         s.getRange(d.row || s.getLastRow() + 1, d.col || 1, d.rows.length, d.rows[0].length).setValues(d.rows);
       return {status: "success", type: "sheet_op"};
     }
     const rng = d.range ? s.getRange(d.range) : s.getDataRange();
-    return {status: "success", type: "sheet_op", a1: rng.getA1Notation(), values: rng.getValues()};
+    const out = {status: "success", type: "sheet_op", a1: rng.getA1Notation(), values: rng.getValues()};
+    if (d.with_bg) out.bgs = rng.getBackgrounds();
+    return out;
   } catch (e) { return {status: "error", message: String(e)}; }
 }
 

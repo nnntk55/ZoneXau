@@ -196,9 +196,17 @@ def sched_table():
         return None
     return "\n".join(" | ".join(str(c) for c in row).rstrip(" |") for row in (r.get("values") or []))
 
+def _is_green(hexbg):
+    try:
+        h = str(hexbg).lstrip("#")
+        r_, g_, b_ = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return g_ >= r_ and g_ >= b_ and g_ > 100
+    except Exception:
+        return False
+
 def sched_rows():
-    """แถวนักเรียนจากชีท: {row, time, name, price, x, y} — x/y = คาบที่เรียน/ความยาวคอร์ส"""
-    r = sched_op(op="read")
+    """แถวนักเรียนจากชีท: {row, time, name, price, x, y, paid} — x/y = คาบที่เรียน/ความยาวคอร์ส"""
+    r = sched_op(op="read", with_bg=1)
     if not r or r.get("status") != "success":
         return []
     out = []
@@ -212,10 +220,33 @@ def sched_rows():
             price = float(str(row[2]) or 0)
         except ValueError:
             price = 0.0
+        bgs = r.get("bgs") or []
+        bg_e = bgs[i - 1][4] if len(bgs) >= i and len(bgs[i - 1]) > 4 else ""
         out.append({"row": i, "time": str(row[0]), "name": str(row[1]).strip(),
                     "price": price, "x": int(m.group(1)), "y": int(m.group(2)),
-                    "paid": str(row[4]) if len(row) > 4 else ""})
+                    "paid": _is_green(bg_e) or ("ชำระ" in str(row[4]) and "ยัง" not in str(row[4]))
+                    if len(row) > 4 else _is_green(bg_e)})
     return out
+
+def sched_pay(name, paid=True):
+    """เปลี่ยนสถานะชำระ + สีเซลล์ E (เขียว=จ่ายแล้ว/แดง=ยัง) และปิด/เปิดค้างใน ledger"""
+    vals = _sched_raw()
+    for i, row in enumerate(vals, start=1):
+        if len(row) > 1 and str(name).strip() and str(name).strip() in str(row[1]):
+            r = sched_op(op="write", cell=f"E{i}",
+                         value="ชำระแล้ว" if paid else "ยังไม่ชำระ",
+                         bg="#00ff00" if paid else "#ff0000")
+            if not (r and r.get("status") == "success"):
+                return f"เขียนสถานะชำระ E{i} ไม่สำเร็จครับ ({(r or {}).get('message', 'no response')})"
+            d = _load(); changed = False
+            for p in d["payables"]:
+                if p.get("who") == row[1] and not p.get("paid") and paid:
+                    p["paid"] = True; changed = True
+            if changed:
+                _save(d)
+            return (f"{row[1]} ปรับเป็น 'ชำระแล้ว' (เขียว) ปิดใบเรียกเก็บให้แล้วครับ" if paid
+                    else f"{row[1]} ปรับเป็น 'ยังไม่ชำระ' (แดง) แล้วครับ")
+    return f"หา '{name}' ในชีทไม่เจอครับ"
 
 def _sched_raw():
     r = sched_op(op="read")
@@ -472,6 +503,7 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 - sched_tick: ติ๊กคาบเรียน +1 (เสาร์สอนเสร็จ) {"action":"sched_tick","who":"ชื่อ หรือ all","say":"..."} — ครบรอบคอร์สระบบจดค้างชำระให้เอง
 - sched_add: เพิ่มนักเรียนใหม่ {"action":"sched_add","time":"16:00","name":"ชื่อ","price":ตัวเลข,"xy":"0/12","note":""}
 - sched_del: เอานักเรียนออก {"action":"sched_del","name":"ชื่อ"}
+- sched_pay: เปลี่ยนสถานะชำระ+สีเซลล์ (เขียว=จ่ายแล้ว/แดง=ยัง) {"action":"sched_pay","name":"ชื่อ","paid":true|false}
 - devin: ส่งงาน/เรื่องให้วิน (ผู้พัฒนาระบบ) {"action":"devin","task":"..."}
 - midas: ส่งข้อความถึงมิดาส (ผู้ช่วยเทรด) {"action":"midas","msg":"..."}
 - ask: ข้อมูลไม่พอ ต้องถามก่อน {"action":"ask","reply":"คำถาม"}
@@ -647,6 +679,8 @@ def handle(text):
                           cmd.get("price", 0), cmd.get("xy", "0/12"), cmd.get("note", ""))
     elif a == "sched_del":
         reply = sched_del(cmd.get("name", ""))
+    elif a == "sched_pay":
+        reply = sched_pay(cmd.get("name", ""), bool(cmd.get("paid", True)))
     elif a == "devin":
         task = cmd.get("task", "")
         reply = "ส่งงานให้วินแล้วครับ เดี๋ยววินหยิบไปทำ" if send_to_devin(task) else "ส่งงานให้วินไม่สำเร็จครับ"
