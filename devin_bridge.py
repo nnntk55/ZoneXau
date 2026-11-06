@@ -94,9 +94,12 @@ def tg_image_attachment(msg, local=False):
         print(f"photo upload err: {e}")
         return None
 
+_LAST_SEND = [0.0]  # เวลาที่วินส่งข้อความหานินล่าสุด (ใช้คำนวณว่านินตอบเร็ว/ช้าแค่ไหน)
+
 def send(text):
     for i in range(0, len(text), 4000):
         tg("sendMessage", chat_id=CHAT, text=text[i:i + 4000])
+    _LAST_SEND[0] = time.time()
 
 def load_state():
     try:
@@ -657,6 +660,12 @@ def main():
                 if str(msg.get("chat", {}).get("id")) != str(CHAT):
                     continue
                 text = (msg.get("text") or msg.get("caption") or "").strip()
+                tag = ""
+                if _LAST_SEND[0] and msg.get("date"):
+                    gap = max(0, int(msg["date"] - _LAST_SEND[0]))
+                    tag = (f"[นินตอบเร็ว ({gap} วิ)] " if gap < 300
+                           else f"[นินตอบหลังวิน {gap // 60} นาที] " if gap < 3600
+                           else f"[นินทักหลังเงียบไป {gap // 3600} ชม.] ")
                 is_voice = bool(msg.get("voice") or msg.get("audio"))
                 is_video = bool(msg.get("video") or msg.get("video_note"))
                 mime = str((msg.get("document") or {}).get("mime_type", ""))
@@ -704,7 +713,7 @@ def main():
                           "/auto": "โหมดอัตโนมัติ: ใช้ local บน VPS ก่อนเสมอ (ประหยัด) งานที่ต้องใช้ cloud หรือ local ใช้ไม่ได้ วินส่งต่อให้ cloud เอง"}[text])
                     continue
                 # รวมข้อความที่พิมพ์ติดๆ กันเป็นก้อนเดียว ปลุกวินครั้งเดียว (ประหยัดโควต้า)
-                st.setdefault("pending", []).append(text)
+                st.setdefault("pending", []).append(tag + text if tag else text)
                 last_in = time.time()
                 save_state(st)
             if st.get("pending") and time.time() - last_in >= BATCH_WAIT and time.time() >= retry_at:
