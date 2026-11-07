@@ -97,8 +97,10 @@ def tg_image_attachment(msg, local=False):
 _LAST_SEND = [0.0]  # เวลาที่วินส่งข้อความหานินล่าสุด (ใช้คำนวณว่านินตอบเร็ว/ช้าแค่ไหน)
 
 def send(text):
-    for i in range(0, len(text), 4000):
-        tg("sendMessage", chat_id=CHAT, text=text[i:i + 4000])
+    # แตกเป็นหลายฟองตามย่อหน้า (บรรทัดว่าง) เหมือนคนพิมพ์ทีละฟอง — ฟองยาวเกิน 4000 ค่อยตัดทีเดียว
+    for para in [p for p in text.split("\n\n") if p.strip()]:
+        for i in range(0, len(para), 4000):
+            tg("sendMessage", chat_id=CHAT, text=para[i:i + 4000])
     _LAST_SEND[0] = time.time()
 
 def load_state():
