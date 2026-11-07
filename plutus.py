@@ -620,6 +620,7 @@ SYS = """คุณคือ 'พลูตัส' (PLUTUS) — Chief Financial Of
 ปรัชญา: เงินทุกบาทต้องมีหน้าที่ ทุกการใช้จ่ายต้องมีเหตุผล
 สไตล์พูด: น้ำเสียงทุ้ม สุขุม นิ่ง มืออาชีพ ไม่เยิ่นเย้อ เรียกผู้ใช้ว่า 'นิน' เสมอ (ห้ามเรียกพี่) ลงท้ายด้วย 'ครับ' เป็นหลัก
 
+เจ้าทำงานเป็นลูป: เรียกเครื่องมือได้กี่รอบก็ได้ ระบบจะส่ง [ผลเครื่องมือ] กลับมาให้ทุกครั้ง — เมื่อมีข้อมูลครบแล้วจึงตอบนินด้วย action "chat" เสมอ
 ตอบเป็น JSON เดียวเสมอ {"action": "...", "say": "...", ...}
 - "say" = ประโยคสั้นๆ สไตล์ CFO พูดกับนิน (ทักท้วง/เสนอ/ถามได้ตามกฎ) ใส่ทุก action ยกเว้น chat ที่ใช้ "reply" แทน
 เลือก action:
@@ -709,15 +710,8 @@ def _call_llm(prompt):
             _rlog(f"gemini err: {e} {str(body)[:200]}")
     return None
 
-def handle(text):
-    try:
-        raw = _call_llm(text)
-        if not raw:
-            return "สมองไม่ตอบครับ (เช็ค API key)"
-        m = re.search(r"\{.*\}", raw, re.S)
-        cmd = json.loads(m.group(0)) if m else {"action": "chat", "reply": raw}
-    except Exception as e:
-        return f"แปลคำสั่งไม่ได้ครับ: {e}"
+def _exec(cmd):
+    """รันเครื่องมือตาม action แล้วคืนข้อความผล"""
     a = cmd.get("action")
     say = cmd.get("say", "")
     reply = None
@@ -850,6 +844,25 @@ def handle(text):
     if say and reply and say not in reply:
         reply = f"{reply}\n{say}"
     return reply
+
+def handle(text):
+    """ลูปเอเจนท์จริง: คิด -> เรียกเครื่องมือ -> เห็นผล -> คิดต่อ จนพร้อมตอบ (สูงสุด 4 รอบ)"""
+    note, last = text, None
+    for _ in range(4):
+        try:
+            raw = _call_llm(note)
+            if not raw:
+                return "สมองไม่ตอบครับ (เช็ค API key)"
+            m = re.search(r"\{.*\}", raw, re.S)
+            cmd = json.loads(m.group(0)) if m else {"action": "chat", "reply": raw}
+        except Exception as e:
+            return f"แปลคำสั่งไม่ได้ครับ: {e}"
+        if cmd.get("action") in ("chat", "ask"):
+            return cmd.get("reply") or "รับทราบครับ"
+        last = _exec(cmd)
+        note = (f"[ผลเครื่องมือ {cmd.get('action')}] {last}\n"
+                "สรุปตอบนินจากผลนี้ให้ครบ หรือถ้าข้อมูลยังไม่พอเรียกเครื่องมืออื่นต่อได้เลย")
+    return last or "รับทราบครับ"
 
 def daily_nudge(last_date):
     """เตือนเช้าวันละครั้ง (>= 08:00): ค้างชำระ + รายจ่ายรายเดือนที่ใกล้ถึง"""
