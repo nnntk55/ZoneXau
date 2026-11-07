@@ -205,11 +205,15 @@ def sched_op(**kw):
     kw["type"] = "sheet_op"; kw.setdefault("ssid", students_ssid())
     if not kw["ssid"]:
         return {"status": "error", "message": "ยังไม่ได้ผูกชีท"}
-    try:
-        return requests.post(GOOGLE_SCRIPT_URL, json=kw, timeout=25).json()
-    except Exception as e:
-        _rlog(f"sched err: {e}")
-        return None
+    for attempt in range(3):
+        try:
+            return requests.post(GOOGLE_SCRIPT_URL, json=kw, timeout=25).json()
+        except Exception as e:
+            if attempt == 2:
+                _rlog(f"sched err: {e}")
+            else:
+                time.sleep(4 * (attempt + 1))
+    return None
 
 def sched_table():
     r = sched_op(op="read")
