@@ -207,7 +207,7 @@ def sched_op(**kw):
         return {"status": "error", "message": "ยังไม่ได้ผูกชีท"}
     for attempt in range(3):
         try:
-            return requests.post(GOOGLE_SCRIPT_URL, json=kw, timeout=25).json()
+            return requests.post(GOOGLE_SCRIPT_URL, json=kw, timeout=60).json()
         except Exception as e:
             if attempt == 2:
                 _rlog(f"sched err: {e}")
