@@ -516,7 +516,8 @@ def check_reminders(st):
             continue
         notified = st.setdefault("rem_notified", [])
         if rid not in notified:
-            send(it.get("text") or "ถึงเวลานัดของวินแล้ว กำลังปลุกวินมาทำต่อ")
+            if it.get("text"):
+                send(it["text"])  # เฉพาะตัวที่มีข้อความให้ส่งจริง — ตัวที่มีแต่ devin (เช่น spontaneity) เงียบ ไม่โชว์กลไกให้นิน
             notified.append(rid); del notified[:-50]
             save_state(st)
         if it.get("devin"):
