@@ -64,6 +64,8 @@ def tg_image_attachment(msg, local=False):
         fid, name = msg["voice"]["file_id"], "voice.ogg"
     elif msg.get("audio"):
         fid, name = msg["audio"]["file_id"], msg["audio"].get("file_name") or "audio.mp3"
+    elif doc.get("file_id"):
+        fid, name = doc["file_id"], doc.get("file_name") or "file.bin"
     else:
         return None
     try:
@@ -575,15 +577,6 @@ def check_midas_reminders(st):
         except Exception as e:
             print(f"midas reminders write err: {e}")
 
-def check_agent_bus(st):
-    """กล่องจดหมายของวิน (charts/bus/win.jsonl) — เอเจนท์ตัวอื่นส่งมาหา ส่งเข้า session เป็น [BUS]"""
-    try:
-        import agent_bus
-        for bm in agent_bus.bus_poll("win"):
-            deliver(st, f"[BUS จาก {bm['from']}] {bm['text']}")
-    except Exception as e:
-        print(f"bus err: {e}")
-
 MIDAS_TASK_DIR = os.getenv("DEVIN_TASK_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_tasks")
 
 def check_midas_tasks(st):
@@ -682,16 +675,18 @@ def main():
                 is_voice = bool(msg.get("voice") or msg.get("audio"))
                 is_video = bool(msg.get("video") or msg.get("video_note"))
                 mime = str((msg.get("document") or {}).get("mime_type", ""))
-                if is_voice or is_video or msg.get("photo") or mime.startswith(("image/", "video/")):
+                if is_voice or is_video or msg.get("photo") or mime.startswith(("image/", "video/")) or (msg.get("document") or {}).get("file_id"):
                     att = tg_image_attachment(msg, local=route(st) == "local")
-                    what = "เสียง" if is_voice else "วิดีโอ" if is_video or mime.startswith("video/") else "รูป"
+                    what = "เสียง" if is_voice else "วิดีโอ" if is_video or mime.startswith("video/") else "ไฟล์" if (msg.get("document") or {}).get("file_id") and not mime.startswith("image/") else "รูป"
                     if att:
                         text = (text or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
                                          else "นินส่งวิดีโอมา แตกเฟรมด้วย vidframes.py แล้ววิเคราะห์" if is_video or mime.startswith("video/")
+                                         else "นินส่งไฟล์มา เก็บไว้แล้ว เปิดดูเนื้อในได้ตามประเภท" if (msg.get("document") or {}).get("file_id") and not mime.startswith("image/")
                                          else "นินส่งรูปมา เปิดดูและวิเคราะห์")) + "\n" + att
                         send(att.split("\n")[0].replace("ถอดเสียงที่นินพูด:", "วินได้ยินว่า:") if att.startswith("ถอดเสียง")
                          else "ได้เสียงแล้ว วินกำลังฟัง" if is_voice
                          else "ได้วิดีโอแล้ว วินกำลังแตกเฟรมดู" if is_video or mime.startswith("video/")
+                         else "ได้ไฟล์แล้ว วินกำลังเปิดดู" if (msg.get("document") or {}).get("file_id") and not mime.startswith("image/")
                          else "ได้รูปแล้ว วินกำลังดู")
                     else:
                         send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
@@ -794,7 +789,6 @@ def main():
                 last_rem = time.time()
                 check_reminders(st)
                 check_midas_reminders(st)
-                check_agent_bus(st)
             time.sleep(2)
         except Exception as e:
             _rlog(f"loop err: {e}")
