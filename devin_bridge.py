@@ -465,7 +465,8 @@ def local_tick(st):
     """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
     if LOCAL["busy"]:
         q = st.get("local_q") or []
-        if q and not LOCAL.get("notified"):
+        if q and not LOCAL.get("notified") and _busy_min() >= 3:
+            # เตือนเฉพาะตอนทำงานนานจริง — คำตอบเร็วๆ ไม่ต้องเด้งสแปมทุกข้อความ
             LOCAL["notified"] = True
             send(f"วินยังทำงานก่อนหน้าอยู่ ({_busy_min()} นาทีแล้ว) ข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที\n"
                  "/status ดูสถานะ  /stop หยุดงานที่ค้างแล้วทำข้อความใหม่")
