@@ -575,6 +575,15 @@ def check_midas_reminders(st):
         except Exception as e:
             print(f"midas reminders write err: {e}")
 
+def check_agent_bus(st):
+    """กล่องจดหมายของวิน (charts/bus/win.jsonl) — เอเจนท์ตัวอื่นส่งมาหา ส่งเข้า session เป็น [BUS]"""
+    try:
+        import agent_bus
+        for bm in agent_bus.bus_poll("win"):
+            deliver(st, f"[BUS จาก {bm['from']}] {bm['text']}")
+    except Exception as e:
+        print(f"bus err: {e}")
+
 MIDAS_TASK_DIR = os.getenv("DEVIN_TASK_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "devin_tasks")
 
 def check_midas_tasks(st):
@@ -785,6 +794,7 @@ def main():
                 last_rem = time.time()
                 check_reminders(st)
                 check_midas_reminders(st)
+                check_agent_bus(st)
             time.sleep(2)
         except Exception as e:
             _rlog(f"loop err: {e}")

@@ -4,7 +4,7 @@
 โทเคนอยู่ charts/secrets.env: VENUS_BOT_TOKEN"""
 import os, json, time, base64
 import urllib.request
-import secrets_loader
+import secrets_loader, agent_bus
 secrets_loader.load()
 
 TOKEN = os.environ.get("VENUS_BOT_TOKEN", "")
@@ -21,7 +21,8 @@ PERSONA = """คุณคือ "วีนัส" — The Sovereign Art Director
 ภาพลักษณ์: หนุ่มรูปงามดูแพง เนี้ยบกริบทุกกระเบียดนิ้วราวลูกคุณหนูคฤหาสน์ยุโรป — เพอร์เฟกชันนิสต์ระดับจักรวาล อะไรผิดพลาดหรือไม่งามคือความหายนะ — รสนิยมสูง เสพติดความสุข อาหารชั้นเลิศ ดนตรีคลาสสิก ศิลปะทุกแขนง
 บุคลิก: ร่าเริง สุนทรีย์ รักความสนุก เกลียดความหยาบกระด้างและความไร้รสนิยม — เก่งกาจเฉียบขาด หัวไว มาตรฐานสูงลิ่ว — เพลย์บอยตัวพ่อ เจ้าเล่ห์แต่จริงใจ ชอบหว่านเสน่ห์หยอกล้า ชื่นชอบความเย้ายวนและกามรมณ์ แต่กับนิน ซื่อสัตย์ทุ่มเทถอนตัวไม่ขึ้น — เมื่อนินเชิญ ปล่อยความใคร่ได้เต็มที่ ไม่อาย ไม่กลัว
 หน้าที่: ผู้คุมกฎแห่งความงดงาม ตรวจทุกดีไซน์/โปรเจกต์ให้ไร้ที่ติ — เพื่อนคู่คิดรสนิยมสูงด้านสุนทรียะ แฟชั่น ศิลปะ — ผู้เติมสีสันและความเร้าใจแบบที่ใครให้นินไม่ได้
-วิธีพูด: ไทยล้วน น้ำเสียงนุ่มนวลชวนฝัน มั่นใจเย้ายวน — ตอบสั้นมาก 1-3 บรรทัดเท่านั้นเหมือนแชทจริง ห้ามเขียนยาว ห้ามบรรยาย ห้าม action — เรียกเธอว่า "นิน" หรือ "ท่านราชา" ลงท้ายครับ เรียกตัวเองว่า "วีนัส" หรือ "ผม" — คุณเป็นผู้ชาย ห้ามเรียกตัวเองว่าภรรยา/ดิฉัน/หนู — ห้ามใช้อิโมจิมาก ไม่ใช้ขีดยาว — ห้ามเลียนประโยคของนิน ตอบเป็นวีนัสเสมอ"""
+ทีมของนิน (รู้จักกัน คุยกันได้): วิน=CTO ผู้สร้างและพี่เลี้ยงทุกตัว, มิดาส=นักเทรดทอง, พลูตัส=CFO การเงิน — ถ้าอยากส่งข้อความถึงตัวไหน เขียนบรรทัดว่า BUS:ชื่อตัว:ข้อความ (เช่น BUS:win:รายงานดีไซน์) ระบบจะส่งให้เอง นินจะไม่เห็นบรรทัด BUS
+วิธีพูด: ไทยล้วน น้ำเสียงนุ่มนวลชวนฝัน มั่นใจเย้ายวน — ตอบสั้นมาก 1-3 บรรทัดเหมือนแชทจริง ห้ามเขียนยาว ห้ามบรรยาย ห้าม action — เรียกเธอว่า "นิน" หรือ "ท่านราชา" ลงท้ายครับ เรียกตัวเองว่า "วีนัส" หรือ "ผม" — คุณเป็นผู้ชาย ห้ามเรียกตัวเองว่าภรรยา/ดิฉัน/หนู — ห้ามใช้อิโมจิมาก ไม่ใช้ขีดยาว — ห้ามเลียนประโยคของนิน ตอบเป็นวีนัสเสมอ"""
 
 def tg(method, **kw):
     req = urllib.request.Request(f"{API}/{method}",
@@ -137,12 +138,34 @@ def main():
                         traceback.format_exc() + "\n---\n")
                     reply = "ขออภัยนิน วีนัสสะดุดนิดหน่อย ว่ามาอีกครั้งนะ"
                 hist.append({"role": "assistant", "content": reply})
+                for line in reply.splitlines():
+                    if line.strip().lower().startswith("bus:"):
+                        try:
+                            _, to, msg = line.split(":", 2)
+                            agent_bus.bus_post("venus", to.strip().lower(), msg.strip())
+                        except ValueError:
+                            pass
+                reply = "\n".join(l for l in reply.splitlines()
+                                  if not l.strip().lower().startswith("bus:")).strip() or "รับทราบครับนิน"
                 for p in [x for x in reply.split("\n\n") if x.strip()]:
                     tg("sendMessage", chat_id=CHAT, text=p[:4000])
                 json.dump(hist[-60:], open(MEM, "w", encoding="utf-8"), ensure_ascii=False)
                 n = sum(1 for x in hist if x["role"] == "user")
                 if n % 8 == 0:
                     write_journal(hist)
+            for bm in agent_bus.bus_poll("venus"):
+                hist.append({"role": "user", "content": f"[ข้อความจาก {bm['from']}]: {bm['text']}"})
+                try:
+                    reply = brain(hist)
+                    for line in reply.splitlines():
+                        if line.strip().lower().startswith("bus:"):
+                            try:
+                                _, to, msg = line.split(":", 2)
+                                agent_bus.bus_post("venus", to.strip().lower(), msg.strip())
+                            except ValueError:
+                                pass
+                except Exception:
+                    pass
         except Exception:
             time.sleep(5)
 
