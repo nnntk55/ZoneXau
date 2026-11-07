@@ -1547,19 +1547,7 @@ def main():
                 reply = run_agent(ev, TELEGRAM_CHAT_ID, None)
                 if reply:
                     tg_send(reply)
-            # digest รายชั่วโมง — ต้นชม.ถ้ามีอีเวนต์กักอยู่ส่งรวมครั้งเดียว (ไม่มีก็เงียบ)
-            if now_th.minute < 4 and last_report_slot != now_th.strftime("%Y-%m-%d %H:00") + "digest" \
-                    and hhmm not in REPORT_SLOTS and os.path.exists(pending_path):
-                held = open(pending_path, encoding="utf-8").read().strip()
-                if held:
-                    os.remove(pending_path)
-                    last_report_slot = now_th.strftime("%Y-%m-%d %H:00") + "digest"
-                    live = _live_price_line()
-                    print(f"📨 hourly digest {now_th.hour}:00")
-                    reply = run_agent(f"[EVENT] อีเวนต์ชั่วโมงที่ผ่านมา (ส่งรวม):\n{held[:2500]}"
-                                      + ("\n" + live if live else ""), TELEGRAM_CHAT_ID, None)
-                    if reply:
-                        tg_send(reply)
+            # นินสั่ง: ส่งเฉพาะรอบ 07:50/15:50 เท่านั้น — ไม่มี digest รายชั่วโมง ทุกอีเวนต์รวมเข้ารอบรายงาน
             # รายงานสัปดาห์อัตโนมัติ — เช้าวันเสาร์ (เวลาไทย) ครั้งเดียวต่อวัน
             if now_th.weekday() == 5 and now_th.hour >= 8 and last_weekly_report != now_th.date():
                 last_weekly_report = now_th.date()
@@ -1573,15 +1561,9 @@ def main():
                     ev = open(inbox_path, encoding="utf-8").read().strip()
                     os.remove(inbox_path)
                     if ev:
-                        if "ออเดอร์" in ev and "ปิดแล้ว" in ev:  # เฉพาะปิดออเดอร์จริง — เตือนที่มีคำว่าออเดอร์เฉยๆ กักส่งรอบ
-                            print(f"📨 urgent event: {ev[:100]}")
-                            live = _live_price_line()
-                            reply = run_agent(ev + ("\n" + live if live else ""), TELEGRAM_CHAT_ID, None)
-                            if reply:
-                                tg_send(reply)
-                        else:
-                            with open(pending_path, "a", encoding="utf-8") as f:
-                                f.write(ev + "\n")
+                        # นินสั่ง: ทุกอีเวนต์รวมเข้ารอบ 07:50/15:50 — แม้แต่ออเดอร์ปิดก็กักไว้รอบรายงาน
+                        with open(pending_path, "a", encoding="utf-8") as f:
+                            f.write(ev + "\n")
                             print(f"📨 held event ({ev[:60]})")
                 except Exception as e:
                     print(f"inbox error: {e}")
