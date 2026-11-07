@@ -59,6 +59,27 @@ def tg_get_updates(offset):
     except Exception:
         return []
 
+def transcribe_voice(msg):
+    """ถอดข้อความเสียง voice/audio ด้วย Groq Whisper"""
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        return ""
+    try:
+        fid = (msg.get("voice") or msg.get("audio"))["file_id"]
+        fp = requests.get(f"https://api.telegram.org/bot{PLUTUS_BOT_TOKEN}/getFile",
+                          params={"file_id": fid}, timeout=15).json().get("result", {}).get("file_path")
+        if not fp:
+            return ""
+        data = requests.get(f"https://api.telegram.org/file/bot{PLUTUS_BOT_TOKEN}/{fp}", timeout=60).content
+        r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                          headers={"Authorization": f"Bearer {key}"},
+                          files={"file": ("voice.ogg", data)},
+                          data={"model": "whisper-large-v3", "language": "th"}, timeout=120)
+        return (r.json().get("text") or "").strip()
+    except Exception as e:
+        print(f"stt err: {e}")
+        return ""
+
 def save_attachment(msg):
     """รูป/เอกสารจากนิน → ดาวน์โหลดเก็บ charts/plutus_files/<วันที่>/<เวลา>_<ชื่อ> คืน path หรือ None"""
     try:
@@ -897,6 +918,8 @@ def main():
                 text = (msg.get("text") or "").strip()
                 if str(msg.get("chat", {}).get("id")) != str(TELEGRAM_CHAT_ID):
                     continue
+                if not text and (msg.get("voice") or msg.get("audio")):
+                    text = transcribe_voice(msg)
                 if not text:
                     saved = save_attachment(msg)
                     if saved:

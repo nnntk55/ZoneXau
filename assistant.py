@@ -1278,6 +1278,26 @@ def openrouter_call():
             continue
     return None
 
+def tg_transcribe_voice(msg):
+    """ถอดข้อความเสียง voice/audio ด้วย Groq Whisper"""
+    if not GROQ_API_KEY:
+        return ""
+    try:
+        fid = (msg.get("voice") or msg.get("audio"))["file_id"]
+        fp = requests.get(f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/getFile",
+                          params={"file_id": fid}, timeout=15).json().get("result", {}).get("file_path")
+        if not fp:
+            return ""
+        data = requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{fp}", timeout=60).content
+        r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                          headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                          files={"file": ("voice.ogg", data)},
+                          data={"model": "whisper-large-v3", "language": "th"}, timeout=120)
+        return (r.json().get("text") or "").strip()
+    except Exception as e:
+        print(f"stt err: {e}")
+        return ""
+
 def tg_download_photo(file_id):
     r = requests.get(f"https://api.telegram.org/bot{ASSISTANT_BOT_TOKEN}/getFile?file_id={file_id}", timeout=15).json()
     path = r.get("result", {}).get("file_path")
@@ -1572,7 +1592,11 @@ def main():
                 msg = upd.get("message") or {}
                 chat_id = msg.get("chat", {}).get("id")
                 text = (msg.get("text") or "").strip()
-                if not text or str(chat_id) != str(TELEGRAM_CHAT_ID):
+                if str(chat_id) != str(TELEGRAM_CHAT_ID):
+                    continue
+                if not text and (msg.get("voice") or msg.get("audio")):
+                    text = tg_transcribe_voice(msg)
+                if not text and not msg.get("photo"):
                     continue
                 # คิวรอยืนยัน (โหมด REQUIRE_CONFIRM)
                 if pending_confirm["action"] and text.lower() in ("y", "n"):
