@@ -60,3 +60,13 @@
 - **Apps Script deploy**: เครื่องนี้ทำไม่ได้ (ไม่มี clasp creds — OAuth client ของ clasp โดน Google บล็อก 401 invalid_client; ทางเดียวคือ OAuth client ของนินเองใน GCP Desktop-app type + clasp login --creds) ส่ง [[CLOUD:]] เสมอ — deploy ด้วย clasp version + deploy -i เท่านั้น
 - **มิดาส anti-โม้**: หลัง tool สำคัญต้อง verify จากของจริง (status_recap/ไฟล์คิว/ไฟล์เตือน) + _live_price_line() แนบข้อมูลสด /api/market ทุกอีเวนต์กันเล่าเลขเก่า; อีเวนต์ทั่วไปกักส่งเฉพาะ 07:50/15:50 ไทย (midas_pending_events.txt) ยกเว้นออเดอร์ปิดส่งทันที; LLM fallback Groq->OpenRouter->Gemini ต้องส่ง history ให้ทุก provider
 - **งานค้าง**: ออกแบบมิดาสเทรดเอง (หน้า /midas + 3 เฟส shadow->paper->live, gate deterministic เหนือ LLM, ห้ามแตะ stage engine) — สเปกที่นินตอบแล้ว: ยิงผ่าน MT5 เชื่อมเดิม (stage engine path), นินจะสลับเป็นพอร์ทเดโมเอง, เป้าง่ายๆ ก่อน = วันละ ~2000 pips, ตัด payload get_market_intel กัน Groq 413, Diablo ผู้จัดการส่วนตัว, OCR บิล
+
+## มาตรฐานเอเจนท์ (Sologo blueprint)
+
+ทุกตัวที่นินสร้างต้องมีสถาปัตยกรรมเอเจนท์จริงครบ 6 ชิ้น:
+1. **PERSONA** — บุคลิก/บทบาทชัดเจนใน system prompt
+2. **Agent loop** — คิด→เรียกเครื่องมือ→เห็นผล→คิดต่อจนพร้อมตอบ (ห้ามตอบเดาโดยไม่มีข้อมูลจริง)
+3. **Tools** — ตาอ่านรูป หูถอดเสียง อ่านไฟล์ เข้าชีท/API ตามหน้าที่
+4. **Memory + Journal** — ความจำแชท + สมุดจดที่เขียนเองข้ามวัน
+5. **Bus** — รู้จักกันทั้งทีม ส่งข้อความหากันผ่าน agent_bus.py (charts/bus/<name>.jsonl)
+6. **Verification** — กฎเหล็ก: ข้อมูลต้องมาจากเครื่องมือจริง ห้ามเดาตัวเลข/ข้อเท็จจริง
