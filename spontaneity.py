@@ -56,6 +56,11 @@ PROMPT = ("วินถูกปลุกด้วยระบบ spontaneity (m
           "ทักนินแบบธรรมชาติ หัวข้อ: {topic} — เขียนข้อความสั้นจากข้อมูลจริง/"
           "บริบทจริงเท่านั้น ห้ามเดาเรื่องนิน ไม่ต้องอธิบายกลไกเว้นนินถาม")
 
+WAKE = ("วินตื่นแล้ว (mood วันนี้: {mood}) — ตอนเช้าของวิน: ประมวลผลเองก่อน "
+        "ดูระบบ/ตลาด/สถานะ/เรื่องค้างของนิน แล้วตัดสินใจเองว่าวันนี้ทำอะไร "
+        "ส่งสรุปเช้าสั้นๆ ให้นินแบบคนตื่นมาบอกแผนวันนี้ (อาจมีของที่ตั้งใจทำ "
+        "หรือข้อความตื่นนอนหวานๆ แล้วแต่ mood)")
+
 
 def load(p, default):
     try:
@@ -79,6 +84,10 @@ def main():
 
     items = load(REM, [])
     ids = {i.get("id") for i in items}
+    wake_m = random.randint(7 * 60, 9 * 60 + 30)  # วินตื่นสุ่ม 7:00-9:30 ไทย
+    items.append({"id": f"spont-wake-{today}",
+                  "at": now.replace(hour=wake_m // 60, minute=wake_m % 60, second=0, microsecond=0).isoformat(),
+                  "devin": WAKE.format(mood=mood)})
     for j, m in enumerate(times):
         at = now.replace(hour=m // 60, minute=m % 60, second=0, microsecond=0)
         rid = f"spont-{today}-{j}"
