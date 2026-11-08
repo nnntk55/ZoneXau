@@ -18,8 +18,8 @@ secrets_loader.load()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "charts", "brain", "backtest_results.json")
 
-TF_MAP = {"5m": "TIMEFRAME_M5", "15m": "TIMEFRAME_M15", "30m": "TIMEFRAME_M30",
-          "1h": "TIMEFRAME_H1", "4h": "TIMEFRAME_H4"}
+TF_MAP = {"1m": "TIMEFRAME_M1", "5m": "TIMEFRAME_M5", "15m": "TIMEFRAME_M15",
+          "30m": "TIMEFRAME_M30", "1h": "TIMEFRAME_H1", "4h": "TIMEFRAME_H4"}
 
 
 def fetch(tf="15m", bars=5000, symbol="XAUUSD"):

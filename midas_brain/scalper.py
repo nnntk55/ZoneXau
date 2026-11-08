@@ -49,6 +49,18 @@ def _log(ev):
     json.dump(rows, open(SCALP_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
+def _d1_ripeness(mt5):
+    """ความสุกเทรนด์ D1: |close - EMA200| / EMA200 > 6% = 'overextended' ปลายเทรนด์"""
+    r = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_D1, 0, 220)
+    if r is None or len(r) < 210:
+        return "unknown"
+    import pandas as pd
+    c = pd.DataFrame(r)["close"]
+    ema200 = c.ewm(span=200, adjust=False).mean().iloc[-1]
+    dist = abs(c.iloc[-1] - ema200) / ema200 * 100
+    return "overextended" if dist > 6 else "ok"
+
+
 def _stoch(tf_code, n=14):
     import MetaTrader5 as mt5
     import pandas as pd
@@ -89,13 +101,26 @@ def tick():
     if st.get("ticket"):
         print(f"holding {st['dir']} @ {st['entry']} (bias {d} conf {conf})")
         return
-    # ---- หาจังหวะเข้า: stoch M15 หรือ M5 อยู่เขต pullback ตรงข้าม bias ----
+    # ---- เกตความสุกเทรนด์ (นินสอน): ราคายืดห่าง EMA200 D1 >6% = ปลายเทรนด์ ห้ามเข้า ----
     import MetaTrader5 as mt5
+    ripe = _d1_ripeness(mt5)
+    if ripe == "overextended":
+        print(f"blocked: เทรนด์สุกแล้ว ราคายืด EMA200 D1 เกิน 6% — จุดที่ streak ตาย")
+        return
+    # ---- เกตพูลแบ็คสุก (นินสอน): sell ต้อง stoch H1>=70 / buy <=30 — เข้าช้ากว่าดีกว่าเข้าปลาย ----
+    k1h = _stoch(mt5.TIMEFRAME_H1)
+    if d == "down" and not (k1h and k1h >= 70):
+        print(f"wait h1 pullback: sell ต้อง stoch H1>=70 (ตอนนี้ {k1h:.0f})" if k1h else "wait h1")
+        return
+    if d == "up" and not (k1h and k1h <= 30):
+        print(f"wait h1 pullback: buy ต้อง stoch H1<=30 (ตอนนี้ {k1h:.0f})" if k1h else "wait h1")
+        return
+    # ---- หาจังหวะเข้า: stoch M15 หรือ M5 อยู่เขต pullback ตรงข้าม bias ----
     k15 = _stoch(mt5.TIMEFRAME_M15)
     k5 = _stoch(mt5.TIMEFRAME_M5)
     trig = (d == "up" and ((k15 and k15 <= STOCH_LO) or (k5 and k5 <= STOCH_LO))) or \
            (d == "down" and ((k15 and k15 >= STOCH_HI) or (k5 and k5 >= STOCH_HI)))
-    print(f"bias {d} conf {conf} | stoch m15={k15} m5={k5} → {'ENTRY' if trig else 'wait'}")
+    print(f"bias {d} conf {conf} | h1={k1h:.0f} m15={k15} m5={k5} → {'ENTRY' if trig else 'wait'}")
     if trig:
         r = trader.open_pos(d, conf, b.get("verdict", ""), sl_usd=SL_USD, tp_usd=TP_USD)
         _log({"event": "open", "dir": d, "r": r, "k15": k15, "k5": k5})
