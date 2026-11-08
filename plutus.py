@@ -918,7 +918,7 @@ def saturday_round():
 
 def main():
     if not PLUTUS_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        _rlog("missing PLUTUS_BOT_TOKEN or TELEGRAM_CHAT_ID"); return
+        _rlog("missing PLUTUS_BOT_TOKEN or TELEGRAM_CHAT_ID — ปิดหน้าต่างนี้"); sys.exit(3)  # loop_plutus.bat เห็น 3 แล้วปิดตัวเอง
     load_memory()
     _rlog("plutus started")
     offset, nudge = 0, ""
