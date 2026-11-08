@@ -115,6 +115,7 @@ def wake(reasons, now):
     print(f"[WAKE] {obj}")
     res = reason(obj)
     learner.log_verdict(res, now.get("gold"), reasons)
+    _write_bias(res, now)  # สมองลงโหวตทิศ — scalper อ่านไฟล์นี้ทุกนาที
     events = paper.step(now.get("gold"), res.get("verdict"),
                         res.get("confidence"), learner.direction_of(res.get("verdict")))
     for ev in events:
@@ -123,6 +124,18 @@ def wake(reasons, now):
         elif "closed" in ev:
             tg_send(f"📄 PAPER: ปิด {ev['closed']} {'ชนะ' if ev['pnl']>0 else 'แพ้'} {ev['chg']:+.2f}% "
                     f"({'+' if ev['pnl']>0 else ''}{ev['pnl']:.0f}$) เหตุ {ev['why']} → equity ${ev['equity']:,.0f}")
+    try:
+        from midas_brain import trader
+        for ev in trader.step(now.get("gold"), res.get("verdict"),
+                              res.get("confidence"), learner.direction_of(res.get("verdict"))):
+            if "opened" in ev:
+                tg_send(f"🔥 DEMO จริง: เปิด {ev['opened']} @ {ev['price']:,.1f} lot {os.environ.get('BRAIN_LOT','0.05')}")
+            elif "closed" in ev:
+                tg_send(f"🔥 DEMO จริง: ปิด ticket {ev['closed']} pnl ${ev['pnl']:+.2f} เหตุ {ev['why']}")
+            elif "error" in ev:
+                print(f"[DEMO] {ev['error']}")
+    except Exception as e:
+        print(f"trader step err: {e}")
     verdict = res.get("verdict", "?")
     conf = res.get("confidence")
     short = (res.get("reasoning") or "")[:700]
@@ -130,6 +143,22 @@ def wake(reasons, now):
             f"เหตุ: {'; '.join(reasons)}\n"
             f"สรุป: {verdict} (conf {conf})\n{short}")
     return res
+
+
+BIAS_FILE = os.path.join(ROOT, "charts", "brain", "bias.json")
+
+def _write_bias(res, now):
+    """เขียน bias ล่าสุดของสมอง — scalper อ่านตัวนี้ก่อนตัดสินใจเข้าไม้"""
+    from midas_brain import learner
+    try:
+        json.dump({"dir": learner.direction_of(res.get("verdict")),
+                   "conf": res.get("confidence"),
+                   "verdict": (res.get("verdict") or "")[:150],
+                   "invalidators": res.get("invalidators", []),
+                   "price": now.get("gold"), "t": time.time()},
+                  open(BIAS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"bias write err: {e}")
 
 
 def run_once(force=False):
