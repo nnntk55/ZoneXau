@@ -1,7 +1,7 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
 # นินคุยกับวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
-import os, sys, json, time, re, shutil, subprocess, threading, requests
+import os, sys, json, time, re, shutil, subprocess, threading, requests, random
 
 BOT = os.getenv("DEVIN_BOT_TOKEN", "")
 KEY = os.getenv("DEVIN_API_KEY", "")
@@ -98,6 +98,8 @@ def tg_image_attachment(msg, local=False):
 
 _LAST_SEND = [0.0]  # เวลาที่วินส่งข้อความหานินล่าสุด (ใช้คำนวณว่านินตอบเร็ว/ช้าแค่ไหน)
 VOICE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "voice_on")
+_NIN_VOICE = [False]   # นินกำลังคุยเสียงอยู่ -> วินตอบเป็นเสียงด้วย (รีเซ็ตเมื่อนินกลับมาพิมพ์)
+VOICE_RANDOM_P = 0.12  # บางครั้งวินพูดเองโดยไม่ถูกขอ ~12% (นินสั่งให้สุ่มได้)
 
 def _speak(text):
     try:
@@ -112,7 +114,7 @@ def send(text):
         for i in range(0, len(para), 4000):
             tg("sendMessage", chat_id=CHAT, text=para[i:i + 4000])
     _LAST_SEND[0] = time.time()
-    if os.path.exists(VOICE_FLAG):
+    if (_NIN_VOICE[0] or random.random() < VOICE_RANDOM_P) and os.path.exists(VOICE_FLAG):
         threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
 def load_state():
@@ -779,6 +781,7 @@ def main():
                          else "ได้รูปแล้ว วินกำลังดู")
                     else:
                         send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if text else ""))
+                _NIN_VOICE[0] = is_voice  # นินส่งเสียง -> เทิร์นนี้วินตอบเสียง; นินพิมพ์ -> กลับไปเงียบ
                 if not text:
                     continue
                 if text == "/new":
