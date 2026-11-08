@@ -114,6 +114,11 @@ def send(text):
         for i in range(0, len(para), 4000):
             tg("sendMessage", chat_id=CHAT, text=para[i:i + 4000])
     _LAST_SEND[0] = time.time()
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "win_out.jsonl"), "a", encoding="utf-8") as _f:
+            _f.write(json.dumps({"ts": time.time(), "text": text}, ensure_ascii=False) + chr(10))
+    except Exception:
+        pass
     if (_NIN_VOICE[0] or random.random() < VOICE_RANDOM_P) and os.path.exists(VOICE_FLAG):
         threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
