@@ -534,10 +534,11 @@ def check_bg_jobs(st):
         except OSError:
             log = ""
         rc = done.get("rc")
-        st.setdefault("local_q", []).append(
-            f"[งานเบื้องหลัง '{meta.get('title', jid)}' จบแล้ว — exit {rc}, ใช้เวลา {int(done.get('sec', 0)) // 60} นาที "
-            f"คำสั่ง: {' '.join(meta.get('cmd') or [])[:300]} | log เต็ม: {os.path.join(BG_JOB_DIR, jid + '.log')}]\n"
-            f"ท้าย log:\n{log[-2500:]}\n(สรุปผลให้นินสั้นๆ ตรงคำถามเดิม — ถ้าพังให้บอกสาเหตุ)")
+        if rc != "stopped":
+            st.setdefault("local_q", []).append(
+                f"[งานเบื้องหลัง '{meta.get('title', jid)}' จบแล้ว — exit {rc}, ใช้เวลา {int(done.get('sec', 0)) // 60} นาที "
+                f"คำสั่ง: {' '.join(meta.get('cmd') or [])[:300]} | log เต็ม: {os.path.join(BG_JOB_DIR, jid + '.log')}]\n"
+                f"ท้าย log:\n{log[-2500:]}\n(สรุปผลให้นินสั้นๆ ตรงคำถามเดิม — ถ้าพังให้บอกสาเหตุ)")
         _rlog(f"bg job done {jid} rc={rc} {done.get('sec')}s: {meta.get('title', '')[:80]}")
         for ext in (".json", ".done.json"):
             try:
@@ -560,6 +561,11 @@ def _stop_bg_jobs():
                         os.kill(int(pid), 9)
                 except Exception:
                     pass
+            try:
+                json.dump({"rc": "stopped", "sec": int(time.time() - meta.get("started", time.time()))},
+                          open(os.path.join(BG_JOB_DIR, jid + ".done.json"), "w", encoding="utf-8"))
+            except OSError:
+                pass
             n += 1
     return n
 
