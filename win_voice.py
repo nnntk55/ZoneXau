@@ -20,8 +20,8 @@ def load_env():
 async def tts(text, out):
     import edge_tts
     import re
-    voice = "en-US-ChristopherNeural" if re.search(r"[A-Za-z]", text) else "th-TH-NiwatNeural"
-    v = edge_tts.Communicate(text, voice, rate="-8%", pitch="-8Hz")
+    voice = "en-US-AndrewNeural" if re.search(r"[A-Za-z]", text) else "th-TH-NiwatNeural"
+    v = edge_tts.Communicate(text, voice, rate="-4%", pitch="+0Hz")
     await v.save(out)
 
 
