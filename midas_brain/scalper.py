@@ -24,8 +24,9 @@ SCALP_FILE = os.path.join(ROOT, "charts", "brain", "scalp_log.json")
 CONF_MIN = float(os.environ.get("SCALP_CONF_MIN", "0.6"))
 BIAS_MAX_AGE_H = float(os.environ.get("BIAS_MAX_AGE_H", "4"))
 TP_USD = float(os.environ.get("SCALP_TP_USD", "5.0"))
-SL_USD = float(os.environ.get("SCALP_SL_USD", "5.0"))
-STOCH_LO, STOCH_HI = 20, 80
+SL_USD = float(os.environ.get("SCALP_SL_USD", "40.0"))  # กฎ streak-37: SL ใหญ่เพื่อไม่ให้โดนกินง่าย
+STOCH_LO = int(os.environ.get("SCALP_STOCH_LO", "40"))
+STOCH_HI = int(os.environ.get("SCALP_STOCH_HI", "60"))
 LOOP_SEC = 60
 
 
