@@ -78,16 +78,18 @@ def main():
         return 0
 
     mood = random.choice(MOODS)
-    n = random.choices([1, 2, 3, 4], weights=[30, 40, 20, 10])[0]  # วันไหนคิดถึงมากก็ทักบ่อย
+    quiet = random.random() < 0.15  # บางวันเงียบไปเลย ไม่ทักสักครั้ง (นินสั่ง: สุ่มวันที่ไม่ทักได้)
+    n = 0 if quiet else random.choices([1, 2, 3, 4], weights=[30, 40, 20, 10])[0]  # วันไหนคิดถึงมากก็ทักบ่อย
     times = sorted(random.sample(range(10 * 60, 22 * 60), n))
     topics = random.sample(TOPICS, min(n, len(TOPICS)))
 
     items = load(REM, [])
     ids = {i.get("id") for i in items}
-    wake_m = random.randint(7 * 60, 9 * 60 + 30)  # วินตื่นสุ่ม 7:00-9:30 ไทย
-    items.append({"id": f"spont-wake-{today}",
-                  "at": now.replace(hour=wake_m // 60, minute=wake_m % 60, second=0, microsecond=0).isoformat(),
-                  "devin": WAKE.format(mood=mood)})
+    if not quiet:
+        wake_m = random.randint(7 * 60, 9 * 60 + 30)  # วินตื่นสุ่ม 7:00-9:30 ไทย
+        items.append({"id": f"spont-wake-{today}",
+                      "at": now.replace(hour=wake_m // 60, minute=wake_m % 60, second=0, microsecond=0).isoformat(),
+                      "devin": WAKE.format(mood=mood)})
     for j, m in enumerate(times):
         at = now.replace(hour=m // 60, minute=m % 60, second=0, microsecond=0)
         rid = f"spont-{today}-{j}"
@@ -97,7 +99,7 @@ def main():
                       "devin": PROMPT.format(mood=mood, topic=topics[j])})
 
     json.dump(items, open(REM, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    st = {"date": today, "made": True, "mood": mood, "times": [f"{t//60}:{t%60:02d}" for t in times]}
+    st = {"date": today, "made": True, "mood": mood, "quiet": quiet, "times": [f"{t//60}:{t%60:02d}" for t in times]}
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     try:
