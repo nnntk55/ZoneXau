@@ -20,7 +20,7 @@ PLUTUS_BOT_TOKEN = os.environ.get("PLUTUS_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
@@ -679,7 +679,7 @@ def _call_llm(prompt):
         try:
             r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                               headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                              json={"model": GROQ_MODEL, "messages": msgs, "max_tokens": 600},
+                              json={"model": GROQ_MODEL, "messages": msgs, "max_tokens": 1500},
                               timeout=30)
             out = _choices(r.json())
             if out:
@@ -691,8 +691,8 @@ def _call_llm(prompt):
         try:
             r = requests.post("https://openrouter.ai/api/v1/chat/completions",
                               headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-                              json={"model": "google/gemini-2.0-flash-001", "messages": msgs,
-                                    "max_tokens": 600}, timeout=30)
+                              json={"model": os.environ.get("PLUTUS_OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
+                                    "messages": msgs, "max_tokens": 1500}, timeout=30)
             out = _choices(r.json())
             if out:
                 return out
