@@ -107,14 +107,22 @@ def detect(prev, now):
 def wake(reasons, now):
     """ปลุกสมองประเมิน — ส่งโจทย์ที่มีบริบทว่าอะไรเปลี่ยน + ผลงานตัวเอง"""
     from midas_brain.engine import reason
-    from midas_brain import learner
+    from midas_brain import learner, paper
     obj = ("ตลาดเปลี่ยนแปลงตอนนี้: " + "; ".join(reasons) +
            f" (เวลาไทย ~{now.get('thai', '?')}) — ประเมินใหม่ว่าโครงสร้าง/ทิศทางตลาดทองยังเหมือนเดิมไหม "
            "เทียบกับสมมติฐานเก่าในความจำ ถ้าหลักฐานเปลี่ยนให้บอก ถ้าไม่เปลี่ยนให้ยืนยัน\n"
-           + learner.scoreboard())
+           + learner.scoreboard() + " | " + paper.scoreboard())
     print(f"[WAKE] {obj}")
     res = reason(obj)
     learner.log_verdict(res, now.get("gold"), reasons)
+    events = paper.step(now.get("gold"), res.get("verdict"),
+                        res.get("confidence"), learner.direction_of(res.get("verdict")))
+    for ev in events:
+        if "opened" in ev:
+            tg_send(f"📄 PAPER: เปิด {ev['opened']} @ {ev['entry']:,.1f} (conf {ev['conf']})")
+        elif "closed" in ev:
+            tg_send(f"📄 PAPER: ปิด {ev['closed']} {'ชนะ' if ev['pnl']>0 else 'แพ้'} {ev['chg']:+.2f}% "
+                    f"({'+' if ev['pnl']>0 else ''}{ev['pnl']:.0f}$) เหตุ {ev['why']} → equity ${ev['equity']:,.0f}")
     verdict = res.get("verdict", "?")
     conf = res.get("confidence")
     short = (res.get("reasoning") or "")[:700]
@@ -125,12 +133,16 @@ def wake(reasons, now):
 
 
 def run_once(force=False):
-    from midas_brain import learner
+    from midas_brain import learner, paper
     prev = _state().get("snap")
     now = snapshot()
     scored = learner.score_open(now.get("gold"))
     if scored:
         print(f"[LEARN] ตัดสิน verdict เพิ่ม {scored} อัน")
+    for ev in paper.step(now.get("gold")):  # เช็ก SL/TP ของโพซิชันเปิดทุกรอบ
+        if "closed" in ev:
+            tg_send(f"📄 PAPER: ปิด {ev['closed']} {'ชนะ' if ev['pnl']>0 else 'แพ้'} {ev['chg']:+.2f}% "
+                    f"({'+' if ev['pnl']>0 else ''}{ev['pnl']:.0f}$) เหตุ {ev['why']} → equity ${ev['equity']:,.0f}")
     reasons = ["บังคับปลุกโดยนิน"] if force else detect(prev, now)
     print(f"[{time.strftime('%H:%M:%S')}] gold={now.get('gold')} bias={now.get('bias')} triggers={len(reasons)}")
     if reasons:
