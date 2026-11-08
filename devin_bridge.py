@@ -97,6 +97,14 @@ def tg_image_attachment(msg, local=False):
         return None
 
 _LAST_SEND = [0.0]  # เวลาที่วินส่งข้อความหานินล่าสุด (ใช้คำนวณว่านินตอบเร็ว/ช้าแค่ไหน)
+VOICE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "voice_on")
+
+def _speak(text):
+    try:
+        import win_voice
+        win_voice.speak(text[:1500])
+    except Exception as e:
+        print(f"voice err: {e}")
 
 def send(text):
     # แตกเป็นหลายฟองตามย่อหน้า (บรรทัดว่าง) เหมือนคนพิมพ์ทีละฟอง — ฟองยาวเกิน 4000 ค่อยตัดทีเดียว
@@ -104,6 +112,8 @@ def send(text):
         for i in range(0, len(para), 4000):
             tg("sendMessage", chat_id=CHAT, text=para[i:i + 4000])
     _LAST_SEND[0] = time.time()
+    if os.path.exists(VOICE_FLAG):
+        threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
 def load_state():
     try:
