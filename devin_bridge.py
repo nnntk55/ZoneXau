@@ -230,8 +230,11 @@ LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงา
                    "[ห้ามรันสคริปต์ที่วนไม่จบ (บอท/plutus.py/assistant.py/flask/server) แบบรอผลใน shell — คำสั่งจะไม่จบ "
                    "วินค้างจนหมดเวลาและนินไม่ได้คำตอบเลย นินสั่ง \"รันให้/เปิดให้\" = เปิดไฟล์ loop_*.bat ให้ในหน้าต่างแยกแล้วตอบทันที ไม่ใช่นั่งเฝ้า เช่น "
                    "`start \"\" /D <โฟลเดอร์ที่ loop_*.bat ตัวอื่นรันอยู่> cmd /c loop_xxx.bat` แล้วตอบทันที "
-                   "ทดสอบสคริปต์ให้ใส่ timeout สั้นเสมอ] ")
-LOCAL_RULES_V = 5
+                   "ทดสอบสคริปต์ให้ใส่ timeout สั้นเสมอ] "
+                   "[งานที่น่าจะนานเกิน 2 นาที (backtest, ดาวน์โหลดข้อมูลย้อนหลังเยอะ, optimize/grid search, train) ห้ามรันรอผลเอง "
+                   "ระหว่างนั้นนินคุยกับวินไม่ได้เลย ให้รัน `python bg_job.py \"ชื่องานสั้นๆ\" -- <คำสั่ง>` (ทดสอบสคริปต์สั้นๆ ให้ผ่านก่อน) "
+                   "แล้วตอบนินทันทีว่ากำลังรันอะไร คาดว่ากี่นาที — เสร็จแล้ว bridge ส่ง log ท้ายงานกลับมาให้วินสรุปให้นินเอง] ")
+LOCAL_RULES_V = 6
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0, "proc": None, "notified": False}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
@@ -496,6 +499,70 @@ def local_tick(st):
     srcs = {m.group(1) for x in q for m in [_Q_TAG.search(x)] if m}
     threading.Thread(target=local_run, args=(st, "\n\n".join(q), srcs), daemon=True).start()
 
+BG_JOB_DIR = os.path.join(LOCAL_DIR, "_telegram", "jobs")
+
+def _bg_jobs():
+    """งานเบื้องหลังจาก bg_job.py: [(id, meta, done|None)]"""
+    out = []
+    try:
+        for f in sorted(os.listdir(BG_JOB_DIR)):
+            if f.endswith(".json") and not f.endswith((".done.json", ".tmp")):
+                jid = f[:-5]
+                try:
+                    meta = json.load(open(os.path.join(BG_JOB_DIR, f), encoding="utf-8"))
+                except Exception:
+                    continue
+                dp = os.path.join(BG_JOB_DIR, jid + ".done.json")
+                done = None
+                if os.path.exists(dp):
+                    try:
+                        done = json.load(open(dp, encoding="utf-8"))
+                    except Exception:
+                        continue
+                out.append((jid, meta, done))
+    except OSError:
+        pass
+    return out
+
+def check_bg_jobs(st):
+    """งานเบื้องหลังเสร็จ -> ส่ง log ท้ายงานเข้าคิว local ให้วินสรุปผลให้นิน (ไฟล์ .json ย้ายเป็น .reported)"""
+    for jid, meta, done in _bg_jobs():
+        if done is None:
+            continue
+        try:
+            log = open(os.path.join(BG_JOB_DIR, jid + ".log"), encoding="utf-8", errors="replace").read()
+        except OSError:
+            log = ""
+        rc = done.get("rc")
+        st.setdefault("local_q", []).append(
+            f"[งานเบื้องหลัง '{meta.get('title', jid)}' จบแล้ว — exit {rc}, ใช้เวลา {int(done.get('sec', 0)) // 60} นาที "
+            f"คำสั่ง: {' '.join(meta.get('cmd') or [])[:300]} | log เต็ม: {os.path.join(BG_JOB_DIR, jid + '.log')}]\n"
+            f"ท้าย log:\n{log[-2500:]}\n(สรุปผลให้นินสั้นๆ ตรงคำถามเดิม — ถ้าพังให้บอกสาเหตุ)")
+        _rlog(f"bg job done {jid} rc={rc} {done.get('sec')}s: {meta.get('title', '')[:80]}")
+        for ext in (".json", ".done.json"):
+            try:
+                os.replace(os.path.join(BG_JOB_DIR, jid + ext), os.path.join(BG_JOB_DIR, jid + ext + ".reported"))
+            except OSError:
+                pass
+        save_state(st)
+
+def _stop_bg_jobs():
+    n = 0
+    for jid, meta, done in _bg_jobs():
+        if done is None and meta.get("pid"):
+            for pid in (meta.get("child"), meta["pid"]):
+                if not pid:
+                    continue
+                try:
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
+                    else:
+                        os.kill(int(pid), 9)
+                except Exception:
+                    pass
+            n += 1
+    return n
+
 CLOUD_HOLD = 1800  # วิ: หลังส่งงานต่อให้ cloud ข้อความถัดไปไปฝั่ง cloud จนเงียบ 30 นาที แล้วกลับมา local
 BATCH_WAIT = 6  # วิ: รอข้อความถัดไปก่อนส่ง ถ้านินพิมพ์หลายข้อความติดกัน
 
@@ -700,7 +767,9 @@ def main():
                     q = len(st.get("local_q") or []) + len(st.get("pending") or [])
                     send(f"โหมด {st.get('mode') or 'auto'} | ตอนนี้ใช้ {route(st)} | "
                          + (f"วิน local กำลังทำงาน {_busy_min()} นาที (ตัดเองที่ {LOCAL_TIMEOUT // 60} นาที)" if LOCAL["busy"] else "วิน local ว่าง")
-                         + f" | ข้อความรอคิว {q}")
+                         + f" | ข้อความรอคิว {q}"
+                         + "".join(f"\nงานเบื้องหลัง: {m.get('title', j)} ({int(time.time() - m.get('started', time.time())) // 60} นาที)"
+                                   for j, m, d in _bg_jobs() if d is None))
                     continue
                 if text == "/stop":
                     p = LOCAL.get("proc")
@@ -712,6 +781,10 @@ def main():
                         send("หยุดงาน local ที่ค้างจากรอบก่อน (ก่อน bridge รีสตาร์ท) แล้ว")
                     else:
                         send("ตอนนี้วิน local ไม่ได้ทำงานค้างอยู่")
+                    continue
+                if text == "/stopjobs":
+                    n = _stop_bg_jobs()
+                    send(f"หยุดงานเบื้องหลัง {n} งานแล้ว" if n else "ไม่มีงานเบื้องหลังที่รันอยู่")
                     continue
                 if text in ("/local", "/cloud", "/auto"):
                     st["mode"] = text[1:]; st["cloud_until"] = 0; st["cloud_active"] = False
@@ -744,6 +817,7 @@ def main():
                 cloud_back(st)  # cloud เงียบเกิน 30 นาทีโดยไม่บอกว่าเสร็จ -> กลับ local
                 save_state(st)
             check_midas_tasks(st)
+            check_bg_jobs(st)
             local_tick(st)
             # งานที่ local ส่งต่อให้ cloud (โหมด auto)
             if st.get("cloud_q") and time.time() >= cloud_retry:
