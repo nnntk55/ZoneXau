@@ -14,6 +14,7 @@ Telegram (ภาษาคน) -> Gemini function calling -> Render Dashboard API
 import os
 import sys
 import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env
+from agent_tools import read_file as agent_read_file, list_files as agent_list_files, fetch_url as agent_fetch_url  # เครื่องมือกลางเอเจนท์ทุกตัว
 import json
 import re
 import time
@@ -921,6 +922,9 @@ TOOL_IMPL = {
     "get_sr_stats": lambda a: tool_get_sr_stats(a.get("asset")),
     "get_hour_stats": lambda a: tool_get_hour_stats(a.get("asset")),
     "set_reminder": lambda a: tool_set_reminder(a["text"], a["at"]),
+    "read_file":   lambda a: agent_read_file(a["path"]),
+    "list_files":  lambda a: agent_list_files(a.get("name", "")),
+    "fetch_url":   lambda a: agent_fetch_url(a["url"]),
 }
 
 # actions ที่กระทบเงิน — ถ้า REQUIRE_CONFIRM=on จะขอยืนยันก่อน
@@ -1034,6 +1038,15 @@ GEMINI_TOOLS = [{
              "asset": asset_param(),
              "tf": {"type": "string", "enum": ["1w", "1d", "4h", "1h", "15m", "5m"],
                     "description": "timeframe เช่น 4h 15m"}}, "required": ["asset", "tf"]}},
+        {"name": "read_file", "description": "อ่านไฟล์บนเครื่องพี่/ในโปรเจกต์ ด้วยชื่อหรือ path (pdf/excel/csv/docx/txt/md/json) — ใช้เมื่อพี่ขอให้อ่านไฟล์หรือเอกสาร",
+         "parameters": {"type": "object", "properties": {
+             "path": {"type": "string", "description": "ชื่อไฟล์หรือ path"}}, "required": ["path"]}},
+        {"name": "list_files", "description": "ค้นหา/ไล่ดูไฟล์ในโปรเจกต์หรือโฟลเดอร์ — ใช้เมื่อไม่รู้ว่าไฟล์อยู่ไหนหรือพี่ถามว่ามีไฟล์อะไรบ้าง",
+         "parameters": {"type": "object", "properties": {
+             "name": {"type": "string", "description": "ชื่อโฟลเดอร์หรือคำค้น (เว้นว่าง=ทั้งโปรเจกต์)"}}}},
+        {"name": "fetch_url", "description": "เปิดอ่านเนื้อเว็บจากลิงก์ที่พี่ส่ง (ข่าว บทความ เอกสารออนไลน์ PDF) — ใช้ทุกครั้งที่พี่ส่งลิงก์มาให้อ่าน",
+         "parameters": {"type": "object", "properties": {
+             "url": {"type": "string", "description": "ลิงก์เต็ม"}}, "required": ["url"]}},
         {"name": "del_alert", "description": "ลบ alert ตามลำดับ (index เริ่ม 0 ดูจาก get_status)",
          "parameters": {"type": "object", "properties": {
              "asset": asset_param(), "index": {"type": "integer"}}, "required": ["asset", "index"]}},

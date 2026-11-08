@@ -8,6 +8,7 @@ env: PLUTUS_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_SCRIPT_URL
 """
 import os, re, sys, json, time, base64, requests
 import secrets_loader  # noqa: F401 — โหลด charts/secrets.env เข้า env
+from agent_tools import read_file as _agent_read_file, fetch_url  # เครื่องมือกลางเอเจนท์ทุกตัว
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -177,73 +178,8 @@ def read_document(path):
         _rlog(f"docread err: {e}")
     return None
 
-SKIP_DIRS = {".git", "__pycache__", "node_modules", ".devin"}
-SECRET_NAMES = {"secrets.env", ".env"}
-
-def _find_file(name):
-    """คืน (path เดียว, None) หรือ (None, [รายการผู้สมัคร]) หรือ (None, [])"""
-    p = str(name).strip().strip('"').strip("'")
-    if not p:
-        return None, []
-    for c in (p, os.path.join(BASE, p), os.path.join(CHART_DIR, p),
-              os.path.join(os.path.expanduser("~"), "Desktop", p)):
-        if os.path.isfile(c):
-            return c, None
-    base = os.path.basename(p).lower()
-    hits = []
-    for root, dirs, files in os.walk(BASE):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        for f in files:
-            if f.lower() in SECRET_NAMES:
-                continue
-            if base in f.lower() or (base and f.lower() in base):
-                hits.append(os.path.join(root, f))
-    return (hits[0], None) if len(hits) == 1 else (None, hits)
-
 def tool_read_file(path):
-    """อ่านไฟล์บนเครื่องจากชื่อ/path — ไม่เปิดไฟล์ลับ"""
-    if os.path.basename(str(path)).lower() in SECRET_NAMES or "secrets" in str(path).lower():
-        return "ไฟล์นั้นเป็นไฟล์ลับครับ อ่านไม่ได้"
-    p, cands = _find_file(path)
-    if p is None:
-        if cands:
-            rel = [os.path.relpath(h, BASE) for h in cands[:10]]
-            return "เจอหลายไฟล์ที่คล้ายกัน:\n" + "\n".join(rel) + "\nบอกชื่อเต็มอีกทีครับ"
-        return f"หาไฟล์ '{path}' ไม่เจอครับ — ลองบอกชื่อไฟล์หรือ path ให้ชัดขึ้น"
-    if os.path.basename(p).lower() in SECRET_NAMES:
-        return "ไฟล์นั้นเป็นไฟล์ลับครับ อ่านไม่ได้"
-    ext = os.path.splitext(p)[1].lower()
-    if ext in IMG_EXTS:
-        return describe_image(p) or "อ่านรูปนั้นไม่ได้ครับ"
-    txt = read_document(p)
-    if txt is None:
-        return f"อ่านไฟล์ {ext or 'ชนิดนี้'} ไม่ได้ครับ (รองรับ pdf/excel/csv/docx/txt/md/json/รูป)"
-    return f"[ไฟล์ {os.path.relpath(p, BASE)}]\n{txt[:6000]}"
-
-def fetch_url(url):
-    """เปิดอ่านลิงก์เว็บ → ข้อความล้วน (ตัดแท็ก/สคริปต์) รองรับ PDF"""
-    try:
-        from bs4 import BeautifulSoup
-        r = requests.get(url, timeout=25, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-        r.raise_for_status()
-        if "pdf" in r.headers.get("Content-Type", "").lower() or url.lower().split("?")[0].endswith(".pdf"):
-            tmp = os.path.join(CHART_DIR, "_url_tmp.pdf")
-            open(tmp, "wb").write(r.content)
-            t = read_document(tmp)
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            return t[:6000] if t else "อ่าน PDF จากลิงก์ไม่ได้ครับ"
-        soup = BeautifulSoup(r.text, "html.parser")
-        for t in soup(["script", "style", "noscript", "nav", "footer", "header", "form"]):
-            t.decompose()
-        txt = "\n".join(l.strip() for l in soup.get_text("\n").splitlines() if l.strip())
-        title = (soup.title.string or "").strip() if soup.title else ""
-        return f"[{title}]\n{txt[:6000]}" if txt else "เว็บนั้นไม่มีข้อความให้อ่านครับ (อาจต้องล็อกอินหรือเป็นแอป JS ล้วน)"
-    except Exception as e:
-        _rlog(f"fetch_url err: {e}")
-        return "เปิดลิงก์นั้นไม่ได้ครับ เช็กว่าลิงก์ถูกและเว็บเข้าถึงได้"
+    return _agent_read_file(path, image_reader=describe_image)
 
 # ---------- students schedule (ชีทตารางสอน — อ่าน/เขียนตรงผ่าน Apps Script) ----------
 SCHED_STATE = os.path.join(CHART_DIR, "plutus_sched.json")
