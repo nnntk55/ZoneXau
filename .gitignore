@@ -13,3 +13,4 @@ devin_bridge_state.json
 charts/
 *_memory*.json
 plutus_ledger.json
+charts/brain/
