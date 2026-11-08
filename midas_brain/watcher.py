@@ -105,13 +105,16 @@ def detect(prev, now):
 
 
 def wake(reasons, now):
-    """ปลุกสมองประเมิน — ส่งโจทย์ที่มีบริบทว่าอะไรเปลี่ยน"""
+    """ปลุกสมองประเมิน — ส่งโจทย์ที่มีบริบทว่าอะไรเปลี่ยน + ผลงานตัวเอง"""
     from midas_brain.engine import reason
+    from midas_brain import learner
     obj = ("ตลาดเปลี่ยนแปลงตอนนี้: " + "; ".join(reasons) +
            f" (เวลาไทย ~{now.get('thai', '?')}) — ประเมินใหม่ว่าโครงสร้าง/ทิศทางตลาดทองยังเหมือนเดิมไหม "
-           "เทียบกับสมมติฐานเก่าในความจำ ถ้าหลักฐานเปลี่ยนให้บอก ถ้าไม่เปลี่ยนให้ยืนยัน")
+           "เทียบกับสมมติฐานเก่าในความจำ ถ้าหลักฐานเปลี่ยนให้บอก ถ้าไม่เปลี่ยนให้ยืนยัน\n"
+           + learner.scoreboard())
     print(f"[WAKE] {obj}")
     res = reason(obj)
+    learner.log_verdict(res, now.get("gold"), reasons)
     verdict = res.get("verdict", "?")
     conf = res.get("confidence")
     short = (res.get("reasoning") or "")[:700]
@@ -122,8 +125,12 @@ def wake(reasons, now):
 
 
 def run_once(force=False):
+    from midas_brain import learner
     prev = _state().get("snap")
     now = snapshot()
+    scored = learner.score_open(now.get("gold"))
+    if scored:
+        print(f"[LEARN] ตัดสิน verdict เพิ่ม {scored} อัน")
     reasons = ["บังคับปลุกโดยนิน"] if force else detect(prev, now)
     print(f"[{time.strftime('%H:%M:%S')}] gold={now.get('gold')} bias={now.get('bias')} triggers={len(reasons)}")
     if reasons:
