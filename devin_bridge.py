@@ -332,6 +332,9 @@ def cloud_back(st):
     """cloud ทำงานที่ส่งต่อเสร็จ -> กลับไปใช้ local พร้อมส่งสรุปของ cloud ให้ local รู้เรื่อง"""
     log = "\n".join(st.pop("cloud_log", []) or [])[-3000:]
     st["cloud_active"] = False; st["cloud_until"] = 0
+    if st.get("mode") == "cloud":  # นินไม่ต้องพิมพ์ /auto เอง — cloud บอกเสร็จแล้วกลับ local-first
+        st["mode"] = "auto"
+    _rlog("cloud done -> back to local")
     if log:
         st["local_note"] = "[วินฝั่ง cloud ทำงานที่ local ส่งต่อไปเสร็จแล้ว สิ่งที่ cloud ตอบนิน:\n" + log + "]"
     send("วินฝั่ง cloud ทำงานนี้เสร็จแล้ว กลับมาใช้วิน local ต่อ (ส่งสรุปให้ local แล้ว)")
@@ -852,7 +855,7 @@ def main():
                         done = False
                         for m in msgs[st["seen"]:]:
                             t = m.get('message', '')
-                            if st.get("cloud_active") and "[[DONE]]" in t:
+                            if (st.get("cloud_active") or st.get("mode") == "cloud") and "[[DONE]]" in t:
                                 done = True; t = t.replace("[[DONE]]", "").strip()
                             if t:
                                 send(t)
@@ -861,7 +864,7 @@ def main():
                         st["seen"] = len(msgs)
                         if st.get("cloud_active"):
                             st["cloud_until"] = time.time() + CLOUD_HOLD
-                        if done or (st.get("cloud_active") and session_dead(s)):
+                        if done or (st.get("cloud_active") and session_dead(s)):  # done รวมโหมด /cloud ด้วย
                             cloud_back(st)
                         save_state(st)
                     # status_enum "blocked" = ตอบเสร็จรอข้อความใหม่ (ปกติ) ไม่ใช่ติดอนุมัติ — ไม่ต้องเตือน
