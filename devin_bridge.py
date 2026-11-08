@@ -34,7 +34,7 @@ def transcribe(data, name):
         r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
                           headers={"Authorization": f"Bearer {key}"},
                           files={"file": (name, data)},
-                          data={"model": os.getenv("GROQ_STT_MODEL", "whisper-large-v3"), "language": "th"},
+                          data={"model": os.getenv("GROQ_STT_MODEL", "whisper-large-v3")},
                           timeout=120)
         if r.status_code != 200:
             print(f"stt fail {r.status_code}: {r.text[:200]}")
