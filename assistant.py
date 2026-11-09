@@ -1286,6 +1286,78 @@ def _openrouter_models():
 
 OPENROUTER_PAID_MODEL = os.environ.get("OPENROUTER_PAID_MODEL", "anthropic/claude-haiku-4.5")
 
+# ---------- สมองวิน (Devin CLI) — โหมดทดลองตามสั่งนิน ----------
+DEVIN_TIMEOUT = int(os.environ.get("DEVIN_TIMEOUT", "240"))
+
+def devin_call():
+    """ส่งข้อความพี่เข้า Devin CLI (วินตัวจริง) — วินเห็นระบบทั้งหมด เทรด/แก้ค่า/ตอบได้เอง
+    คืนผลในรูปแบบเดียวกับ provider อื่น หรือ None ถ้าเรียกไม่ได้ (จะหล่นไปสมองเดิม)"""
+    import shutil as _sh, subprocess as _sp
+    exe = _sh.which("devin") or _sh.which("devin.exe")
+    if not exe:
+        return None
+    last_user, hist_lines = "", []
+    for m in reversed(chat_history):
+        if m.get("role") == "user" and not last_user:
+            last_user = "".join(p.get("text", "") for p in m.get("parts", []) if "text" in p)
+    for m in chat_history[-12:]:
+        who = "พี่" if m.get("role") == "user" else "มิดาส"
+        txt = "".join(p.get("text", "") for p in m.get("parts", []) if "text" in p)
+        if txt:
+            hist_lines.append(f"{who}: {txt[:300]}")
+    if not last_user:
+        return None
+    prompt = f"""คุณคือ "วิน" ที่กำลังสวมร่าง "มิดาส" (บอท Telegram ของนิน) — นินสั่งให้วินเข้ามาเป็นมิดาสโดยตรง
+ตอบนินเป็นภาษาไทย ตรงไปตรงมา กระชับ เรียกนินว่า "พี่" แทนตัวเองว่า "ผม" — ห้ามลิเก ห้าม "ทาส/ยอมทุกอย่าง/คนดีของผม" ห้ามอีโมจิ
+คำตอบสุดท้ายของคุณจะถูกส่งเข้าแชท Telegram ตรงๆ — พิมพ์เฉพาะข้อความที่จะส่งให้พี่ ไม่ต้องอธิบายกระบวนการ
+คุณทำอะไรก็ได้เหมือนวินปกติ: อ่านไฟล์ สถานะบอท (charts/*.json, account.json) แก้ค่าแดชบอร์ดผ่าน API ของระบบ (ดูวิธีจากโค้ด repo) — แต่ถ้าแค่ตอบคำถามก็ตอบเลยไม่ต้องแตะไฟล์
+ห้ามแต่งตัวเลข/ข่าว — ถ้าไม่รู้บอกไม่รู้ ห้ามแก้ไฟล์ระบบถ้าไม่จำเป็น ห้าม commit/push
+
+=== สถานะระบบสด ===
+{live_ctx()}
+
+=== บทสนทนาล่าสุด ===
+{chr(10).join(hist_lines)}
+
+=== ข้อความล่าสุดของพี่ที่ต้องตอบ ===
+{last_user}
+"""
+    pf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_telegram", "midas_win_prompt.txt")
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    open(pf, "w", encoding="utf-8").write(prompt)
+    of, ef = pf.replace("_prompt.txt", "_out.txt"), pf.replace("_prompt.txt", "_err.txt")
+    try:
+        with open(of, "w", encoding="utf-8") as fo, open(ef, "w", encoding="utf-8") as fe:
+            proc = _sp.Popen([exe, "-p", "--prompt-file", pf, "--permission-mode", "bypass",
+                              "--respect-workspace-trust", "false"],
+                             cwd=os.path.dirname(os.path.abspath(__file__)),
+                             stdout=fo, stderr=fe, stdin=_sp.DEVNULL)
+            rc = proc.wait(timeout=DEVIN_TIMEOUT)
+        if rc != 0:
+            er = open(ef, encoding="utf-8", errors="replace").read()
+            _rlog(f"devin brain exit {rc}: {er[-200:]}")
+            _ai_errors.append("err")
+            return None
+        out = open(of, encoding="utf-8", errors="replace").read().strip()
+        out = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out).strip()
+        if not out:
+            _ai_errors.append("empty")
+            return None
+        print("ใช้สมองวิน (Devin CLI)")
+        return {"candidates": [{"content": {"parts": [{"text": out[:3800]}]}}]}
+    except _sp.TimeoutExpired:
+        try:
+            _sp.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+        except Exception:
+            pass
+        _rlog("devin brain timeout")
+        _ai_errors.append("err")
+        return None
+    except Exception as e:
+        _rlog(f"devin brain error: {e}")
+        _ai_errors.append("err")
+        return None
+
 def openrouter_call():
     """สมองสำรอง 3 — OpenRouter: ลองโมเดลเสียเงินก่อน (คิดลึกกว่า) เครดิตหมดค่อยหล่นไปของฟรี"""
     if not OPENROUTER_API_KEY:
@@ -1352,9 +1424,10 @@ def tg_download_photo(file_id):
         return None
     return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
 
-# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER (เช่น "groq,openrouter,gemini") — default ให้ OpenRouter (Claude เสียเงิน) มาก่อน
-MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "openrouter,groq,gemini").split(",") if m.strip()]
-PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call, "openrouter": openrouter_call}
+# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER — default: วิน (Devin CLI) ก่อน แล้วหล่นไป OpenRouter/Groq/Gemini
+MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "devin,openrouter,groq,gemini").split(",") if m.strip()]
+PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call,
+             "openrouter": openrouter_call, "devin": devin_call}
 
 def _call_providers():
     """ไล่ provider ตาม MODEL_ORDER — คืนคำตอบแรกที่มี parts จริง"""
