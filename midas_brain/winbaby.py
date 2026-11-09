@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""winbaby — MT4 สเปกวิน: สัญญาณเดียวกัน (score ≥90 + stochRSI ฝั่งเดียวกัน แท่ง M5 ปิดใหม่)
-แต่หั่นหาง: SL $5 (ไม่ใช่ $50) | trail step $0.5 ล็อก fav-$0.10 | ไม่มี TP
-เสี่ยง 10% พอร์ทต่อไม้ (vol = bal*0.10/(5*100)) | ทีละไม้เดียว | เพดาน 200 lot
-backtest 17 เดือน: WR ~75% exp +0.98/ไม้ exp/risk ดีกว่า dollarsbaby ~7 เท่า
+"""winbaby — MT4 ของวินล้วน: DONCHIAN-20 BREAKOUT (ดีไซน์สัญญาณเอง)
+เข้า: แท่ง M5 ปิดทะลุช่อง 20 แท่ง — เหนือจุดสูงสุด = buy / ต่ำกว่าต่ำสุด = sell
+ออก: SL $10 | trail step $0.5 ล็อก fav-$0.10 | ไม่มี TP | ทีละไม้เดียว
+เสี่ยง 10% พอร์ทต่อไม้ | เพดาน 200 lot
+backtest 17 เดือน: 5,727 ไม้ WR 80% exp +1.20 streak 42
 demo เท่านั้น — state → charts/winbaby_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import pandas as pd
 import MetaTrader5 as mt5
-from midas_brain.sniper_bt import fetch_all
-from midas_brain.nin_score import build_scores
 
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "winbaby_demo.json")
 MAGIC = 20261112
-SL_USD = 5.0; STEP = 0.5; OFF = 0.10; RISK = 0.10; POLL = 10
+DCN = 20  # ช่อง donchian 20 แท่ง
+SL_USD = 10.0; STEP = 0.5; OFF = 0.10; RISK = 0.10; POLL = 10
 
 
 def init():
@@ -46,10 +46,15 @@ def close(pos):
     return mt5.order_send(req)
 
 
-def cur_score():
-    data = fetch_all(300)
-    m, buy, sell, sc = build_scores(data)
-    return buy[-1], sell[-1], sc[-1, 9]
+def cur_side():
+    """donchian breakout ของวิน: แท่งปิดล่าสุดทะลุช่อง 20 แท่ง (ไม่รวมแท่งตัวเอง)"""
+    r = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 0, DCN + 3)
+    if r is None or len(r) < DCN + 2:
+        return 0
+    c = float(r[-2]["close"])
+    hh = max(float(x["high"]) for x in r[-DCN-2:-2])
+    ll = min(float(x["low"]) for x in r[-DCN-2:-2])
+    return 1 if c > hh else (-1 if c < ll else 0)
 
 
 def pos():
@@ -102,10 +107,8 @@ def main():
             if bt != last_bar:
                 last_bar = bt
                 if not p:
-                    b, s, t10 = cur_score()
-                    side = 1 if b > s else (-1 if s > b else 0)
-                    sc_in = max(b, s)
-                    if side and sc_in >= 90 and t10 == side:
+                    side = cur_side()
+                    if side:
                         bal = a.balance
                         vol = round(min(max(0.01, bal * RISK / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
@@ -113,7 +116,7 @@ def main():
                             en = rr.price
                             st["open"] = {"side": side, "entry": en,
                                           "slp": en - side * SL_USD, "lvl": 0, "vol": vol}
-                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} score {sc_in}%")
+                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} dcn")
                         else:
                             print("send fail")
             save(st)
