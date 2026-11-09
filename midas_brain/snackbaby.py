@@ -15,7 +15,7 @@ STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAGIC = 20261111
 MOM_BARS = 12      # โมเมนตัม 12 แท่ง M5 = 1 ชม.
 MOM_MIN = 2.0      # ต้องขยับเกิน $2 ถึงนับเป็นสัญญาณ
-SL_USD = 10.0; STEP = 0.5; OFF = 0.10; RISK = 0.01; POLL = 10
+SL_USD = 5.0; STEP = 0.3; OFF = 0.05; RISK = 0.01; POLL = 10
 START_EQUITY = 100.0
 
 
@@ -74,6 +74,11 @@ def main():
     init()
     st = {"trades": 0, "wins": 0, "streak": 0, "max_streak": 0,
           "equity": START_EQUITY, "open": None, "log": []}
+    if os.path.exists(STATE):
+        try:
+            st.update(json.load(open(STATE)))
+        except Exception:
+            pass
     last_bar = None
     while True:
         try:

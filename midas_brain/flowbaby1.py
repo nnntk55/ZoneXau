@@ -1,25 +1,24 @@
 # -*- coding: utf-8 -*-
-"""dollarbabyflow — สูตร C# ของนิน (score ≥80 + stochRSI ฝั่งเดียวกัน แท่ง M5 ปิดใหม่)
-+ ฟิลเตอร์โซนตามหลักที่นินสอน: ห้ามเข้าถ้าแนว EMA50/100/200 ฝั่งตรงข้ามอยู่ใกล้กว่า $20
-(buy ต้องมีที่ว่างถึงแนวต้าน > $20 / sell ต้องมีที่ว่างถึงแนวรับ > $20 — กันเข้าปลายเทรนด์)
-ออก: SL $10 | trail step $0.5 ล็อก fav-$0.10 | ทีละไม้เดียว
-ล็อตทบต้น = equity ÷ 10,000 (เริ่ม $100) | เพดาน 200 lot
-demo เท่านั้น — state → charts/dollarbabyflow_demo.json"""
+"""flowbaby1 (compound) — เทคนิก C# ของนิน สองฝั่ง (แท่ง M5 ปิดใหม่)
+เข้า buy: ปิด > EMA10/20/200 + stoch %K>%D สองแท่งติด + %K<50 (pullback ในเทรนด์ขึ้น)
+เข้า sell: กระจก — ปิด < EMA10/20/200 + %K<%D สองแท่งติด + %K>50
++ ฟิลเตอร์โซน: ห้ามเข้าถ้าแนว EMA50/100/200 H4 ฝั่งตรงข้ามอยู่ใกล้กว่า $20
+ออก: SL $30 | TP $2 ตายตัว (tick จริง 3wk C#สองฝั่ง: 50tr 100% +$100 streak50)
+ล็อตทบต้นโหด = equity ÷ 1,000 (เริ่ม $20 → 0.02) | เพดาน 200 lot | eq≤0 = ตายหยุดเทรด
+demo เท่านั้น — state → charts/flowbaby1_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5
-from midas_brain.sniper_bt import fetch_all
-from midas_brain.nin_score import build_scores
 from exness_zone_trigger_bot import find_sr_levels, sr_nearest
 
-STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "dollarbabyflow_demo.json")
+STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "flowbaby1_demo.json")
 MAGIC = 20261114
-MIN_SCORE = 80
 ZONE_DIST = 20.0   # ต้องมีที่ว่างถึงแนวตรงข้ามเกิน $20
-SL_USD = 10.0; STEP = 0.5; OFF = 0.10; POLL = 10
-START_EQUITY = 100.0
+SL_USD = 30.0; TP_USD = 2.0; POLL = 10
+START_EQUITY = 20.0
 
 
 def init():
@@ -31,10 +30,12 @@ def init():
 
 def send(side, vol):
     tick = mt5.symbol_info_tick("XAUUSD")
+    if tick is None:
+        return None
     px = tick.ask if side == 1 else tick.bid
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": vol,
            "type": mt5.ORDER_TYPE_BUY if side == 1 else mt5.ORDER_TYPE_SELL,
-           "price": px, "deviation": 30, "magic": MAGIC, "comment": "dbflow",
+           "price": px, "deviation": 30, "magic": MAGIC, "comment": "fb1",
            "type_filling": mt5.ORDER_FILLING_IOC}
     r = mt5.order_send(req)
     return r if r and r.retcode == mt5.TRADE_RETCODE_DONE else None
@@ -42,19 +43,39 @@ def send(side, vol):
 
 def close(pos):
     tick = mt5.symbol_info_tick("XAUUSD")
+    if tick is None:
+        return None
     side = -1 if pos.type == 0 else 1
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": pos.volume,
            "type": mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY,
            "position": pos.ticket, "price": tick.bid if side == -1 else tick.ask,
-           "deviation": 30, "magic": MAGIC, "comment": "dbflow_exit",
+           "deviation": 30, "magic": MAGIC, "comment": "fb1_exit",
            "type_filling": mt5.ORDER_FILLING_IOC}
     return mt5.order_send(req)
 
 
-def cur_score():
-    data = fetch_all(300)
-    m, buy, sell, sc = build_scores(data)
-    return buy[-1], sell[-1], sc[-1, 9]
+def cur_side():
+    """เทคนิก C# ของนิน: แท่ง M5 ปิดล่าสุด — เทรนด์ผ่าน EMA + stoch ตัดฝั่งในโซน pullback"""
+    r = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 0, 260)
+    if r is None or len(r) < 215:
+        return 0
+    cl = pd.Series([float(x["close"]) for x in r])
+    hi = pd.Series([float(x["high"]) for x in r])
+    lo = pd.Series([float(x["low"]) for x in r])
+    e10 = cl.ewm(span=10, adjust=False).mean().values
+    e20 = cl.ewm(span=20, adjust=False).mean().values
+    e200 = cl.ewm(span=200, adjust=False).mean().values
+    hh = hi.rolling(14).max(); ll = lo.rolling(14).min()
+    k = (100 * (cl - ll) / (hh - ll).replace(0, np.nan)).fillna(50).values
+    d = pd.Series(k).rolling(3).mean().values
+    i = len(cl) - 2  # แท่งปิดล่าสุด
+    if cl[i] > e10[i] and cl[i] > e20[i] and cl[i] > e200[i] and \
+       k[i] > d[i] and k[i - 1] > d[i - 1] and k[i] < 50:
+        return 1
+    if cl[i] < e10[i] and cl[i] < e20[i] and cl[i] < e200[i] and \
+       k[i] < d[i] and k[i - 1] < d[i - 1] and k[i] > 50:
+        return -1
+    return 0
 
 
 def zone_ok(side, px):
@@ -86,24 +107,31 @@ def main():
     init()
     st = {"trades": 0, "wins": 0, "streak": 0, "max_streak": 0,
           "equity": START_EQUITY, "open": None, "log": []}
+    if os.path.exists(STATE):
+        try:
+            st.update(json.load(open(STATE)))
+        except Exception:
+            pass
     last_bar = None
     while True:
         try:
             tick = mt5.symbol_info_tick("XAUUSD")
+            if tick is None:
+                time.sleep(POLL)
+                continue
             bid = tick.bid
             p = pos()
             o = st["open"]
             if p and o:
-                side = o["side"]; en = o["entry"]; slp = o["slp"]
-                fav = (bid - en) * side
-                while fav >= (o["lvl"] + 1) * STEP:
-                    ns = en + side * ((o["lvl"] + 1) * STEP - OFF)
-                    slp = max(slp, ns) if side == 1 else min(slp, ns)
-                    o["lvl"] += 1
-                o["slp"] = slp
+                side = o["side"]; en = o["entry"]; slp = o["slp"]; tpp = o["tpp"]
+                hit = None
                 if (bid <= slp) if side == 1 else (bid >= slp):
+                    hit = slp
+                elif (bid >= tpp) if side == 1 else (bid <= tpp):
+                    hit = tpp
+                if hit is not None:
                     close(p[0])
-                    pnl = (slp - en) * side * p[0].volume * 100
+                    pnl = (hit - en) * side * p[0].volume * 100
                     st["trades"] += 1
                     win = pnl > 0
                     st["wins"] += win
@@ -118,17 +146,26 @@ def main():
             bt = int(r[-2]["time"]) if r is not None and len(r) > 1 else None
             if bt != last_bar:
                 last_bar = bt
-                if not p:
-                    b, s, t10 = cur_score()
-                    side = 1 if b > s else (-1 if s > b else 0)
-                    if side and max(b, s) >= MIN_SCORE and t10 == side and zone_ok(side, bid):
-                        vol = round(min(max(0.01, st["equity"] / 10000.0), 200.0), 2)
+                if not p and st["equity"] > 0:
+                    side = cur_side()
+                    if side and zone_ok(side, bid):
+                        vol = round(min(max(0.01, st["equity"] / 1000.0), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
                             en = rr.price
                             st["open"] = {"side": side, "entry": en,
-                                          "slp": en - side * SL_USD, "lvl": 0, "vol": vol}
+                                          "slp": en - side * SL_USD,
+                                          "tpp": en + side * TP_USD, "vol": vol}
                             print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} flow")
+            # ถอน 10% ทุกวันศุกร์ (ครั้งเดียวต่อสัปดาห์) — เก็บกำไรกันระเบิด
+            now = pd.Timestamp.now()
+            wk = now.isocalendar()[:2]
+            if now.weekday() == 4 and st.get("last_skim") != list(wk) and st["equity"] > START_EQUITY:
+                skim = round(st["equity"] * 0.10, 2)
+                st["equity"] = round(st["equity"] - skim, 2)
+                st["withdrawn"] = round(st.get("withdrawn", 0) + skim, 2)
+                st["last_skim"] = list(wk)
+                print(f"FRIDAY SKIM -${skim} eq ${st['equity']} total wd ${st['withdrawn']}")
             save(st)
         except Exception as e:
             print("err", e)

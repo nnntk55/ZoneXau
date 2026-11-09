@@ -14,7 +14,7 @@ import MetaTrader5 as mt5
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "winbaby_demo.json")
 MAGIC = 20261112
 DCN = 20  # ช่อง donchian 20 แท่ง
-SL_USD = 10.0; STEP = 0.5; OFF = 0.10; POLL = 10
+SL_USD = 5.0; STEP = 0.5; OFF = 0.10; POLL = 10
 START_EQUITY = 100.0
 
 
@@ -75,6 +75,11 @@ def main():
     init()
     st = {"trades": 0, "wins": 0, "streak": 0, "max_streak": 0,
           "equity": START_EQUITY, "open": None, "log": []}
+    if os.path.exists(STATE):
+        try:
+            st.update(json.load(open(STATE)))
+        except Exception:
+            pass
     last_bar = None
     while True:
         try:

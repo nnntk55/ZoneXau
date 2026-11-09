@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Nin 10-checkpoint demo bot — สเปกที่พิสูจน์แล้วบน demo เท่านั้น
-เข้า: คะแนน ≥90% + จุด10 stochRSI ตัดฝั่งเดียวกัน (แท่ง M5 ปิดใหม่)
-ออก: SL $50 | trailing ทุก +$1 ล็อก fav-$0.25 | ไม่มี TP
-lot = bal*0.5/(50*100) → -50% ต่อไม้ | ทีละไม้เดียว | state → charts/dollarsbaby_demo.json"""
+เข้า: คะแนน ≥70% (<$2M; ≥$2M ใช้ ≥90) + จุด10 stochRSI ตัดฝั่งเดียวกัน (แท่ง M5 ปิดใหม่)
+ออก: SL $15 | TP $4 ตายตัว (tick จริง 3wk ≥70+r30%: 166tr → $14.1k DD71%)
+lot = bal*0.3/(15*100) → -30% ต่อไม้ (≥$2M: 36% บน SL15) | ทีละไม้เดียว | state → charts/dollarsbaby_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -14,7 +14,7 @@ from midas_brain.nin_score import build_scores
 
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "dollarsbaby_demo.json")
 MAGIC = 20261110
-SL_USD = 50.0; STEP = 1.0; OFF = 0.25; POLL = 10
+SL_USD = 15.0; TP_USD = 4.0; POLL = 10
 
 
 def init():
@@ -69,26 +69,33 @@ def main():
     init()
     st = {"trades": 0, "wins": 0, "streak": 0, "max_streak": 0,
           "open": None, "log": []}
+    if os.path.exists(STATE):
+        try:
+            st.update(json.load(open(STATE)))
+        except Exception:
+            pass
     last_bar = None
     while True:
         try:
             a = mt5.account_info()
             tick = mt5.symbol_info_tick("XAUUSD")
+            if tick is None:
+                time.sleep(POLL)
+                continue
             bid = tick.bid
             p = pos()
             o = st["open"]
-            # --- จัดการไม้เปิด: trailing ทุก +$1 ---
+            # --- จัดการไม้เปิด: TP $4 / SL $30 ตายตัว ---
             if p and o:
-                side = o["side"]; en = o["entry"]; slp = o["slp"]
-                fav = (bid - en) * side
-                while fav >= (o["lvl"] + 1) * STEP:
-                    ns = en + side * ((o["lvl"] + 1) * STEP - OFF)
-                    slp = max(slp, ns) if side == 1 else min(slp, ns)
-                    o["lvl"] += 1
-                o["slp"] = slp
+                side = o["side"]; en = o["entry"]; slp = o["slp"]; tpp = o["tpp"]
+                hit = None
                 if (bid <= slp) if side == 1 else (bid >= slp):
+                    hit = slp
+                elif (bid >= tpp) if side == 1 else (bid <= tpp):
+                    hit = tpp
+                if hit is not None:
                     close(p[0])
-                    pnl = (slp - en) * side * p[0].volume * 100
+                    pnl = (hit - en) * side * p[0].volume * 100
                     st["trades"] += 1
                     win = pnl > 0
                     st["wins"] += win
@@ -108,14 +115,15 @@ def main():
                     side = 1 if b > s else (-1 if s > b else 0)
                     sc_in = max(b, s)
                     bal = a.balance
-                    mins = 80 if bal < 2_000_000 else 90
+                    mins = 70 if bal < 2_000_000 else 90
                     if side and sc_in >= mins and t10 == side:
-                        vol = round(min(max(0.01, bal * (0.5 if bal < 2_000_000 else 0.36) / (SL_USD * 100)), 200.0), 2)
+                        vol = round(min(max(0.01, bal * (0.3 if bal < 2_000_000 else 0.36) / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
                             en = rr.price
                             st["open"] = {"side": side, "entry": en,
-                                          "slp": en - side * SL_USD, "lvl": 0, "vol": vol}
+                                          "slp": en - side * SL_USD,
+                                          "tpp": en + side * TP_USD, "vol": vol}
                             print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} score {sc_in}%")
                         else:
                             print("send fail")
