@@ -15,7 +15,7 @@ from midas_brain.nin_score import build_scores
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "snackbaby_demo.json")
 MAGIC = 20261111
 MIN_SCORE = 80
-SL_USD = 5.0; STEP = 0.5; OFF = 0.10; RISK = 0.01; POLL = 10
+SL_USD = 10.0; STEP = 0.5; OFF = 0.10; RISK = 0.01; POLL = 10
 START_EQUITY = 100.0
 
 
