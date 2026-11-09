@@ -96,6 +96,33 @@ def t_fetch_url(url):
     return fetch_url(url)
 
 
+def t_read_news(limit=3):
+    """อ่านข่าวยาวจริง: ดึงพาดหัวทองจาก Google News RSS แล้วเปิดเนื้อข่าว top N ให้สมองอ่านเอง"""
+    try:
+        import requests as _rq, xml.etree.ElementTree as ET
+        from agent_tools import fetch_url
+        r = _rq.get("https://news.google.com/rss/search?q=gold+XAUUSD+price&hl=en-US&gl=US&ceid=US:en",
+                    timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        root = ET.fromstring(r.content)
+        entries = root.findall(".//item")
+        items = []
+        for e in entries[:limit]:
+            link = (e.findtext("link") or "").strip()
+            art = ""
+            try:
+                r = _rq.get(link, timeout=10, allow_redirects=True,
+                            headers={"User-Agent": "Mozilla/5.0"})
+                if r.ok:
+                    art = fetch_url(r.url)[:4000]
+            except Exception:
+                pass
+            items.append({"title": e.findtext("title") or "", "published": e.findtext("pubDate") or "",
+                          "link": link, "article": art})
+        return {"items": items, "note": "เนื้อข่าวจริง — ว่าง=เว็บบล็อก bot อ่านแค่พาดหัว"}
+    except Exception as e:
+        return {"error": f"read_news unavailable: {e}"}
+
+
 def t_memory_search(query=""):
     d = _load_hyp()
     rows = d["hypotheses"]
@@ -142,6 +169,9 @@ TOOLS = [
     {"type": "function", "function": {"name": "fetch_url",
         "description": "เปิดอ่านหน้าเว็บ/เอกสารจากลิงก์ เมื่อต้องการหลักฐานเพิ่มที่ไม่มีในระบบ",
         "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}}},
+    {"type": "function", "function": {"name": "read_news",
+        "description": "อ่านข่าวยาวจริงเกี่ยวกับทอง/USD (top N) — ใช้ประกอบ verdict ว่าอะไรขับตลาด ไม่ต้องส่งให้นิน ส่งแค่ผล verdict",
+        "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "description": "จำนวนข่าวสูงสุด ค่าเริ่มต้น 3"}}}}},
     {"type": "function", "function": {"name": "record_hypothesis",
         "description": "บันทึกสมมติฐานที่ตั้งไว้ + สิ่งที่คาดว่าจะเห็นถ้ามันจริง",
         "parameters": {"type": "object", "properties": {
@@ -168,6 +198,7 @@ IMPL = {
     "market_intel": lambda a: t_market_intel(),
     "technical": lambda a: t_technical(a.get("tfs")),
     "fetch_url": lambda a: t_fetch_url(a.get("url", "")),
+    "read_news": lambda a: t_read_news(int(a.get("limit", 3))),
     "record_hypothesis": lambda a: t_record_hypothesis(a.get("text", ""), a.get("expects", "")),
     "add_evidence": lambda a: t_add_evidence(int(a.get("hyp_id", 0)), a.get("note", ""), a.get("verdict")),
 }
