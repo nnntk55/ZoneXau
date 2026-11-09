@@ -155,7 +155,7 @@ def init_mt5():
     if not mt5.initialize():
         print("❌ MetaTrader5 initialize failed")
         return False
-    if ACCOUNT and PASSWORD and SERVER:
+    if ACCOUNT and PASSWORD and SERVER and not os.environ.get("MT5_NOLOGIN"):
         authorized = mt5.login(ACCOUNT, password=PASSWORD, server=SERVER)
         if not authorized:
             print(f"❌ Failed to connect to Exness MT5: {mt5.last_error()}")

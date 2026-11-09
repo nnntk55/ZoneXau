@@ -2,7 +2,7 @@
 """Nin 10-checkpoint demo bot — สเปกที่พิสูจน์แล้วบน demo เท่านั้น
 เข้า: คะแนน ≥90% + จุด10 stochRSI ตัดฝั่งเดียวกัน (แท่ง M5 ปิดใหม่)
 ออก: SL $50 | trailing ทุก +$1 ล็อก fav-$0.25 | ไม่มี TP
-lot = bal*0.5/(50*100) → -50% ต่อไม้ | ทีละไม้เดียว | state → charts/millionbaby_demo.json"""
+lot = bal*0.5/(50*100) → -50% ต่อไม้ | ทีละไม้เดียว | state → charts/dollarsbaby_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -12,7 +12,7 @@ import MetaTrader5 as mt5
 from midas_brain.sniper_bt import fetch_all, TFS
 from midas_brain.nin_score import build_scores
 
-STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "millionbaby_demo.json")
+STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "dollarsbaby_demo.json")
 MAGIC = 20261110
 SL_USD = 50.0; STEP = 1.0; OFF = 0.25; POLL = 10
 
