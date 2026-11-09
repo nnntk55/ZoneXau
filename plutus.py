@@ -891,6 +891,41 @@ def daily_nudge(last_date):
         tg_send("พลูตัส เช้านี้ครับ:\n" + "\n".join(lines))
     return today
 
+def month_end_report():
+    """วันที่ 1 ของเดือนใหม่ >= 09:00 — สรุปบัญชีเดือนที่แล้วให้นิน (เดือนละครั้ง)"""
+    now = datetime.now(TH)
+    if now.day != 1 or now.hour < 9:
+        return
+    conf = _sched_conf()
+    if conf.get("last_eom") == now.strftime("%Y-%m"):
+        return
+    prev = (now - timedelta(days=1)).strftime("%Y-%m")
+    r = monthly_report(prev)
+    lines = [f"สรุปบัญชีเดือน {prev}:"]
+    for k in ("รับ", "จ่าย", "เก็บ", "สำรอง"):
+        lines.append(f"{k}: {r[k] or '-'}")
+    if r["รับ_แยกหมวด"]:
+        lines.append("รับแยกหมวด: " + ", ".join(f"{c} {v:,.0f}" for c, v in r["รับ_แยกหมวด"]))
+    if r["จ่าย_แยกหมวด"]:
+        lines.append("จ่ายแยกหมวด: " + ", ".join(f"{c} {v:,.0f}" for c, v in r["จ่าย_แยกหมวด"]))
+    port = port_snapshot()
+    if port:
+        lines.append(f"พอร์ทเทรดตอนนี้: equity ${port.get('equity')} balance ${port.get('balance')} "
+                     f"profit ${port.get('profit')} margin ${port.get('margin')}")
+    un = unpaid_list()
+    if un:
+        lines.append("ค้างชำระคงเหลือ: " + ", ".join(f"{p['who']} {p['amount']:,.0f} (ครบ {p.get('due','-')})" for p in un))
+    conf["last_eom"] = now.strftime("%Y-%m"); _sched_save(conf)
+    src = "\n".join(lines)
+    chat_history.append({"role": "user", "content": f"[ระบบ] ปิดเดือน {prev}\n{src}"})
+    save_memory()
+    reply = handle("[ระบบ] สิ้นเดือนแล้ว สรุปบัญชีให้นินจากข้อมูลจริงข้างล่างเป็นหมวดชัดๆ "
+                   "(รับ/จ่าย/เก็บ/สำรอง แยกหมวดใหญ่ พอร์ทเทรด และค้างชำระถ้ามี) ห้ามเดาตัวเลข:\n" + src)
+    if reply:
+        chat_history.append({"role": "assistant", "content": reply})
+        save_memory()
+        tg_send(reply)
+
 def saturday_round():
     """เสาร์หลัง 20:00 — อ่านชีทสอนแล้วให้พลูตัสตัดรอบสรุปให้นิน (วันละครั้ง)"""
     now = datetime.now(TH)
@@ -926,6 +961,7 @@ def main():
         try:
             nudge = daily_nudge(nudge)
             saturday_round()
+            month_end_report()
             # ผลงานที่วินทำเสร็จส่งกลับเข้า inbox — ให้พลูตัสรายงานนินต่อในบทบาทตัวเอง
             if os.path.exists(PLUTUS_INBOX):
                 try:
