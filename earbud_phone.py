@@ -2,7 +2,7 @@
 """earbud_phone.py — รันบน Termux (Android) ให้นินคุยกับวินผ่านหูฟัง
 
 ติดตั้งครั้งแรกบนมือถือ (เปิด Termux):
-  pkg install python termux-api -y
+  pkg install python ffmpeg mpv -y      (termux-api ด้วยถ้ามี ถ้าไม่มีก็ใช้ ffmpeg แทน)
   pip install requests edge-tts
   echo "<EARBUD_TOKEN ที่วินส่งให้ในแชท>" > ~/win_token.txt
   python earbud_phone.py
@@ -33,10 +33,18 @@ def token():
 
 
 def record():
-    """อัดเสียง REC_SECS วิ คืน bytes หรือ None"""
+    """อัดเสียง REC_SECS วิ คืน bytes หรือ None — termux-api ก่อน ไม่มีใช้ ffmpeg opensles"""
     try:
         subprocess.run(["termux-microphone-record", "-f", REC, "-l", str(REC_SECS)],
                        timeout=REC_SECS + 10, capture_output=True)
+        if os.path.exists(REC) and os.path.getsize(REC) > 2000:
+            return open(REC, "rb").read()
+    except Exception:
+        pass
+    try:
+        if os.path.exists(REC): os.remove(REC)
+        subprocess.run(["ffmpeg", "-y", "-f", "opensles", "-i", "default", "-t", str(REC_SECS), REC],
+                       timeout=REC_SECS + 15, capture_output=True)
         if os.path.exists(REC) and os.path.getsize(REC) > 2000:
             return open(REC, "rb").read()
     except Exception as e:
@@ -81,7 +89,9 @@ def speak(text):
     async def gen():
         await edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", pitch="+0Hz").save(out)
     asyncio.run(gen())
-    subprocess.run(["termux-media-player", "play", out], capture_output=True, timeout=300)
+    r = subprocess.run(["termux-media-player", "play", out], capture_output=True, timeout=300)
+    if r.returncode != 0:
+        subprocess.run(["mpv", "--really-quiet", out], capture_output=True, timeout=300)
     # รอให้เล่นจบคร่าวๆ ตามความยาว
     time.sleep(max(2, len(text) // 18))
 
