@@ -1284,14 +1284,17 @@ def _openrouter_models():
         _rlog(f"OpenRouter list models error: {e}")
     return [m.strip() for m in OPENROUTER_MODELS if m.strip()]
 
+OPENROUTER_PAID_MODEL = os.environ.get("OPENROUTER_PAID_MODEL", "anthropic/claude-haiku-4.5")
+
 def openrouter_call():
-    """สมองสำรอง 3 — OpenRouter free models ลองทีละตัวจนเจอที่ตอบ"""
+    """สมองสำรอง 3 — OpenRouter: ลองโมเดลเสียเงินก่อน (คิดลึกกว่า) เครดิตหมดค่อยหล่นไปของฟรี"""
     if not OPENROUTER_API_KEY:
         return None
     tools = [{"type": "function", "function": {"name": d["name"],
         "description": d.get("description", ""), "parameters": d.get("parameters", {})}}
         for d in GEMINI_TOOLS[0]["function_declarations"]]
-    for model in _openrouter_models():
+    models = [OPENROUTER_PAID_MODEL] + _openrouter_models() if OPENROUTER_PAID_MODEL else _openrouter_models()
+    for model in models:
         try:
             r = requests.post("https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
@@ -1349,8 +1352,8 @@ def tg_download_photo(file_id):
         return None
     return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
 
-# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER (เช่น "groq,openrouter,gemini")
-MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "groq,openrouter,gemini").split(",") if m.strip()]
+# ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER (เช่น "groq,openrouter,gemini") — default ให้ OpenRouter (Claude เสียเงิน) มาก่อน
+MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "openrouter,groq,gemini").split(",") if m.strip()]
 PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call, "openrouter": openrouter_call}
 
 def _call_providers():
