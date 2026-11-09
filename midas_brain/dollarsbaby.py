@@ -109,7 +109,7 @@ def main():
                     sc_in = max(b, s)
                     if side and sc_in >= 90 and t10 == side:
                         bal = a.balance
-                        vol = round(max(0.01, bal * 0.5 / (SL_USD * 100)), 2)
+                        vol = round(min(max(0.01, bal * (0.5 if bal < 2_000_000 else 0.36) / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
                             en = rr.price
