@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""snackbaby — ค่าขนมรายวัน: สัญญาณเดียวกับ dollarsbaby (score ≥90 + stochRSI ฝั่งเดียวกัน)
-แต่ปิดแบบ 1:1 เร็ว: TP +1000pt / SL -1000pt (±$1) ฝังในออเดอร์เลย broker จัดการเอง
-lot คงที่ 0.01 ไม่ทบ — พอร์ทจำลองเริ่ม $100 ติดตามผลใน state
+"""snackbaby — ค่าขนมรายวัน: สัญญาณเดียวกับ dollarsbaby แต่ผ่อนเกณฑ์เป็น score ≥80
+(ทำให้สัญญาณถี่ขึ้นเท่าตัว ~2.5 ไม้/วัน จาก backtest 17 เดือน: 2606 ไม้ WR 72% exp +0.87)
+ออก: SL $5 | trail step $0.5 ล็อก fav-$0.10 | ไม่มี TP | ทีละไม้เดียว
+ล็อตทบต้น = 1% ของ equity จำลอง (เริ่ม $100) — ที่ $100 ติดพื้น 0.01 = เสี่ยง ~5%/ไม้
 demo เท่านั้น — state → charts/snackbaby_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,11 +14,9 @@ from midas_brain.nin_score import build_scores
 
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "snackbaby_demo.json")
 MAGIC = 20261111
-TP_PTS = 1000   # +$1.00 (point=0.001)
-SL_PTS = 1000   # -$1.00
-VOL = 0.01
+MIN_SCORE = 80
+SL_USD = 5.0; STEP = 0.5; OFF = 0.10; RISK = 0.01; POLL = 10
 START_EQUITY = 100.0
-POLL = 10
 
 
 def init():
@@ -28,17 +27,25 @@ def init():
 
 
 def send(side, vol):
-    info = mt5.symbol_info("XAUUSD"); pt = info.point
     tick = mt5.symbol_info_tick("XAUUSD")
     px = tick.ask if side == 1 else tick.bid
-    sl = px - side * SL_PTS * pt
-    tp = px + side * TP_PTS * pt
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": vol,
            "type": mt5.ORDER_TYPE_BUY if side == 1 else mt5.ORDER_TYPE_SELL,
-           "price": px, "sl": sl, "tp": tp, "deviation": 30, "magic": MAGIC,
-           "comment": "snack", "type_filling": mt5.ORDER_FILLING_IOC}
+           "price": px, "deviation": 30, "magic": MAGIC, "comment": "snack",
+           "type_filling": mt5.ORDER_FILLING_IOC}
     r = mt5.order_send(req)
     return r if r and r.retcode == mt5.TRADE_RETCODE_DONE else None
+
+
+def close(pos):
+    tick = mt5.symbol_info_tick("XAUUSD")
+    side = -1 if pos.type == 0 else 1
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": pos.volume,
+           "type": mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY,
+           "position": pos.ticket, "price": tick.bid if side == -1 else tick.ask,
+           "deviation": 30, "magic": MAGIC, "comment": "snack_exit",
+           "type_filling": mt5.ORDER_FILLING_IOC}
+    return mt5.order_send(req)
 
 
 def cur_score():
@@ -62,37 +69,51 @@ def save(st):
 
 def main():
     init()
-    st = {"trades": 0, "wins": 0, "equity": START_EQUITY,
-          "open_ticket": None, "log": []}
+    st = {"trades": 0, "wins": 0, "streak": 0, "max_streak": 0,
+          "equity": START_EQUITY, "open": None, "log": []}
     last_bar = None
     while True:
         try:
-            # ไม้ที่เปิดอยู่โดน TP/SL ฝั่ง broker ปิดเอง — เช็กจาก deal history
+            tick = mt5.symbol_info_tick("XAUUSD")
+            bid = tick.bid
             p = pos()
-            if st["open_ticket"] and not any(x.ticket == st["open_ticket"] for x in p):
-                ds = mt5.history_deals_get(st["open_ticket"]) or []
-                pnl = sum(d.profit for d in ds if d.magic == MAGIC)
-                if pnl != 0.0:
+            o = st["open"]
+            if p and o:
+                side = o["side"]; en = o["entry"]; slp = o["slp"]
+                fav = (bid - en) * side
+                while fav >= (o["lvl"] + 1) * STEP:
+                    ns = en + side * ((o["lvl"] + 1) * STEP - OFF)
+                    slp = max(slp, ns) if side == 1 else min(slp, ns)
+                    o["lvl"] += 1
+                o["slp"] = slp
+                if (bid <= slp) if side == 1 else (bid >= slp):
+                    close(p[0])
+                    pnl = (slp - en) * side * p[0].volume * 100
+                    st["trades"] += 1
                     win = pnl > 0
-                    st["trades"] += 1; st["wins"] += win
+                    st["wins"] += win
+                    st["streak"] = st["streak"] + 1 if win else 0
+                    st["max_streak"] = max(st["max_streak"], st["streak"])
                     st["equity"] = round(st["equity"] + pnl, 2)
-                    st["log"].append({"t": str(pd.Timestamp.now()), "pnl": round(pnl, 2), "win": win})
-                    print(f"close pnl ${pnl:+.2f} eq ${st['equity']:.2f}")
-                st["open_ticket"] = None
-            # สัญญาณเข้าเมื่อแท่ง M5 ปิดใหม่ และไม่มีไม้ค้าง
+                    st["log"].append({"t": str(pd.Timestamp.now()), "pnl": round(pnl, 2),
+                                      "win": win, "side": "buy" if side == 1 else "sell"})
+                    st["open"] = None
+                    print(f"close pnl ${pnl:+.2f} eq ${st['equity']:.2f} streak={st['streak']}")
             r = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 0, 2)
             bt = int(r[-2]["time"]) if r is not None and len(r) > 1 else None
             if bt != last_bar:
                 last_bar = bt
-                if not p and st["open_ticket"] is None:
+                if not p:
                     b, s, t10 = cur_score()
                     side = 1 if b > s else (-1 if s > b else 0)
-                    if side and max(b, s) >= 90 and t10 == side:
-                        vol = round(min(max(0.01, st["equity"] / 10000.0), 200.0), 2)
+                    if side and max(b, s) >= MIN_SCORE and t10 == side:
+                        vol = round(min(max(0.01, st["equity"] * RISK / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
-                            st["open_ticket"] = rr.order
-                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {rr.price} score {max(b,s)}%")
+                            en = rr.price
+                            st["open"] = {"side": side, "entry": en,
+                                          "slp": en - side * SL_USD, "lvl": 0, "vol": vol}
+                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} score {max(b,s)}%")
             save(st)
         except Exception as e:
             print("err", e)
