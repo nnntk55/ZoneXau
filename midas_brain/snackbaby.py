@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""snackbaby — ค่าขนมรายวัน: สัญญาณเดียวกับ dollarsbaby แต่ผ่อนเกณฑ์เป็น score ≥80
-(ทำให้สัญญาณถี่ขึ้นเท่าตัว ~2.5 ไม้/วัน จาก backtest 17 เดือน: 2606 ไม้ WR 72% exp +0.87)
-ออก: SL $5 | trail step $0.5 ล็อก fav-$0.10 | ไม่มี TP | ทีละไม้เดียว
-ล็อตทบต้น = 1% ของ equity จำลอง (เริ่ม $100) — ที่ $100 ติดพื้น 0.01 = เสี่ยง ~5%/ไม้
+"""snackbaby — ค่าขนมรายวัน สัญญาณออกแบบเองของวิน: MOMENTUM-12
+เข้า: แท่ง M5 ปิด vs ปิด 12 แท่งก่อน (โมเมนตัม 1 ชม.) — เหนือ = buy / ใต้ = sell (±$2 min)
+ออก: SL $10 | trail step $0.5 ล็อก fav-$0.10 | ไม่มี TP | ทีละไม้เดียว
+backtest 17 เดือน: 16,390 ไม้ WR 82% exp +1.38 streak 46 — ถี่สุดในบ้าน
+ล็อตทบต้น = 1% ของ equity จำลอง (เริ่ม $100) — ที่ $100 ติดพื้น 0.01
 demo เท่านั้น — state → charts/snackbaby_demo.json"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import pandas as pd
 import MetaTrader5 as mt5
-from midas_brain.sniper_bt import fetch_all
-from midas_brain.nin_score import build_scores
 
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "snackbaby_demo.json")
 MAGIC = 20261111
-MIN_SCORE = 80
+MOM_BARS = 12      # โมเมนตัม 12 แท่ง M5 = 1 ชม.
+MOM_MIN = 2.0      # ต้องขยับเกิน $2 ถึงนับเป็นสัญญาณ
 SL_USD = 10.0; STEP = 0.5; OFF = 0.10; RISK = 0.01; POLL = 10
 START_EQUITY = 100.0
 
@@ -48,10 +48,13 @@ def close(pos):
     return mt5.order_send(req)
 
 
-def cur_score():
-    data = fetch_all(300)
-    m, buy, sell, sc = build_scores(data)
-    return buy[-1], sell[-1], sc[-1, 9]
+def cur_side():
+    """โมเมนตัมแบบง่ายของวิน: ปิดล่าสุด vs ปิด 12 แท่งก่อน (แท่งปิดแล้วเท่านั้น)"""
+    r = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 0, MOM_BARS + 3)
+    if r is None or len(r) < MOM_BARS + 2:
+        return 0
+    mom = float(r[-2]["close"]) - float(r[-2 - MOM_BARS]["close"])
+    return 1 if mom > MOM_MIN else (-1 if mom < -MOM_MIN else 0)
 
 
 def pos():
@@ -104,16 +107,15 @@ def main():
             if bt != last_bar:
                 last_bar = bt
                 if not p:
-                    b, s, t10 = cur_score()
-                    side = 1 if b > s else (-1 if s > b else 0)
-                    if side and max(b, s) >= MIN_SCORE and t10 == side:
+                    side = cur_side()
+                    if side:
                         vol = round(min(max(0.01, st["equity"] * RISK / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
                             en = rr.price
                             st["open"] = {"side": side, "entry": en,
                                           "slp": en - side * SL_USD, "lvl": 0, "vol": vol}
-                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} score {max(b,s)}%")
+                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {en} mom")
             save(st)
         except Exception as e:
             print("err", e)
