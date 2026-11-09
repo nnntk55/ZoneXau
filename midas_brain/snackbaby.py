@@ -27,13 +27,13 @@ def init():
     return a
 
 
-def send(side):
+def send(side, vol):
     info = mt5.symbol_info("XAUUSD"); pt = info.point
     tick = mt5.symbol_info_tick("XAUUSD")
     px = tick.ask if side == 1 else tick.bid
     sl = px - side * SL_PTS * pt
     tp = px + side * TP_PTS * pt
-    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": VOL,
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": "XAUUSD", "volume": vol,
            "type": mt5.ORDER_TYPE_BUY if side == 1 else mt5.ORDER_TYPE_SELL,
            "price": px, "sl": sl, "tp": tp, "deviation": 30, "magic": MAGIC,
            "comment": "snack", "type_filling": mt5.ORDER_FILLING_IOC}
@@ -88,10 +88,11 @@ def main():
                     b, s, t10 = cur_score()
                     side = 1 if b > s else (-1 if s > b else 0)
                     if side and max(b, s) >= 90 and t10 == side:
-                        rr = send(side)
+                        vol = round(min(max(0.01, st["equity"] / 10000.0), 200.0), 2)
+                        rr = send(side, vol)
                         if rr:
                             st["open_ticket"] = rr.order
-                            print(f"OPEN {'buy' if side==1 else 'sell'} {VOL} @ {rr.price} score {max(b,s)}%")
+                            print(f"OPEN {'buy' if side==1 else 'sell'} {vol} @ {rr.price} score {max(b,s)}%")
             save(st)
         except Exception as e:
             print("err", e)
