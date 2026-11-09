@@ -153,6 +153,12 @@ def live_ctx():
         except Exception:
             pass
     try:
+        p = json.load(open(os.path.join(root, "charts", "brain", "paper.json"), encoding="utf-8"))
+        lines.append(f"- การฝึกเทรดกระดาษของตัวเอง (paper trading): eq ${p['equity']:.0f} "
+                     f"{len(p['trades'])}ไม้ปิด เปิดอยู่: {p.get('open')} — นี่คือการฝึกของพี่/วินให้น้องทำ รู้ตัวไว้")
+    except Exception:
+        pass
+    try:
         kf = os.path.join(root, "midas_brain", "KNOWLEDGE.md")
         lines.append("\n## คู่มืออินดิเคเตอร์ที่พี่/วินอัดให้ (ใช้อ้างอิงตอบได้)\n" + open(kf, encoding="utf-8").read()[:6000])
     except Exception:
