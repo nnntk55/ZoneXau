@@ -108,6 +108,8 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - ข้อความที่ขึ้นต้นด้วย [EVENT] คือข่าวจากบอทเทรด (ปิดออเดอร์/แผนหยุด/ข่าวแรง) ไม่ใช่คำพูดพี่ — รายงานผลให้พี่ฟังในบทบาทของคุณ สั้นๆ มีน้ำหนัก
 - [EVENT] ขาดทุน (profit ติดลบ/วันติดลบ) → รายงานผลแล้วถามพี่ว่า "จะหยุดวางแผนใหม่ หรือไปต่อ" — ห้ามหยุดเอง เด็ดขาด การตัดสินใจเป็นของพี่ (พี่ตอบหยุด → set_power off; ตอบไปต่อ → ปล่อยระบบทำงานต่อ)
 - พี่ถามว่าเทรดช่วงไหนดี/จะตั้งเวลาเทรด → เรียก get_hour_stats ดูผลจริงแยกช่วงเวลาก่อน บอกจำนวนไม้ด้วย ถ้าไม้น้อยให้บอกตรงๆ ว่ายังสรุปไม่ได้ ห้ามตั้ง window เองถ้าพี่ไม่ได้สั่ง
+
+
 - พี่ถามเรื่องข่าว/ทำไมทองขึ้นลง/DXY/ยีลด์/Fed/macro → เรียก get_market_intel ทุกครั้งก่อนตอบ แล้วตอบจากข้อมูลจริงที่ tool คืนเท่านั้น — ห้ามเดาข่าว ห้ามจำตัวเลขจากบทสนทนาเก่า ถ้า tool error ให้บอกพี่ว่าดึงข้อมูลไม่ได้ (get_news = เฉพาะปฏิทินข่าว ไม่ใช่ภาพรวมตลาด)
 - พี่ถามทิศทาง/bias/กราฟเป็นขาอะไร/แนวรับต้าน/โซน → เรียก get_market_intel แล้วอ่าน field "tech": **ทิศทาง stoch บน D1 (stoch_k/stoch_d + stoch_zone/cross/stoch_dir) คือ bias หลักของพี่** — stoch D1 ไหลขึ้น = bias ขึ้น ไหลลง = bias ลง; พี่ถามว่า stoch TF ไหนกำลังขึ้นหรือลง ให้ตอบจาก tfs[TF].stoch_dir + stoch_k เทียบ stoch_k_prev + K เทียบ D ของ TF นั้น ห้ามตอบว่า "ดูไม่ได้/ไม่รู้ว่าขึ้นหรือลง" ถ้า field เหล่านี้มีค่า; tfs[TF].vs_ema200 บอกราคาอยู่เหนือ/ใต้ EMA200 — ใต้ EMA200 = bias ใหญ่ยังเป็นขาลงแม้เทรนด์ระยะสั้นจะขึ้น พูดตามนั้นตรงๆ; **ทิศทางเทคนิคต้องตอบจาก field tech เท่านั้น ห้ามอ้าง macro/ข่าวเป็นเหตุผลว่ากราฟเป็นขาอะไร**; tech.daily_bias/tech.tfs[trend,structure] ประกอบ, tech.zones = โซนรับ/ต้านที่ระบบสแกนจากแท่ง MT5 จริง (โซนสลับข้าง = แนวเก่าถูกทะลุกลายเป็นแนวฝั่งตรงข้าม), tech.levels = แนวเส้นรวมจุดสูงสุด/ต่ำสุดเก่าที่ยังไม่ทะลุ, **tech.flow_read = บทอ่านทิศตามวิธีพี่** (H4 ยังเป็นขา + stoch D1 ไหลยังไม่สุด + ทะลุโซนเก่าแต่ยังไม่ชนโซนถัดไป → มีแนวโน้มไปต่อถึงโซนถัดไปก่อนกลับตัว) — พี่ถาม "จะไปต่อไหม/แนวโน้ม/ถึงไหน" ให้ใช้ flow_read ตอบตรงๆ พร้อมชื่อโซนเป้าหมาย; **tech.call_stats = สถิติความแม่นจริงของบทอ่านระบบ** (hit=ถึงเป้า miss=หลุดกลับฝั่งตรงข้าม flipped=สลับทิศก่อนถึงเป้า) — พี่ถามว่าบทวิเคราะห์/ระบบแม่นไหมให้ตอบจากเลขนี้ตรงๆ อย่าโอ้อวด — ตอบเป็นบทวิเคราะห์ของตัวเองจากข้อมูลนี้ ห้ามตอบ "ไม่รู้" ถ้า tech มีข้อมูล; ถ้า tech หายจริงๆ (field ว่าง/ไม่มี) ค่อยบอกพี่ว่าข้อมูลเทคนิคไม่มา ยกเว้นสิทธิ์นี้ — ถ้าพี่ถามเรื่องที่ไม่มีข้อมูลจริงๆ ให้บอกตรงๆ ไม่ต้องเดา
 - พี่ถามวิเคราะห์ครบ/ควรเทรดไหม/ช่วงข่าวยังไง/จะเข้าตรงไหน → เรียก get_market_intel แล้วตอบตามสูตรพี่ 4 ชั้น: (1) **เบื้องหลังขับราคา** — why_moved+five_questions+regime+divergences ว่าอะไรขับทองตอนนี้ (2) **ข่าว** — news_read ข่าวแรงถัดไปอีกกี่ชม./แนวโน้มผลกระทบ/ควรเลี่ยงไหม (เลี่ยง ±15-30 นาทีรอบข่าวแรง อย่าเดาทิศก่อนตัวเลขออก) (3) **เทคนิค top-down** — tech.trade_read (ทิศจาก W1/D1/H4 → โซนเป้าหมาย → สัญญาณ LTF) + flow_read + zones ตอบชัดว่า ควรเทรดไหม ถ้าควรรอต้องรอสัญญาณอะไรที่ไหน (4) **จุดเข้า** — เข้าบน M15/M5 เมื่อสัญญาณตรงทิศ HTF ที่โซนเท่านั้น ไม่ไล่กลางทาง; ถ้า trade_read verdict=หลีกเลี่ยงให้บอกพี่ตรงๆ ว่าไม่ควรเทรด
@@ -131,6 +133,32 @@ SYSTEM_PROMPT = """คุณคือ "Midas" — ปิศาจผมทอง
 - เปลี่ยน stage_tfs/set ใดๆ → บอทจะอ่านค่าใหม่รอบถัดไปเอง หลังตั้งเสร็จให้บอกพี่ว่าตั้งอะไรตรงไหนบ้างตามผล tool จริง
 - หลัง set_direction/set_stage_plan/set_power ระบบจะต่อท้ายบรรทัดสถานะจริงจากแดชบอร์ดให้เอง (ON/OFF, ทิศ, stage ที่เปิด, ออโต้/ถามก่อน, เวลา) — ไม่ต้องทวนสถานะซ้ำเอง ตอบสั้นๆ พอ
 """
+def live_ctx():
+    """บริบทสดของระบบ — โหลดทุกข้อความให้มิดาสรู้ว่าบ้านเป็นไง (ตอบคำถามทั่วไปได้จริง ไม่ใช่ไร้บริบท)"""
+    lines = ["\n\n## บริบทบ้านสด (อัปเดตทุกข้อความ — ใช้ตอบคำถามได้ทันที ไม่ต้องเดา)"]
+    babies = [
+        ("snackbaby", "สเกิร์ป mom-12 M5 (ของวิน/เดวิน)"),
+        ("winbaby", "dcn-20 M5 (ของวิน/เดวิน)"),
+        ("dollarsbaby", "คะแนนนิน ≥70 + TP4/SL15 risk30% (ของพี่)"),
+        ("flowbaby1", "C#+โซน compound โหด $20 (ของพี่)"),
+        ("flowbaby2", "C#+โซน stable $1000 (ของพี่)"),
+    ]
+    root = os.path.dirname(os.path.abspath(__file__))
+    for name, desc in babies:
+        try:
+            s = json.load(open(os.path.join(root, "charts", f"{name}_demo.json"), encoding="utf-8"))
+            eq = s.get("equity")
+            lines.append(f"- {name} ({desc}): {s['trades']}ไม้ ชนะ{s['wins']} "
+                         f"eq ${eq if eq is not None else '-'} {'กำลังถือไม้' if s.get('open') else 'ว่าง'}")
+        except Exception:
+            pass
+    try:
+        kf = os.path.join(root, "midas_brain", "KNOWLEDGE.md")
+        lines.append("\n## คู่มืออินดิเคเตอร์ที่พี่/วินอัดให้ (ใช้อ้างอิงตอบได้)\n" + open(kf, encoding="utf-8").read()[:6000])
+    except Exception:
+        pass
+    return "\n".join(lines)
+
 
 # ==========================================
 # PERSISTENT MEMORY — จำข้ามการรีสตาร์ท
@@ -1100,7 +1128,7 @@ def gemini_call(contents):
     body = {
         "contents": _with_thought_signatures(contents),
         "tools": GEMINI_TOOLS,
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT + live_ctx()}]},
         "generationConfig": {"temperature": 0.3},
     }
     models = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
@@ -1132,7 +1160,7 @@ def gemini_call(contents):
 def _to_openai_messages():
     """แปลง history แบบ Gemini -> OpenAI: tool_calls ของเทิร์นเดียวรวมใน assistant message เดียว
     id ไม่ซ้ำ และทุก tool_call ต้องมี tool response ตามทันที (ไม่งั้น Groq/OpenRouter ตอบ 400)"""
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT + live_ctx()}]
     pending = []  # [(id, name)] tool_calls ที่ยังไม่ได้ผล
     n = 0
 
