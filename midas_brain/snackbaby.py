@@ -109,7 +109,7 @@ def main():
                 if not p:
                     side = cur_side()
                     if side:
-                        vol = round(min(max(0.01, st["equity"] * RISK / (SL_USD * 100)), 200.0), 2)
+                        vol = round(min(max(0.01, st["equity"] / 10000.0), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
                             en = rr.price
