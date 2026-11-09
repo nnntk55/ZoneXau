@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """runnerbaby — ตัวเก็บยาวของวิน: DONCHIAN-48 breakout บน M15 (ช่อง 12 ชม.)
 เข้า: แท่ง M15 ปิดทะลุจุดสูงสุด/ต่ำสุด 48 แท่ง → ตามทาง breakout
-ออก: SL $15 | trail step $2.0 ล็อก fav-$0.75 | ไม่มี TP — ปล่อยวิ่งตามเทรนด์
-backtest M15 ~70 วัน: 2,792 ไม้ WR 80% avg +$1.38/ไม้ streak 39
+ออก: SL $5 | trail step $0.5 ล็อก fav-$0.25 | ไม่มี TP
+backtest tick จริง 3 สัปดาห์: 98 ไม้ WR 96% สุทธิ +$34 @$100 streak 51
 ล็อตทบต้น = equity ÷ 10,000 (เริ่ม $100) | ทีละไม้เดียว | เพดาน 200 lot
 demo เท่านั้น — state → charts/runnerbaby_demo.json"""
 import os, sys, time, json
@@ -14,7 +14,7 @@ import MetaTrader5 as mt5
 STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts", "runnerbaby_demo.json")
 MAGIC = 20261113
 DCN = 48
-SL_USD = 15.0; STEP = 2.0; OFF = 0.75; POLL = 15
+SL_USD = 5.0; STEP = 0.5; OFF = 0.25; POLL = 15
 START_EQUITY = 100.0
 
 
