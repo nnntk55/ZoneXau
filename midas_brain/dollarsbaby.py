@@ -107,8 +107,9 @@ def main():
                     b, s, t10 = cur_score()
                     side = 1 if b > s else (-1 if s > b else 0)
                     sc_in = max(b, s)
-                    if side and sc_in >= 90 and t10 == side:
-                        bal = a.balance
+                    bal = a.balance
+                    mins = 80 if bal < 2_000_000 else 90
+                    if side and sc_in >= mins and t10 == side:
                         vol = round(min(max(0.01, bal * (0.5 if bal < 2_000_000 else 0.36) / (SL_USD * 100)), 200.0), 2)
                         rr = send(side, vol)
                         if rr:
