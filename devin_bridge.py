@@ -244,7 +244,8 @@ def deliver(st, text, force_cloud=False):
 # ---------- โหมด local: ส่งงานให้ Devin CLI บนเครื่องนี้ (คิดแค่ token ถูกกว่า cloud) ----------
 LOCAL_DIR = os.getenv("DEVIN_WORKDIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "devin_work", "ZoneXau")
 LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "bypass")  # อนุญาตทุกอย่างไม่ต้องกดยืนยัน (deny ใน .devin/config.json ยังกันอยู่)
-LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "2400"))
+# 0 = ไม่ตัดงานเอง (นินสั่ง: ตัด 40 นาทีเสียเวลา งานหายหมด) — หยุดได้ด้วย /stop เท่านั้น
+LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "0"))
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
                  "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
@@ -268,7 +269,8 @@ LOCAL_RULES_V = 7
 LOCAL_SHORT_RULE = ("[กฎทุกข้อความ: งานที่คาดว่าเกิน 2 นาที (backtest/optimize/ดาวน์โหลดข้อมูลเยอะ) ห้ามรันรอผลเอง — "
                     "ประเมินเวลาก่อน (`python bg_job.py --estimate <สคริปต์>` หรือรันชุดเล็กแล้วคูณ) แล้วรัน "
                     "`python bg_job.py \"ชื่องาน\" -- <คำสั่ง>` ตอบนินทันทีว่ารันอะไร คาดว่ากี่นาที | "
-                    "ย้ายไปเบื้องหลังไม่ได้และเกิน 10 นาที ให้ถามนินก่อน]")
+                    "ย้ายไปเบื้องหลังไม่ได้และเกิน 10 นาที ให้ถามนินก่อน | นินถามความคืบหน้า: ห้ามเริ่มงานเดิมใหม่ "
+                    "ให้ดู `python bg_job.py --estimate <ชื่องาน>` กับ log ใน _telegram/jobs แล้วตอบว่าถึงไหน เหลืออีกกี่นาที]")
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0, "proc": None, "notified": False}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
@@ -376,7 +378,8 @@ def _local_children():
 def _busy_info():
     t_end = time.gmtime(LOCAL.get("started", time.time()) + LOCAL_TIMEOUT + 7 * 3600)
     kids = _local_children()
-    return (f"วิน local ทำงานมา {_busy_min()} นาที (ตัดเองตอน {t_end.tm_hour:02d}:{t_end.tm_min:02d})"
+    cut = f" (ตัดเองตอน {t_end.tm_hour:02d}:{t_end.tm_min:02d})" if LOCAL_TIMEOUT else " (ไม่ตัดเอง รันจนเสร็จ)"
+    return (f"วิน local ทำงานมา {_busy_min()} นาที{cut}"
             + ("\nกำลังรัน: " + "\nกำลังรัน: ".join(kids) if kids else "\n(ตอนนี้ไม่มีคำสั่งรันค้าง — วินกำลังคิด/เขียนคำตอบ)"))
 
 def _busy_min():
@@ -486,7 +489,7 @@ def local_run(st, text, srcs=None):
             LOCAL["proc"] = proc
             open(LOCAL_PID_FILE, "w").write(str(proc.pid))
             try:
-                rc = proc.wait(timeout=LOCAL_TIMEOUT)
+                rc = proc.wait(timeout=LOCAL_TIMEOUT or None)
             except subprocess.TimeoutExpired:
                 _kill_tree(proc)
                 rc = None
@@ -552,7 +555,7 @@ def local_tick(st):
             LOCAL["notified"] = True
             send(_busy_info() + ("\nข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที" if q else "")
                  + "\n/status ดูสถานะ  /stop หยุดงานนี้")
-        if time.time() - LOCAL.get("started", 0) > LOCAL_TIMEOUT + 300:
+        if LOCAL_TIMEOUT and time.time() - LOCAL.get("started", 0) > LOCAL_TIMEOUT + 300:
             # thread ค้างเกินเวลาตัดแล้ว (ไม่ควรเกิด) — ปลดล็อกเพื่อให้รับงานใหม่ได้
             _rlog(f"local watchdog: busy {_busy_min()} min, force reset")
             if LOCAL.get("proc"):

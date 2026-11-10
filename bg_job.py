@@ -5,7 +5,7 @@
 import json, os, subprocess, sys, time
 
 JOB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_telegram", "jobs")
-MAX_SEC = int(os.getenv("BG_JOB_MAX_SEC", str(6 * 3600)))
+MAX_SEC = int(os.getenv("BG_JOB_MAX_SEC", "0"))  # 0 = ไม่ตัดเอง หยุดด้วย /stopjobs
 HIST = os.path.join(JOB_DIR, "history.jsonl")
 
 def _script(cmd):
@@ -73,7 +73,7 @@ def run(jid):
             p = subprocess.Popen(cmd if len(cmd) > 1 else cmd[0], shell=len(cmd) == 1, cwd=meta["cwd"],
                                  stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT)
             meta["child"] = p.pid; _write(mp, meta)
-            rc = p.wait(timeout=MAX_SEC)
+            rc = p.wait(timeout=MAX_SEC or None)
         except subprocess.TimeoutExpired:
             p.kill(); lf.write(f"\n[bg_job] ตัดงานเพราะนานเกิน {MAX_SEC // 60} นาที\n")
         except Exception as e:
