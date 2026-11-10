@@ -2,7 +2,7 @@
 ใช้: python bg_job.py "ชื่องานสั้นๆ" -- <คำสั่ง ...>
 ประเมินเวลาจากงานที่เคยรัน: python bg_job.py --estimate <ชื่อสคริปต์หรือคำในชื่องาน>
 ผลอยู่ที่ _telegram/jobs/<id>.log — เสร็จแล้วเขียน <id>.done.json แล้ว devin_bridge ส่งผลให้วินสรุปให้นินเอง"""
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 
 JOB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_telegram", "jobs")
 MAX_SEC = int(os.getenv("BG_JOB_MAX_SEC", "0"))  # 0 = ไม่ตัดเอง หยุดด้วย /stopjobs
@@ -51,13 +51,35 @@ def _spawn(args):
             return subprocess.Popen(args, creationflags=base, **kw)
     return subprocess.Popen(args, start_new_session=True, **kw)
 
-def start(title, cmd):
+def median_sec(key):
+    h = sorted(x[1] for x in history(key) if x[2] == 0)
+    return h[len(h) // 2] if h else None
+
+def progress(log_path):
+    """สัดส่วนงานที่เสร็จ จากบรรทัด `[progress] 35/100` หรือ `[progress] 35%` ล่าสุดใน log"""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - 8000)); tail = f.read()
+    except OSError:
+        return None
+    m = re.findall(r"\[progress\]\s*([\d.]+)\s*(?:/\s*([\d.]+)|%)", tail)
+    if not m:
+        return None
+    a, b = m[-1]
+    try:
+        fr = float(a) / float(b) if b else float(a) / 100
+    except (ValueError, ZeroDivisionError):
+        return None
+    return min(max(fr, 0.0), 1.0)
+
+def start(title, cmd, eta_min=None):
     os.makedirs(JOB_DIR, exist_ok=True)
     jid = time.strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
-    meta = {"id": jid, "title": title, "cmd": cmd, "cwd": os.getcwd(), "started": time.time()}
+    sc = _script(cmd)
+    eta = eta_min * 60 if eta_min else (median_sec(sc) if sc else None)
+    meta = {"id": jid, "title": title, "cmd": cmd, "cwd": os.getcwd(), "started": time.time(), "eta_sec": eta}
     _write(os.path.join(JOB_DIR, jid + ".json"), meta)
     _spawn([sys.executable, os.path.abspath(__file__), "--run", jid])
-    sc = _script(cmd)
     if sc:
         print("ประเมินเวลา:", estimate(sc))
     print(f"เริ่มงานเบื้องหลังแล้ว id={jid} log={os.path.join(JOB_DIR, jid + '.log')} — เสร็จแล้ว bridge ส่งผลกลับมาเอง")
@@ -95,6 +117,14 @@ if __name__ == "__main__":
         run(a[1])
     elif "--" in a and a.index("--") >= 1 and a[a.index("--") + 1:]:
         i = a.index("--")
-        start(" ".join(a[:i]), a[i + 1:])
+        pre, eta = a[:i], None
+        if "--eta" in pre:
+            j = pre.index("--eta")
+            try:
+                eta = float(pre[j + 1])
+            except (IndexError, ValueError):
+                pass
+            pre = pre[:j] + pre[j + 2:]
+        start(" ".join(pre), a[i + 1:], eta)
     else:
         print(__doc__); sys.exit(2)

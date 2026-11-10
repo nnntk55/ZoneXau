@@ -268,7 +268,8 @@ LOCAL_RULES_V = 7
 # แนบทุกข้อความ — กฎใส่ครั้งเดียวแล้ววินลืมกลางบทสนทนายาว (backtest รันรอผลจนชน timeout 40 นาทีติดกัน 4 รอบ)
 LOCAL_SHORT_RULE = ("[กฎทุกข้อความ: งานที่คาดว่าเกิน 2 นาที (backtest/optimize/ดาวน์โหลดข้อมูลเยอะ) ห้ามรันรอผลเอง — "
                     "ประเมินเวลาก่อน (`python bg_job.py --estimate <สคริปต์>` หรือรันชุดเล็กแล้วคูณ) แล้วรัน "
-                    "`python bg_job.py \"ชื่องาน\" -- <คำสั่ง>` ตอบนินทันทีว่ารันอะไร คาดว่ากี่นาที | "
+                    "`python bg_job.py \"ชื่องาน\" --eta <นาทีที่ประเมิน> -- <คำสั่ง>` ตอบนินทันทีว่ารันอะไร คาดว่ากี่นาที "
+                    "(เกิน 60 นาทีบอกเป็นชั่วโมง นินจะได้ไม่ต้องรอ) สคริปต์ที่เขียนเองต้องพิมพ์ `[progress] i/n` ระหว่างรัน | "
                     "ย้ายไปเบื้องหลังไม่ได้และเกิน 10 นาที ให้ถามนินก่อน | นินถามความคืบหน้า: ห้ามเริ่มงานเดิมใหม่ "
                     "ให้ดู `python bg_job.py --estimate <ชื่องาน>` กับ log ใน _telegram/jobs แล้วตอบว่าถึงไหน เหลืออีกกี่นาที]")
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
@@ -550,11 +551,6 @@ def local_tick(st):
     """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
     if LOCAL["busy"]:
         q = st.get("local_q") or []
-        if not LOCAL.get("notified") and _busy_min() >= 3:
-            # เกิน 3 นาที บอกนินครั้งเดียวว่าค้างที่อะไร — คำตอบเร็วๆ ไม่ต้องเด้งสแปม
-            LOCAL["notified"] = True
-            send(_busy_info() + ("\nข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที" if q else "")
-                 + "\n/status ดูสถานะ  /stop หยุดงานนี้")
         if LOCAL_TIMEOUT and time.time() - LOCAL.get("started", 0) > LOCAL_TIMEOUT + 300:
             # thread ค้างเกินเวลาตัดแล้ว (ไม่ควรเกิด) — ปลดล็อกเพื่อให้รับงานใหม่ได้
             _rlog(f"local watchdog: busy {_busy_min()} min, force reset")
@@ -565,7 +561,7 @@ def local_tick(st):
             return
         if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
             LOCAL["pings"] = LOCAL.get("pings", 0) + 1
-            send(_busy_info() + "\n/stop หยุดงานนี้")
+            send(_busy_info() + ("\nข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที" if q else "") + "\n/stop หยุดงานนี้")
         if time.time() - LOCAL.get("typing", 0) > 5:
             LOCAL["typing"] = time.time()
             tg("sendChatAction", chat_id=CHAT, action="typing")
@@ -604,10 +600,38 @@ def _bg_jobs():
         pass
     return out
 
+def _fmt_min(sec):
+    m = int(sec // 60)
+    return f"{m // 60} ชม. {m % 60} นาที" if m >= 60 else f"{m} นาที"
+
+def _bg_line(jid, meta):
+    """งานเบื้องหลัง: รันมาเท่าไร ถึงกี่ % เหลืออีกประมาณเท่าไร (จาก [progress] ใน log หรือเวลาประเมิน)"""
+    el = time.time() - meta.get("started", time.time())
+    fr = None
+    try:
+        import bg_job
+        fr = bg_job.progress(os.path.join(BG_JOB_DIR, jid + ".log"))
+    except Exception:
+        pass
+    line = f"งานเบื้องหลัง: {meta.get('title', jid)} — รันมา {_fmt_min(el)}"
+    if fr and fr > 0.01:
+        line += f" ถึง {fr * 100:.0f}% เหลืออีกประมาณ {_fmt_min(el / fr - el)}"
+    elif meta.get("eta_sec"):
+        left = meta["eta_sec"] - el
+        line += f" ประเมินไว้ {_fmt_min(meta['eta_sec'])}" + (f" เหลืออีกประมาณ {_fmt_min(left)}" if left > 0 else " (เกินที่ประเมินแล้ว)")
+    return line
+
+BG_PING = {}
+
 def check_bg_jobs(st):
-    """งานเบื้องหลังเสร็จ -> ส่ง log ท้ายงานเข้าคิว local ให้วินสรุปผลให้นิน (ไฟล์ .json ย้ายเป็น .reported)"""
+    """งานเบื้องหลังเสร็จ -> ส่ง log ท้ายงานเข้าคิว local ให้วินสรุปผลให้นิน (ไฟล์ .json ย้ายเป็น .reported)
+    ยังไม่เสร็จ -> ทักนินทุก 10 นาที ว่าถึงไหน เหลืออีกกี่นาที"""
     for jid, meta, done in _bg_jobs():
         if done is None:
+            n = BG_PING.get(jid, 0)
+            if time.time() - meta.get("started", time.time()) >= 600 * (n + 1):
+                BG_PING[jid] = n + 1
+                send(_bg_line(jid, meta) + "\n/stopjobs หยุดงานเบื้องหลัง")
             continue
         try:
             log = open(os.path.join(BG_JOB_DIR, jid + ".log"), encoding="utf-8", errors="replace").read()
@@ -855,8 +879,7 @@ def main():
                     send(f"โหมด {st.get('mode') or 'auto'} | ตอนนี้ใช้ {route(st)} | "
                          + (_busy_info() if LOCAL["busy"] else "วิน local ว่าง")
                          + f" | ข้อความรอคิว {q}"
-                         + "".join(f"\nงานเบื้องหลัง: {m.get('title', j)} ({int(time.time() - m.get('started', time.time())) // 60} นาที)"
-                                   for j, m, d in _bg_jobs() if d is None))
+                         + "".join("\n" + _bg_line(j, m) for j, m, d in _bg_jobs() if d is None))
                     continue
                 if text == "/stop":
                     p = LOCAL.get("proc")
