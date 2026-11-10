@@ -1,6 +1,6 @@
 # win_backup.py — สำเนา "ผังวิน" อัปเดตอัตโนมัติ (รันผ่าน loop_winbackup.bat วันละครั้ง)
 # เซฟ zip ทับไฟล์เดิมทุกวัน + ส่งเข้า Telegram นินอัตโนมัติทุก 7 วัน
-import os, sys, json, zipfile, hashlib, datetime, urllib.request
+import os, sys, json, zipfile, hashlib, datetime, urllib.request, base64
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CHARTS = os.path.join(ROOT, "charts")
@@ -56,6 +56,21 @@ def send_zip(caption):
     except Exception:
         return False
 
+
+def send_drive():
+    """อัป zip เดียวกันขึ้น Google Drive นิน (ผ่าน Apps Script type=drive_save)"""
+    url = os.getenv("GOOGLE_SCRIPT_URL")
+    if not url:
+        return False
+    try:
+        b64 = base64.b64encode(open(ZIP_PATH, "rb").read()).decode()
+        body = json.dumps({"type": "drive_save", "name": os.path.basename(ZIP_PATH), "b64": b64}).encode()
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        res = urllib.request.urlopen(req, timeout=120).read().decode()
+        return '"success"' in res
+    except Exception:
+        return False
+
 def main():
     digest = build_zip()
     st = json.load(open(STATE_PATH)) if os.path.isfile(STATE_PATH) else {}
@@ -64,8 +79,10 @@ def main():
     sent = False
     if "--send" in sys.argv or (datetime.date.today() - datetime.date.fromisoformat(last_send)).days >= 7:
         sent = send_zip(f"สำเนาวินประจำวัน {today} (อัตโนมัติ ไม่ต้องตอบ)")
+        drv = send_drive()
         if sent:
             last_send = today
+        st["last_drive"] = today if drv else st.get("last_drive")
     json.dump({"last_build": today, "last_send": last_send, "sha": digest,
                "files": len(MANIFEST)}, open(STATE_PATH, "w"), indent=1)
     print(f"backup {digest} files={len(MANIFEST)} sent={sent}")

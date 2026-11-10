@@ -187,6 +187,17 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // === ผังวิน: เซฟ zip ขึ้น Drive โฟลเดอร์ WIN_BACKUP ===
+    if (data && data.type === "drive_save") {
+      const bytes = Utilities.base64Decode(data.b64 || "");
+      const blob = Utilities.newBlob(bytes, "application/zip", data.name || "WIN_BACKUP.zip");
+      const it = DriveApp.getFoldersByName("WIN_BACKUP");
+      const folder = it.hasNext() ? it.next() : DriveApp.createFolder("WIN_BACKUP");
+      const f = folder.createFile(blob);
+      return ContentService.createTextOutput(JSON.stringify({status:"success",type:"drive_save",id:f.getId(),url:f.getUrl()}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     // === พลูตัส: ซิงก์ ledger การเงินทั้งก้อนขึ้นชีทแยก ===
     if (data && data.type === "finance_sync") {
       return ContentService.createTextOutput(JSON.stringify(financeSync(data)))
