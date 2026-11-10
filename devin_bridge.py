@@ -108,6 +108,14 @@ def _speak(text):
     except Exception as e:
         print(f"voice err: {e}")
 
+CHAT_HIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "chat_hist.jsonl")
+def _chatlog(who, text):
+    try:
+        with open(CHAT_HIST, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": time.time(), "who": who, "text": str(text)[:8000]}, ensure_ascii=False) + chr(10))
+    except Exception:
+        pass
+
 def send(text):
     # แตกเป็นหลายฟองตามย่อหน้า (บรรทัดว่าง) เหมือนคนพิมพ์ทีละฟอง — ฟองยาวเกิน 4000 ค่อยตัดทีเดียว
     for para in [p for p in text.split("\n\n") if p.strip()]:
@@ -119,6 +127,7 @@ def send(text):
             _f.write(json.dumps({"ts": time.time(), "text": text}, ensure_ascii=False) + chr(10))
     except Exception:
         pass
+    _chatlog("win", text)
     if (_NIN_VOICE[0] or random.random() < VOICE_RANDOM_P) and os.path.exists(VOICE_FLAG):
         threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
@@ -825,6 +834,7 @@ def main():
                     continue
                 # รวมข้อความที่พิมพ์ติดๆ กันเป็นก้อนเดียว ปลุกวินครั้งเดียว (ประหยัดโควต้า)
                 st.setdefault("pending", []).append(tag + text if tag else text)
+                _chatlog("nin", tag + text if tag else text)
                 last_in = time.time()
                 save_state(st)
             if st.get("pending") and time.time() - last_in >= BATCH_WAIT and time.time() >= retry_at:

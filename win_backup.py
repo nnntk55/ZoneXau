@@ -19,6 +19,7 @@ MANIFEST = [
     "earbud_api.py",
     "earbud_phone.py",
     "thaitime.py",
+    "charts/chat_hist.jsonl",
 ]
 MANIFEST += sorted(
     os.path.join("charts", f).replace(os.sep, "/")
