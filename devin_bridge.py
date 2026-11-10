@@ -264,6 +264,11 @@ LOCAL_AUTO_RULE = ("[กติกาประหยัด: ทำทุกงา
                    "แล้วตอบนินทันทีว่ากำลังรันอะไร คาดว่ากี่นาที (บอกว่าประเมินจากอะไร) — เสร็จแล้ว bridge ส่ง log ท้ายงานกลับมาให้วินสรุปให้นินเอง "
                    "— ถ้าย้ายไปเบื้องหลังไม่ได้และคาดว่าเกิน 10 นาที: ห้ามลงมือ บอกนินก่อนว่าจะทำอะไร ใช้กี่นาที แล้วรอนินตอบ] ")
 LOCAL_RULES_V = 7
+# แนบทุกข้อความ — กฎใส่ครั้งเดียวแล้ววินลืมกลางบทสนทนายาว (backtest รันรอผลจนชน timeout 40 นาทีติดกัน 4 รอบ)
+LOCAL_SHORT_RULE = ("[กฎทุกข้อความ: งานที่คาดว่าเกิน 2 นาที (backtest/optimize/ดาวน์โหลดข้อมูลเยอะ) ห้ามรันรอผลเอง — "
+                    "ประเมินเวลาก่อน (`python bg_job.py --estimate <สคริปต์>` หรือรันชุดเล็กแล้วคูณ) แล้วรัน "
+                    "`python bg_job.py \"ชื่องาน\" -- <คำสั่ง>` ตอบนินทันทีว่ารันอะไร คาดว่ากี่นาที | "
+                    "ย้ายไปเบื้องหลังไม่ได้และเกิน 10 นาที ให้ถามนินก่อน]")
 _CLOUD_TAG = re.compile(r"\[\[CLOUD:?\s*(.*?)\]\]", re.S)
 LOCAL = {"busy": False, "started": 0.0, "proc": None, "notified": False}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
@@ -335,6 +340,44 @@ def _kill_orphan():
     if found:
         _rlog(f"killed orphan local devin pid {pid}")
     return found
+
+def _local_children():
+    """คำสั่งที่วิน local รันอยู่จริงตอนนี้ (process ลูกหลานของ Devin CLI) — ให้นินเห็นว่าค้างที่อะไร"""
+    p = LOCAL.get("proc")
+    if not p:
+        return []
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"],
+                               capture_output=True, text=True, timeout=30)
+            rows = [(x["ProcessId"], x["ParentProcessId"], x.get("Name") or "", x.get("CommandLine") or "")
+                    for x in json.loads(r.stdout or "[]")]
+        else:
+            r = subprocess.run(["ps", "-eo", "pid=,ppid=,comm=,args="], capture_output=True, text=True, timeout=30)
+            rows = []
+            for ln in r.stdout.splitlines():
+                a = ln.split(None, 3)
+                if len(a) >= 3:
+                    rows.append((int(a[0]), int(a[1]), a[2], a[3] if len(a) > 3 else a[2]))
+    except Exception:
+        return []
+    kids, todo = {}, [p.pid]
+    while todo:
+        pp = todo.pop()
+        for pid, ppid, name, cl in rows:
+            if ppid == pp and pid not in kids:
+                kids[pid] = (name, cl); todo.append(pid)
+    skip = ("conhost", "devin", "node", "powershell", "pwsh", "bash", "sh", "cmd")
+    out = [cl.strip()[:160] for name, cl in kids.values()
+           if not name.lower().replace(".exe", "").startswith(skip) and cl.strip()]
+    return out[:4]
+
+def _busy_info():
+    t_end = time.gmtime(LOCAL.get("started", time.time()) + LOCAL_TIMEOUT + 7 * 3600)
+    kids = _local_children()
+    return (f"วิน local ทำงานมา {_busy_min()} นาที (ตัดเองตอน {t_end.tm_hour:02d}:{t_end.tm_min:02d})"
+            + ("\nกำลังรัน: " + "\nกำลังรัน: ".join(kids) if kids else "\n(ตอนนี้ไม่มีคำสั่งรันค้าง — วินกำลังคิด/เขียนคำตอบ)"))
 
 def _busy_min():
     return int((time.time() - LOCAL.get("started", time.time())) // 60)
@@ -427,7 +470,7 @@ def local_run(st, text, srcs=None):
         elif st.get("local_rules_v") != LOCAL_RULES_V:
             prompt = LOCAL_AUTO_RULE + "\n" + text
         else:
-            prompt = text
+            prompt = LOCAL_SHORT_RULE + "\n" + text
         pf = os.path.join(LOCAL_DIR, "_telegram", "prompt.txt")
         os.makedirs(os.path.dirname(pf), exist_ok=True)
         open(pf, "w", encoding="utf-8").write(prompt)
@@ -459,6 +502,8 @@ def local_run(st, text, srcs=None):
             if srcs:
                 _report_all(srcs, False, f"ทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ถูกตัดกลางคัน")
             send(f"วินทำงานนานเกิน {LOCAL_TIMEOUT // 60} นาที ตัดรอบนี้ไปก่อน สั่งต่อได้เลย")
+            st["local_note"] = (f"[งานรอบก่อนโดนตัดทิ้งเพราะรันรอผลเกิน {LOCAL_TIMEOUT // 60} นาที ผลหายหมด — "
+                                "ถ้าจะทำงานนั้นต่อ ต้องรันผ่าน bg_job.py เท่านั้น แล้วบอกนินว่ารอบก่อนโดนตัด]")
             st["local_started"] = True
             return
         out = _ANSI.sub("", open(of, encoding="utf-8", errors="replace").read()).strip()
@@ -502,11 +547,11 @@ def local_tick(st):
     """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
     if LOCAL["busy"]:
         q = st.get("local_q") or []
-        if q and not LOCAL.get("notified") and _busy_min() >= 3:
-            # เตือนเฉพาะตอนทำงานนานจริง — คำตอบเร็วๆ ไม่ต้องเด้งสแปมทุกข้อความ
+        if not LOCAL.get("notified") and _busy_min() >= 3:
+            # เกิน 3 นาที บอกนินครั้งเดียวว่าค้างที่อะไร — คำตอบเร็วๆ ไม่ต้องเด้งสแปม
             LOCAL["notified"] = True
-            send(f"วินยังทำงานก่อนหน้าอยู่ ({_busy_min()} นาทีแล้ว) ข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที\n"
-                 "/status ดูสถานะ  /stop หยุดงานที่ค้างแล้วทำข้อความใหม่")
+            send(_busy_info() + ("\nข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที" if q else "")
+                 + "\n/status ดูสถานะ  /stop หยุดงานนี้")
         if time.time() - LOCAL.get("started", 0) > LOCAL_TIMEOUT + 300:
             # thread ค้างเกินเวลาตัดแล้ว (ไม่ควรเกิด) — ปลดล็อกเพื่อให้รับงานใหม่ได้
             _rlog(f"local watchdog: busy {_busy_min()} min, force reset")
@@ -517,7 +562,7 @@ def local_tick(st):
             return
         if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
             LOCAL["pings"] = LOCAL.get("pings", 0) + 1
-            send(f"วินยังทำงานอยู่ ({_busy_min()} นาที) ยังไม่หาย — /status ดูสถานะ  /stop หยุดงานนี้")
+            send(_busy_info() + "\n/stop หยุดงานนี้")
         if time.time() - LOCAL.get("typing", 0) > 5:
             LOCAL["typing"] = time.time()
             tg("sendChatAction", chat_id=CHAT, action="typing")
@@ -805,7 +850,7 @@ def main():
                 if text == "/status":
                     q = len(st.get("local_q") or []) + len(st.get("pending") or [])
                     send(f"โหมด {st.get('mode') or 'auto'} | ตอนนี้ใช้ {route(st)} | "
-                         + (f"วิน local กำลังทำงาน {_busy_min()} นาที (ตัดเองที่ {LOCAL_TIMEOUT // 60} นาที)" if LOCAL["busy"] else "วิน local ว่าง")
+                         + (_busy_info() if LOCAL["busy"] else "วิน local ว่าง")
                          + f" | ข้อความรอคิว {q}"
                          + "".join(f"\nงานเบื้องหลัง: {m.get('title', j)} ({int(time.time() - m.get('started', time.time())) // 60} นาที)"
                                    for j, m, d in _bg_jobs() if d is None))
