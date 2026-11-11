@@ -36,9 +36,15 @@ public class SnackbabyA : Robot
     [Parameter("DayStochLen", DefaultValue = 14)] public int DayStochLen { get; set; }
     [Parameter("DayStochK", DefaultValue = 3)] public int DayStochK { get; set; }
     [Parameter("DayStochD", DefaultValue = 3)] public int DayStochD { get; set; }
+    [Parameter("UseBbwGate", DefaultValue = false)] public bool UseBbwGate { get; set; }
+    [Parameter("BbwMin", DefaultValue = 0.06)] public double BbwMin { get; set; }
+    [Parameter("UseAdxGate", DefaultValue = false)] public bool UseAdxGate { get; set; }
+    [Parameter("AdxMin", DefaultValue = 30.0)] public double AdxMin { get; set; }
 
     private ExponentialMovingAverage _ef, _es, _def;
     private StochasticOscillator _st, _dst;
+    private BollingerBands _dbb;
+    private DirectionalMovementSystem _dms;
     private RelativeStrengthIndex _rsi;
     private Bars _dbars;
     private int _pendingSide;
@@ -61,11 +67,13 @@ public class SnackbabyA : Robot
         _es = Indicators.ExponentialMovingAverage(Bars.ClosePrices, EmaSlow);
         if (UseStochRsi) _rsi = Indicators.RelativeStrengthIndex(Bars.ClosePrices, StochLen);
         else _st = Indicators.StochasticOscillator(StochLen, StochK, StochD, MovingAverageType.Simple);
-        if (UseDayEma || UseDayStoch)
+        if (UseDayEma || UseDayStoch || UseBbwGate || UseAdxGate)
         {
             _dbars = MarketData.GetBars(TimeFrame.Daily);
             if (UseDayEma) _def = Indicators.ExponentialMovingAverage(_dbars.ClosePrices, DayEmaLen);
             if (UseDayStoch) _dst = Indicators.StochasticOscillator(_dbars, DayStochLen, DayStochK, DayStochD, MovingAverageType.Simple);
+            if (UseBbwGate) _dbb = Indicators.BollingerBands(_dbars.ClosePrices, 20, 2, MovingAverageType.Simple);
+            if (UseAdxGate) _dms = Indicators.DirectionalMovementSystem(_dbars, 14);
         }
         Positions.Closed += OnPosClosed;
         Print("START SnackbabyA VolMin=" + Symbol.VolumeInUnitsMin);
@@ -129,6 +137,13 @@ public class SnackbabyA : Robot
         }
         else if (mom > MomMin && bull && kUp && !ZBlock(1, i)) sig = 1;
         else if (mom < -MomMin && bear && kDn && !ZBlock(-1, i)) sig = -1;
+        if (UseBbwGate)
+        {
+            int di = _dbars.ClosePrices.Count - 2;
+            double mid = _dbb.Main[di];
+            if (mid > 0 && (_dbb.Top[di] - _dbb.Bottom[di]) / mid < BbwMin) sig = 0;
+        }
+        if (UseAdxGate && _dms.ADX[_dbars.ClosePrices.Count - 2] < AdxMin) sig = 0;
         if (sig != 0)
         {
             if (_skipSignals > 0) _skipSignals--;

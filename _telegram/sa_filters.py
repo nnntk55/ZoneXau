@@ -13,6 +13,10 @@ RUNS=[
  ("sa_dema", ["--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
  ("sa_dstoch", ["--UseM5EmaBias=False","--UseDayStoch=True"]),
  ("sa_dayboth", ["--UseM5EmaBias=False","--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
+ ("sa_bbw", ["--UseBbwGate=True","--BbwMin=0.06"]),
+ ("sa_bbwd", ["--UseBbwGate=True","--BbwMin=0.06","--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
+ ("sa_adx", ["--UseAdxGate=True","--AdxMin=30"]),
+ ("sa_adxd", ["--UseAdxGate=True","--AdxMin=30","--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
 ]
 START=sys.argv[1] if len(sys.argv)>1 else "09/10/2026"
 END=sys.argv[2] if len(sys.argv)>2 else "09/11/2026"
