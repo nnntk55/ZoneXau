@@ -2041,6 +2041,271 @@ def process_stage_set(asset_key, s, set_key):
                             s["s4_confirm_candle"] = None  # ส่งถามไม่ได้ → ให้ลองแท่งเดิมอีกรอบหน้า
 
 
+# ===================== SNACKBABY EA (port จาก cTrader) =====================
+# กติกาเดียวกับ Snackbaby.cs ตัวชนะ A/B: EMA50/100/200 stack + stoch 3/3/3 cross
+# สัญญาณบนแท่งปิด -> ยิงแท่งถัดไปหลังเช็คซ้ำ | SL = sl_usd หน่วยราคา | trail step/offset
+# เพดานวัน: daily_target_pips/usd + daily_loss_pips | เวลาเซิร์ฟเวอร์ start_hour->end_hour
+# ห้ามเทรดบัญชีจริง: ยิงเฉพาะเมื่อ mt5 account trade_mode == DEMO เท่านั้น
+SNACK_MAGIC = 202613
+SNACK_DEFAULTS = {
+    "is_active": False,
+    "sl_usd": 8.0, "trail_step": 1.8, "trail_off": 0.3, "tp_usd": 0.0,
+    "daily_target_pips": 2000.0, "daily_target_usd": 0.0, "daily_loss_pips": 2000.0,
+    "start_hour": -1, "end_hour": 0,
+    "fix_lot": 0.01,
+    "buy_below": 100.0, "sell_above": 0.0,
+    "price_filter": False, "exit_cross": False,
+    "ema_fast": 50, "ema_mid": 100, "ema_slow": 200,
+    "stoch_len": 3, "stoch_k": 3, "stoch_d": 3,
+}
+SNACK = {
+    "symbol": "XAUUSDm",
+    "cfg": dict(SNACK_DEFAULTS),
+    "cfg_ts": 0.0,
+    "pending_side": 0, "sig_close": 0.0, "last_bar": None,
+    "slp": None, "lvl": 0,
+    "day_usd": 0.0, "day_pips": 0.0,
+    "last_action": "เริ่มระบบ", "push_ts": 0.0,
+    "demo_warned": False,
+}
+
+def snack_fetch_cfg(force=False):
+    if not force and time.time() - SNACK["cfg_ts"] < 10:
+        return SNACK["cfg"]
+    try:
+        res = requests.get(f"{RENDER_DASHBOARD_URL}/api/snack/config",
+                           timeout=8, headers=dash_headers())
+        if res.status_code == 200:
+            cfg = dict(SNACK_DEFAULTS)
+            cfg.update(res.json())
+            SNACK["cfg"] = cfg
+            SNACK["cfg_ts"] = time.time()
+    except Exception as e:
+        print(f"snack cfg sync error: {e}")
+    return SNACK["cfg"]
+
+def snack_push(force=False):
+    if not force and time.time() - SNACK["push_ts"] < 20:
+        return
+    SNACK["push_ts"] = time.time()
+    pos_txt, pos_price = None, 0.0
+    try:
+        mp = [p for p in (mt5.positions_get(symbol=SNACK["symbol"]) or []) if p.magic == SNACK_MAGIC]
+        if mp:
+            pos_txt = "BUY" if mp[0].type == mt5.POSITION_TYPE_BUY else "SELL"
+            pos_price = mp[0].price_open
+    except Exception:
+        pass
+    try:
+        requests.post(f"{RENDER_DASHBOARD_URL}/api/snack/state", timeout=8,
+                      headers=dash_headers(),
+                      json={"rt": {"day_usd": round(SNACK["day_usd"], 2),
+                                   "day_pips": round(SNACK["day_pips"]),
+                                   "pos": pos_txt, "pos_price": pos_price,
+                                   "last_action": SNACK["last_action"],
+                                   "ts": (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%H:%M:%S")}})
+    except Exception:
+        pass
+
+def snack_today_totals():
+    """กำไรปิดไม้รวมวันนี้ (UTC) ของ magic SNACK — usd + pips (1 pip = 0.1 ราคา ตาม cTrader)"""
+    usd, pips = 0.0, 0.0
+    try:
+        day0 = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        deals = mt5.history_deals_get(day0, datetime.now(timezone.utc) + timedelta(hours=24)) or []
+        ins = {}
+        for d in deals:
+            if d.magic != SNACK_MAGIC:
+                continue
+            if d.entry == mt5.DEAL_ENTRY_IN:
+                ins[d.position_id] = d
+            elif d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT):
+                op = ins.get(d.position_id)
+                if not op:
+                    continue
+                side = 1 if op.type == mt5.DEAL_TYPE_BUY else -1
+                pips += (d.price - op.price) * side / 0.1
+                usd += d.profit + d.swap + d.commission + op.commission
+    except Exception as e:
+        print(f"snack daily totals error: {e}")
+    return usd, pips
+
+def snack_is_demo():
+    """เการ์ดแข็ง: ยิงออเดอร์ได้เฉพาะบัญชี DEMO เท่านั้น"""
+    try:
+        ai = mt5.account_info()
+        return ai is not None and ai.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+    except Exception:
+        return False
+
+def snack_open(side, lot, cfg):
+    if not snack_is_demo():
+        if not SNACK["demo_warned"]:
+            SNACK["demo_warned"] = True
+            SNACK["last_action"] = "BLOCKED: บัญชีไม่ใช่ DEMO"
+            send_telegram_notification("⛔ SNACKBABY ปฏิเสธยิง — บัญชี MT5 ไม่ใช่ DEMO (real/live) เช็คการเชื่อมต่อก่อน")
+        return None
+    symbol = SNACK["symbol"]
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        return None
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(lot),
+           "type": mt5.ORDER_TYPE_BUY if side == 1 else mt5.ORDER_TYPE_SELL,
+           "price": tick.ask if side == 1 else tick.bid,
+           "deviation": 30, "magic": SNACK_MAGIC, "comment": "snackbaby",
+           "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+    res = mt5.order_send(req)
+    if res.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"snack order fail: {res.comment}")
+        send_telegram_notification(f"⚠️ SNACKBABY ยิง {'BUY' if side == 1 else 'SELL'} ไม่ผ่าน: {res.comment}")
+        return None
+    return res.price or req["price"]
+
+def snack_close(p, reason):
+    tick = mt5.symbol_info_tick(p.symbol)
+    if tick is None:
+        return
+    is_buy = p.type == mt5.POSITION_TYPE_BUY
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": p.symbol, "position": p.ticket,
+           "volume": p.volume,
+           "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
+           "price": tick.bid if is_buy else tick.ask,
+           "deviation": 30, "magic": SNACK_MAGIC, "comment": "snackbaby close",
+           "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+    res = mt5.order_send(req)
+    if res.retcode == mt5.TRADE_RETCODE_DONE:
+        SNACK["last_action"] = f"ปิด ({reason}) @ {req['price']:.2f}"
+        SNACK["slp"], SNACK["lvl"] = None, 0
+        send_telegram_notification(f"🍪 SNACKBABY ปิดไม้ ({reason}) @ {req['price']:.2f}")
+        snack_push(force=True)
+    else:
+        print(f"snack close fail: {res.comment}")
+
+def snack_manage(cfg):
+    """trailing + SL เดินระบบ — ทำงานเสมอแม้สวิตช์ปิด (ไม้ที่ค้างต้องถูกดูแล)"""
+    positions = [p for p in (mt5.positions_get(symbol=SNACK["symbol"]) or []) if p.magic == SNACK_MAGIC]
+    if not positions:
+        SNACK["slp"], SNACK["lvl"] = None, 0
+        return
+    p = positions[0]
+    side = 1 if p.type == mt5.POSITION_TYPE_BUY else -1
+    tick = mt5.symbol_info_tick(p.symbol)
+    if tick is None:
+        return
+    px = tick.bid if side == 1 else tick.ask
+    if SNACK["slp"] is None:
+        SNACK["slp"] = p.price_open - side * cfg["sl_usd"]
+        SNACK["lvl"] = 0
+    fav = (px - p.price_open) * side
+    if cfg["tp_usd"] > 0 and fav >= cfg["tp_usd"]:
+        snack_close(p, "TP")
+        return
+    while fav >= (SNACK["lvl"] + 1) * cfg["trail_step"]:
+        ns = p.price_open + side * ((SNACK["lvl"] + 1) * cfg["trail_step"] - cfg["trail_off"])
+        SNACK["slp"] = max(SNACK["slp"], ns) if side == 1 else min(SNACK["slp"], ns)
+        SNACK["lvl"] += 1
+    if (side == 1 and px <= SNACK["slp"]) or (side == -1 and px >= SNACK["slp"]):
+        snack_close(p, "SL/Trail")
+
+def snack_stoch(h, l, c, length, k_p, d_p):
+    import numpy as np
+    hh = pd.Series(h).rolling(length, min_periods=1).max().values
+    ll = pd.Series(l).rolling(length, min_periods=1).min().values
+    rng = hh - ll
+    raw = np.where(rng > 1e-12, 100.0 * (np.asarray(c) - ll) / rng, 50.0)
+    k = pd.Series(raw).rolling(k_p, min_periods=1).mean().values
+    d = pd.Series(k).rolling(d_p, min_periods=1).mean().values
+    return k, d
+
+def run_snack_loop():
+    time.sleep(8)
+    while True:
+        try:
+            cfg = snack_fetch_cfg()
+            symbol = SNACK["symbol"]
+            mt5.symbol_select(symbol, True)
+            snack_manage(cfg)
+            positions = [p for p in (mt5.positions_get(symbol=symbol) or []) if p.magic == SNACK_MAGIC]
+            usd, pips = snack_today_totals()
+            SNACK["day_usd"], SNACK["day_pips"] = usd, pips
+
+            df = fetch_mt5_candles(symbol, "5m", 400)
+            if df is None or len(df) < 220:
+                snack_push(); time.sleep(3); continue
+            closed_t = str(df['time'].iloc[-2])
+            if closed_t == SNACK["last_bar"]:
+                snack_push(); time.sleep(3); continue
+            SNACK["last_bar"] = closed_t
+
+            c = df['Close'].values
+            ef = pd.Series(c).ewm(span=int(cfg["ema_fast"]), adjust=False).mean().values
+            em = pd.Series(c).ewm(span=int(cfg["ema_mid"]), adjust=False).mean().values
+            es = pd.Series(c).ewm(span=int(cfg["ema_slow"]), adjust=False).mean().values
+            sk, sd = snack_stoch(df['High'].values, df['Low'].values, c,
+                                 int(cfg["stoch_len"]), int(cfg["stoch_k"]), int(cfg["stoch_d"]))
+            i, li = len(df) - 2, len(df) - 1
+
+            sh, eh = int(cfg["start_hour"]), int(cfg["end_hour"])
+            in_win = True
+            if sh >= 0:
+                tick = mt5.symbol_info_tick(symbol)
+                hh = datetime.fromtimestamp(tick.time, tz=timezone.utc).hour if tick else datetime.now(timezone.utc).hour
+                in_win = (sh <= hh < eh) if sh <= eh else (hh >= sh or hh < eh)
+            caps_hit = ((cfg["daily_target_usd"] > 0 and usd >= cfg["daily_target_usd"]) or
+                        (cfg["daily_target_pips"] > 0 and pips >= cfg["daily_target_pips"]) or
+                        (cfg["daily_loss_pips"] > 0 and pips <= -cfg["daily_loss_pips"]))
+            ok = cfg["is_active"] and in_win and not caps_hit
+
+            if not ok:
+                SNACK["pending_side"] = 0
+            elif SNACK["pending_side"] != 0:
+                side = SNACK["pending_side"]
+                SNACK["pending_side"] = 0
+                tick = mt5.symbol_info_tick(symbol)
+                if tick:
+                    bid = tick.bid
+                    live_kd = (sk[li] >= sd[li]) if side == 1 else (sk[li] <= sd[li])
+                    pf = cfg["price_filter"]
+                    side_ok = (not pf) or (
+                        (bid > ef[li] and bid > em[li] and bid > es[li]) if side == 1
+                        else (bid < ef[li] and bid < em[li] and bid < es[li]))
+                    still = live_kd and side_ok and (
+                        bid >= SNACK["sig_close"] if side == 1 else bid <= SNACK["sig_close"])
+                    if still and not positions:
+                        fill = snack_open(side, cfg["fix_lot"], cfg)
+                        if fill:
+                            SNACK["slp"] = fill - side * cfg["sl_usd"]
+                            SNACK["lvl"] = 0
+                            SNACK["last_action"] = f"เปิด {'BUY' if side == 1 else 'SELL'} @ {fill:.2f}"
+                            send_telegram_notification(
+                                f"🍪 SNACKBABY เปิด {'BUY' if side == 1 else 'SELL'} @ {fill:.2f} "
+                                f"(lot {cfg['fix_lot']}) วันนี้ {usd:+.2f}$ / {pips:+.0f} pips")
+                            snack_push(force=True)
+                        positions = [p for p in (mt5.positions_get(symbol=symbol) or []) if p.magic == SNACK_MAGIC]
+
+            if ok:
+                kd0, kd1 = sk[i] - sd[i], sk[i - 1] - sd[i - 1]
+                x_up = kd1 <= 0 and kd0 > 0
+                x_dn = kd1 >= 0 and kd0 < 0
+                if positions and cfg["exit_cross"]:
+                    side = 1 if positions[0].type == mt5.POSITION_TYPE_BUY else -1
+                    if (side == 1 and x_dn) or (side == -1 and x_up):
+                        snack_close(positions[0], "cross สวน")
+                        snack_push(); time.sleep(3); continue
+                up_stack = ef[i] > em[i] > es[i]
+                dn_stack = es[i] > em[i] > ef[i]
+                p_up = c[i] > ef[i] and c[i] > em[i] and c[i] > es[i]
+                p_dn = c[i] < ef[i] and c[i] < em[i] and c[i] < es[i]
+                pf = cfg["price_filter"]
+                if x_up and up_stack and (not pf or p_up) and sk[i] < cfg["buy_below"]:
+                    SNACK["pending_side"], SNACK["sig_close"] = 1, c[i]
+                elif x_dn and dn_stack and (not pf or p_dn) and sk[i] > cfg["sell_above"]:
+                    SNACK["pending_side"], SNACK["sig_close"] = -1, c[i]
+            snack_push()
+        except Exception as e:
+            print(f"snack loop error: {e}")
+        time.sleep(3)
+
 SELF_UPDATE_REPO = "nnntk55/ZoneXau"
 SELF_UPDATE_SHA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     ".repo_sha_" + os.path.splitext(os.path.basename(__file__))[0])
@@ -2101,6 +2366,9 @@ if __name__ == "__main__":
         # รีเซ็ต pending_confirmation ทุก asset เมื่อเริ่มรันใหม่
         for key in ASSETS.keys():
             ASSETS[key]["pending_confirmation"] = None
+
+        SNACK["symbol"] = ASSETS["xau"]["symbol"]  # ใช้ชื่อ symbol เดียวกับทองที่ resolve แล้ว
+        threading.Thread(target=run_snack_loop, daemon=True).start()
 
         send_telegram_notification("🟢 *[ALL-IN-ONE BOT STARTED]* บอทเรดาร์เฝ้ากราฟ Exness MT5 พร้อมเชื่อมต่อ Render Dashboard แล้ว!")
         threads = []

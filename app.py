@@ -458,6 +458,27 @@ for _k, _a in ASSETS.items():
     _sv = saved_states.get(_k, {})
     _a["state"]["set2"] = _sv["set2"] if isinstance(_sv.get("set2"), dict) else default_set2()
     _a["state"]["alerts"] = _sv["alerts"] if isinstance(_sv.get("alerts"), list) else []
+
+# ===================== SNACKBABY EA (โมดูลแยกจาก stage engine) =====================
+# EA อิสระตัวแรกบนแดชบอร์ด — เปิด/ปิด + พารามิเตอร์ บอท MT5 ฝั่ง VPS ดึงผ่าน /api/snack/config
+SNACK_DEFAULTS = {
+    "is_active": False,
+    "sl_usd": 8.0, "trail_step": 1.8, "trail_off": 0.3, "tp_usd": 0.0,
+    "daily_target_pips": 2000.0, "daily_target_usd": 0.0, "daily_loss_pips": 2000.0,
+    "start_hour": -1, "end_hour": 0,
+    "fix_lot": 0.01,
+    "buy_below": 100.0, "sell_above": 0.0,
+    "price_filter": False, "exit_cross": False,
+}
+SNACK = {
+    "name": "SNACKBABY EA",
+    "emoji": "🍪",
+    "state": dict(SNACK_DEFAULTS),
+}
+_sv = saved_states.get("snack")
+if isinstance(_sv, dict):
+    SNACK["state"].update({k: v for k, v in _sv.items() if k != "rt"})
+SNACK["state"]["rt"] = {}
 global_flash = {"msg": None, "type": None}
 app = Flask(__name__)
 app.before_request(check_access)
@@ -754,6 +775,42 @@ HTML_TEMPLATE = """
                 {{ flash_msg }}
             </div>
         {% endif %}
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 1rem; font-weight: 600; color: #5f4a43;">{{ snack.emoji }} {{ snack.name }} <span style="font-weight:400; font-size:0.7rem; color:#9b8477;">XAUUSD M5 · EXNESS DEMO</span></span>
+                <form action="/snack/toggle" method="POST" style="margin:0;">
+                    <button type="submit" class="badge toggle-btn {% if snack.state.is_active %}badge-status-on{% else %}badge-status-off{% endif %}">
+                        {% if snack.state.is_active %}🟢 ON{% else %}🔴 OFF{% endif %}
+                    </button>
+                </form>
+            </div>
+            {% set rt = snack.state.get('rt', {}) %}
+            <div style="font-size:0.8rem; color:#7a6555; margin-bottom:8px; line-height:1.6;">
+                วันนี้: <b>{{ "%.2f"|format(rt.get('day_usd', 0)) }} USD</b> / {{ "%.0f"|format(rt.get('day_pips', 0)) }} pips
+                {% if rt.get('pos') %} | ถือ {{ rt.pos }} @ {{ "%.2f"|format(rt.get('pos_price', 0)) }}{% else %} | ไม่มีไม้{% endif %}
+                <br>ล่าสุด: {{ rt.get('last_action', '—') }}{% if rt.get('ts') %} <span style="color:#9b8477">({{ rt.ts }})</span>{% endif %}
+            </div>
+            <form action="/snack/params" method="POST" class="panel">
+                <div class="panel-title">⚙️ พารามิเตอร์</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px; font-size:0.75rem; color:#7a6555;">
+                    <label>SL$ <input type="number" step="0.1" name="sl_usd" value="{{ snack.state.sl_usd }}" style="width:54px;"></label>
+                    <label>Trail <input type="number" step="0.1" name="trail_step" value="{{ snack.state.trail_step }}" style="width:54px;"></label>
+                    <label>Off <input type="number" step="0.1" name="trail_off" value="{{ snack.state.trail_off }}" style="width:48px;"></label>
+                    <label>Lot <input type="number" step="0.01" name="fix_lot" value="{{ snack.state.fix_lot }}" style="width:58px;"></label>
+                    <label>TPips <input type="number" name="daily_target_pips" value="{{ snack.state.daily_target_pips|int }}" style="width:64px;"></label>
+                    <label>LPips <input type="number" name="daily_loss_pips" value="{{ snack.state.daily_loss_pips|int }}" style="width:64px;"></label>
+                    <label>เริ่มชม. <input type="number" name="start_hour" value="{{ snack.state.start_hour|int }}" style="width:48px;"></label>
+                    <label>ถึงชม. <input type="number" name="end_hour" value="{{ snack.state.end_hour|int }}" style="width:48px;"></label>
+                    <label>Buy&lt; <input type="number" step="1" name="buy_below" value="{{ snack.state.buy_below|int }}" style="width:48px;"></label>
+                    <label>Sell&gt; <input type="number" step="1" name="sell_above" value="{{ snack.state.sell_above|int }}" style="width:48px;"></label>
+                </div>
+                <div style="display:flex; gap:12px; margin-top:6px; font-size:0.75rem; color:#7a6555; align-items:center;">
+                    <label><input type="checkbox" name="price_filter" {% if snack.state.price_filter %}checked{% endif %}> เกทราคาเหนือ/ใต้ EMA</label>
+                    <label><input type="checkbox" name="exit_cross" {% if snack.state.exit_cross %}checked{% endif %}> ออกเมื่อ cross สวน</label>
+                    <button type="submit" class="toggle-btn" style="font-size:0.75rem; padding:3px 10px;">บันทึก</button>
+                </div>
+            </form>
+        </div>
         {% for key, asset in assets.items() %}
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -1881,7 +1938,7 @@ def home():
     bot_t = LAST_BOT_PUSH["t"]
     bot_online = bot_t is not None and (time.time() - bot_t) < BOT_DOWN_TIMEOUT
     bot_last = f"heartbeat ล่าสุด: {datetime.fromtimestamp(bot_t, timezone(timedelta(hours=7))).strftime('%H:%M:%S')}" if bot_t else "ยังไม่เคยรับข้อมูลจากบอท"
-    return render_template_string(HTML_TEMPLATE, assets=ASSETS, flash_msg=msg, flash_type=ftype, bot_online=bot_online, bot_last=bot_last)
+    return render_template_string(HTML_TEMPLATE, assets=ASSETS, snack=SNACK, flash_msg=msg, flash_type=ftype, bot_online=bot_online, bot_last=bot_last)
 
 @app.route("/send-test")
 def send_test():
@@ -2226,6 +2283,49 @@ def get_market_data():
     for k, asset in ASSETS.items():
         output[k] = asset["state"]
     return jsonify(output)
+
+@app.route('/snack/toggle', methods=['POST'])
+def snack_toggle():
+    st = SNACK["state"]
+    st["is_active"] = not bool(st.get("is_active"))
+    save_state_to_sheets("snack", {k: v for k, v in st.items() if k != "rt"})
+    print(f"🍪 SNACKBABY toggled -> is_active={st['is_active']}")
+    return redirect(url_for("home"))
+
+@app.route('/snack/params', methods=['POST'])
+def snack_params():
+    st = SNACK["state"]
+    for k in ("sl_usd", "trail_step", "trail_off", "tp_usd",
+              "daily_target_pips", "daily_target_usd", "daily_loss_pips",
+              "start_hour", "end_hour", "fix_lot", "buy_below", "sell_above"):
+        v = request.form.get(k)
+        if v not in (None, ""):
+            try:
+                st[k] = float(v)
+            except ValueError:
+                pass
+    st["price_filter"] = request.form.get("price_filter") == "on"
+    st["exit_cross"] = request.form.get("exit_cross") == "on"
+    save_state_to_sheets("snack", {k: v for k, v in st.items() if k != "rt"})
+    return redirect(url_for("home"))
+
+@app.route('/api/snack/config', methods=['GET'])
+def snack_config():
+    """บอท MT5 ดึงคอนฟิก EA — is_active + พารามิเตอร์ทั้งหมด"""
+    st = SNACK["state"]
+    return jsonify({k: st.get(k, d) for k, d in SNACK_DEFAULTS.items()})
+
+@app.route('/api/snack/state', methods=['POST'])
+def snack_state():
+    """บอท MT5 push สถานะ runtime (กำไรวัน/ไม้ที่ถือ/last action) ขึ้นการ์ด"""
+    try:
+        data = request.json or {}
+        if isinstance(data.get("rt"), dict):
+            SNACK["state"]["rt"] = data["rt"]
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"Snack state error: {e}")
+        return jsonify({"status": "error"}), 500
 
 @app.route('/api/config/<asset_key>', methods=['GET'])
 def get_asset_config(asset_key):
