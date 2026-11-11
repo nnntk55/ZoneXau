@@ -78,12 +78,13 @@ def main():
     last_send = st.get("last_send", "1970-01-01")
     today = datetime.date.today().isoformat()
     sent = False
+    drv = send_drive()
+    if drv:
+        st["last_drive"] = today
     if "--send" in sys.argv or (datetime.date.today() - datetime.date.fromisoformat(last_send)).days >= 7:
         sent = send_zip(f"สำเนาวินประจำวัน {today} (อัตโนมัติ ไม่ต้องตอบ)")
-        drv = send_drive()
         if sent:
             last_send = today
-        st["last_drive"] = today if drv else st.get("last_drive")
     json.dump({"last_build": today, "last_send": last_send, "sha": digest,
                "files": len(MANIFEST)}, open(STATE_PATH, "w"), indent=1)
     print(f"backup {digest} files={len(MANIFEST)} sent={sent}")
