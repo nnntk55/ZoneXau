@@ -2367,9 +2367,6 @@ if __name__ == "__main__":
         for key in ASSETS.keys():
             ASSETS[key]["pending_confirmation"] = None
 
-        SNACK["symbol"] = ASSETS["xau"]["symbol"]  # ใช้ชื่อ symbol เดียวกับทองที่ resolve แล้ว
-        threading.Thread(target=run_snack_loop, daemon=True).start()
-
         send_telegram_notification("🟢 *[ALL-IN-ONE BOT STARTED]* บอทเรดาร์เฝ้ากราฟ Exness MT5 พร้อมเชื่อมต่อ Render Dashboard แล้ว!")
         threads = []
         for key in ASSETS.keys():
