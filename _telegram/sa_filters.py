@@ -10,12 +10,15 @@ RUNS=[
  ("sa_f_z", ["--UseZScore=True","--ZLen=50","--ZMax=2"]),
  ("sa_f_cd", ["--CooldownLosses=2","--CooldownSignals=1"]),
  ("sa_f_zcd", ["--UseZScore=True","--ZLen=50","--ZMax=2","--CooldownLosses=2","--CooldownSignals=1"]),
+ ("sa_dema", ["--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
+ ("sa_dstoch", ["--UseM5EmaBias=False","--UseDayStoch=True"]),
+ ("sa_dayboth", ["--UseM5EmaBias=False","--UseDayEma=True","--DayEmaLen=50","--UseDayStoch=True"]),
 ]
 START=sys.argv[1] if len(sys.argv)>1 else "09/10/2026"
 END=sys.argv[2] if len(sys.argv)>2 else "09/11/2026"
 TAG=sys.argv[3] if len(sys.argv)>3 else ""
-ONLY=sys.argv[4] if len(sys.argv)>4 else ""
-runs=[r for r in RUNS if ONLY=="" or ONLY in r[0]]
+ONLY=sys.argv[4:]
+runs=[r for r in RUNS if not ONLY or any(t in r[0] for t in ONLY)]
 n=len(runs)
 for k,(name,extra) in enumerate(runs,1):
     name=name+TAG
@@ -23,11 +26,18 @@ for k,(name,extra) in enumerate(runs,1):
     cmd=[CLI,"backtest",ALGO,"--ctid=ninin.natakrit@gmail.com",f"--pwd-file={PW}","--account=3002363",
          "--symbol=XAUUSD","--period=m5",f"--start={START}",f"--end={END}","--data-mode=m1",
          "--balance=10000",f"--report-json={os.path.join(OUT,name)}.json","--equity-x-axis=Trades"]+BASE+extra
-    try:
-        r=subprocess.run(cmd,env=env,capture_output=True,text=True,timeout=3600)
-        print(r.stdout[-400:],flush=True)
+    report=os.path.join(OUT,name)+".json"
+    if os.path.exists(report): os.remove(report)
+    p=subprocess.Popen(cmd,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    t0=time.time(); out=""
+    while time.time()-t0<1800:
+        if p.poll() is not None: break
+        if os.path.exists(report) and time.time()-os.path.getmtime(report)>10: break
+        time.sleep(5)
+    try: out,_=p.communicate(timeout=10)
     except subprocess.TimeoutExpired:
-        print("TIMEOUT",name,flush=True)
+        p.kill(); out,_=p.communicate()
+    print((out or "")[-400:],flush=True)
     subprocess.run(["taskkill","/F","/IM","ctrader-cli.exe"],capture_output=True)
     subprocess.run(["taskkill","/F","/IM","algohost.exe"],capture_output=True)
 print("[progress] done",flush=True)
