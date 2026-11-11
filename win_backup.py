@@ -81,7 +81,7 @@ def main():
     drv = send_drive()
     if drv:
         st["last_drive"] = today
-    if "--send" in sys.argv or (datetime.date.today() - datetime.date.fromisoformat(last_send)).days >= 7:
+    if "--send" in sys.argv or (datetime.date.today() - datetime.date.fromisoformat(last_send)).days >= 1:
         sent = send_zip(f"สำเนาวินประจำวัน {today} (อัตโนมัติ ไม่ต้องตอบ)")
         if sent:
             last_send = today
