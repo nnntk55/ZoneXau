@@ -24,8 +24,9 @@ MANIFEST = [
 MANIFEST += sorted(
     os.path.join("charts", f).replace(os.sep, "/")
     for f in os.listdir(CHARTS)
-    if f.endswith(".json") and not f.startswith("win_backup")
+    if (f.endswith(".json") or f.endswith(".md")) and not f.startswith("win_backup")
 ) if os.path.isdir(CHARTS) else []
+MANIFEST.append("win_tradebook.md")
 
 def build_zip():
     h = hashlib.sha256()
