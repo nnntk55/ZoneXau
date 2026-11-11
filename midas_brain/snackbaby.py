@@ -54,9 +54,12 @@ def tg(msg):
 
 
 def init():
-    acct = int(os.environ.get("MT5_ACCOUNT_6") or os.environ.get("MT5_ACCOUNT", "0"))
-    pwd = os.environ.get("MT5_PASSWORD_6") or os.environ.get("MT5_PASSWORD", "")
-    srv = os.environ.get("MT5_SERVER_6") or os.environ.get("MT5_SERVER", "")
+    acct = int(os.environ.get("MT5_ACCOUNT_SNACK") or os.environ.get("MT5_ACCOUNT_6")
+               or os.environ.get("MT5_ACCOUNT", "0"))
+    pwd = os.environ.get("MT5_PASSWORD_SNACK") or os.environ.get("MT5_PASSWORD_6") \
+        or os.environ.get("MT5_PASSWORD", "")
+    srv = os.environ.get("MT5_SERVER_SNACK") or os.environ.get("MT5_SERVER_6") \
+        or os.environ.get("MT5_SERVER", "")
     ok = mt5.initialize(path=TERMINAL) or mt5.initialize()
     if not ok:
         print("MT5 init fail"); return False
