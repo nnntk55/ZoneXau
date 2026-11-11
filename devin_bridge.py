@@ -626,6 +626,7 @@ BG_PING = {}
 def check_bg_jobs(st):
     """งานเบื้องหลังเสร็จ -> ส่ง log ท้ายงานเข้าคิว local ให้วินสรุปผลให้นิน (ไฟล์ .json ย้ายเป็น .reported)
     ยังไม่เสร็จ -> ทักนินทุก 10 นาที ว่าถึงไหน เหลืออีกกี่นาที"""
+    reported_titles = set()  # กันงานชื่อซ้ำแจ้งหลายรอบในรอบเดียว (งานที่เปิดซ้ำหลายตัว)
     for jid, meta, done in _bg_jobs():
         if done is None:
             n = BG_PING.get(jid, 0)
