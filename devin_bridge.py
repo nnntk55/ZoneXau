@@ -630,7 +630,7 @@ def check_bg_jobs(st):
     for jid, meta, done in _bg_jobs():
         if done is None:
             n = BG_PING.get(jid, 0)
-            if time.time() - meta.get("started", time.time()) >= 600 * (n + 1):
+            if n == 0 and time.time() - meta.get("started", time.time()) >= 600:
                 BG_PING[jid] = n + 1
                 send(_bg_line(jid, meta) + "\n/stopjobs หยุดงานเบื้องหลัง")
             continue
