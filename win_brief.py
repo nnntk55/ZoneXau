@@ -5,7 +5,7 @@ import os, json, datetime
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 HIST = os.path.join(ROOT, "charts", "chat_hist.jsonl")
-HIST2 = os.path.abspath(os.path.join(ROOT, "..", "..", "charts", "chat_hist.jsonl"))  # bridge ตัวจริงบน Desktop
+HIST2 = os.path.abspath(os.path.join(ROOT, "..", "..", "charts", "chat_hist.jsonl"))
 OUT = os.path.join(ROOT, "charts", "win_brief.md")
 N = 500  # จำนวนบรรทัดล่าสุดที่เอามาสรุป
 MAX_TEXT = 300  # ตัดข้อความยาว
@@ -14,11 +14,12 @@ def thai(ts):
     return (datetime.datetime.utcfromtimestamp(ts) + datetime.timedelta(hours=7)).strftime("%Y-%m-%d %H:%M")
 
 def main():
-    if not os.path.isfile(HIST):
+    hist = HIST if os.path.isfile(HIST) else HIST2
+    if not os.path.isfile(hist):
         open(OUT, "w", encoding="utf-8").write("# win_brief\nไม่มี chat_hist\n")
         print("no hist")
         return
-    lines = open(HIST, encoding="utf-8", errors="replace").read().splitlines()[-N:]
+    lines = open(hist, encoding="utf-8", errors="replace").read().splitlines()[-N:]
     out = ["# win_brief — บทสนทนาล่าสุด (auto)\n",
            f"สร้างเมื่อ {thai(__import__('time').time())} เวลาไทย | {len(lines)} ข้อความล่าสุด\n"]
     for ln in lines:
