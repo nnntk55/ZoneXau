@@ -5,8 +5,9 @@ import os, json, datetime
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 HIST = os.path.join(ROOT, "charts", "chat_hist.jsonl")
+HIST2 = os.path.abspath(os.path.join(ROOT, "..", "..", "charts", "chat_hist.jsonl"))  # bridge ตัวจริงบน Desktop
 OUT = os.path.join(ROOT, "charts", "win_brief.md")
-N = 150  # จำนวนบรรทัดล่าสุดที่เอามาสรุป
+N = 500  # จำนวนบรรทัดล่าสุดที่เอามาสรุป
 MAX_TEXT = 300  # ตัดข้อความยาว
 
 def thai(ts):
