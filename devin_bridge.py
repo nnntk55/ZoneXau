@@ -306,11 +306,19 @@ def _kill_tree(proc):
     """ฆ่า Devin CLI พร้อม process ลูก (git/python/node ที่มันเปิด) — เฉพาะ tree ของงานนี้ ไม่แตะบอทที่รันอยู่"""
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
-        else:
-            proc.kill()
+            r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+            if r.returncode != 0:
+                _rlog(f"taskkill pid {proc.pid} rc {r.returncode}: {(r.stdout + r.stderr).decode(errors='replace').strip()[:300]!r}")
     except Exception as e:
-        print(f"kill err: {e}")
+        _rlog(f"kill tree err pid {proc.pid}: {e}")
+    try:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+    except Exception as e:
+        _rlog(f"kill err pid {proc.pid}: {e}")
+    if proc.poll() is None:
+        _rlog(f"pid {proc.pid} ยังไม่ตายหลัง kill")
 
 LOCAL_PID_FILE = os.path.join(LOCAL_DIR, "_telegram", "local_pid.txt")
 
@@ -457,7 +465,7 @@ def _report_all(srcs, ok, detail):
     for s in (srcs or ()):
         _bot_report(s, ok, detail)
 
-def local_run(st, text, srcs=None):
+def local_run(st, text, srcs=None, gen=0):
     """รัน devin -p (ต่อ conversation เดิมด้วย -c) แล้วส่งคำตอบเข้า Telegram — รันใน thread แยก
     โหมด auto: local พัง หรือวิน local ขอ [[CLOUD: ...]] -> ส่งต่อให้ cloud เอง — srcs = ชื่อบอทที่ส่งงานเข้าคิว จบแล้วรายงานกลับเข้า inbox ของบอทนั้น"""
     auto = (st.get("mode") or "auto") == "auto"
@@ -494,7 +502,8 @@ def local_run(st, text, srcs=None):
                                                    "--respect-workspace-trust", "false"]
         # stdout/stderr ลงไฟล์ (ไม่ใช้ pipe): ถ้า Devin CLI เปิด process ลูกค้างไว้ (เช่นรัน server ทดสอบ) pipe จะไม่ปิด
         # subprocess.run(capture_output) เลยค้างตลอดไป -> bridge busy ค้าง ไม่ตอบนินอีกเลย
-        of, ef = pf[:-4] + "_out.txt", pf[:-4] + "_err.txt"
+        sfx = f"_{gen}" if LOCAL.get("abandoned") else ""  # ตัวที่ถูกปล่อยทิ้งอาจยังเขียนไฟล์เดิมอยู่
+        of, ef = pf[:-4] + sfx + "_out.txt", pf[:-4] + sfx + "_err.txt"
         t0 = time.time()
         LOCAL["io"] = (of, ef)
         _rlog(f"local start ({len(text)} chars, {'new' if first else 'continue'}): {text[:150]!r}")
@@ -507,6 +516,9 @@ def local_run(st, text, srcs=None):
             except subprocess.TimeoutExpired:
                 _kill_tree(proc)
                 rc = None
+        if LOCAL.get("gen") != gen:
+            _rlog(f"local gen {gen} (ถูกปล่อยหลัง /stop) จบเองแล้ว rc {rc} หลัง {int(time.time() - t0)}s — ทิ้งผล")
+            return
         LOCAL["proc"] = None
         if LOCAL.pop("cancelled", False):
             _rlog(_local_diag())
@@ -554,12 +566,14 @@ def local_run(st, text, srcs=None):
         _rlog(f"local error: {e}")
         fail(f"โหมด local error: {e}")
     finally:
-        LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
-        try:
-            os.remove(LOCAL_PID_FILE)
-        except OSError:
-            pass
-        save_state(st)
+        if LOCAL.get("gen") == gen:
+            LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
+            LOCAL.pop("stop_at", None); LOCAL.pop("cancelled", None)
+            try:
+                os.remove(LOCAL_PID_FILE)
+            except OSError:
+                pass
+            save_state(st)
 
 def local_tick(st):
     """ส่งคิวงานให้ Devin CLI ทีละรอบ — ระหว่างวินทำงาน ข้อความใหม่รอในคิวแล้วส่งรวมรอบถัดไป"""
@@ -572,6 +586,16 @@ def local_tick(st):
                 _kill_tree(LOCAL["proc"])
             LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
             send("งานก่อนหน้าค้างเกินเวลา วินตัดทิ้งแล้ว ทำข้อความถัดไปต่อเลย")
+            return
+        if LOCAL.get("stop_at") and time.time() - LOCAL["stop_at"] > 30:
+            # /stop แล้ว 30 วิ process ยังไม่ตาย — ปล่อยมันไว้ (ผลของมันจะถูกทิ้ง) แล้วกลับมารับข้อความนินต่อ
+            p = LOCAL.get("proc")
+            _rlog(f"local /stop ไม่หยุดใน 30s (pid {p.pid if p else '?'}) — ปล่อยทิ้ง รับงานต่อ ; " + _local_diag())
+            LOCAL["gen"] = LOCAL.get("gen", 0) + 1; LOCAL["abandoned"] = True
+            LOCAL["busy"] = False; LOCAL["proc"] = None; LOCAL["notified"] = False
+            LOCAL.pop("stop_at", None); LOCAL.pop("cancelled", None)
+            st["local_started"] = True
+            send("ตัวที่ค้างไม่ยอมหยุด วินปล่อยมันไว้แล้วกลับมาแล้ว ส่งข้อความต่อได้เลย")
             return
         if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
             LOCAL["pings"] = LOCAL.get("pings", 0) + 1
@@ -587,8 +611,9 @@ def local_tick(st):
     st["local_q"] = []
     save_state(st)
     LOCAL["busy"] = True; LOCAL["started"] = time.time(); LOCAL["pings"] = 0
+    LOCAL["gen"] = gen = LOCAL.get("gen", 0) + 1
     srcs = {m.group(1) for x in q for m in [_Q_TAG.search(x)] if m}
-    threading.Thread(target=local_run, args=(st, "\n\n".join(q), srcs), daemon=True).start()
+    threading.Thread(target=local_run, args=(st, "\n\n".join(q), srcs, gen), daemon=True).start()
 
 BG_JOB_DIR = os.path.join(LOCAL_DIR, "_telegram", "jobs")
 
@@ -900,9 +925,10 @@ def main():
                 if text == "/stop":
                     p = LOCAL.get("proc")
                     if LOCAL["busy"] and p:
-                        LOCAL["cancelled"] = True
-                        _kill_tree(p)
-                        send("หยุดงานที่ค้างแล้ว ข้อความที่รอคิวจะทำต่อเลย")
+                        LOCAL["cancelled"] = True; LOCAL.setdefault("stop_at", time.time())
+                        _rlog(f"/stop pid {p.pid} ; " + _local_diag())
+                        threading.Thread(target=_kill_tree, args=(p,), daemon=True).start()
+                        send("กำลังหยุดงานที่ค้าง ข้อความที่รอคิวจะทำต่อเลย (ถ้า 30 วิไม่หยุด วินปล่อยมันทิ้งแล้วรับงานต่อเอง)")
                     elif _kill_orphan():
                         send("หยุดงาน local ที่ค้างจากรอบก่อน (ก่อน bridge รีสตาร์ท) แล้ว")
                     else:
