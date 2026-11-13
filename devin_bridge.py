@@ -938,6 +938,11 @@ def _self_update_worker():
             print(f"self-update err: {e}")
 
 def main():
+    try:
+        from win_console import disable_quickedit
+        disable_quickedit()
+    except Exception:
+        pass
     threading.Thread(target=_self_update_worker, daemon=True).start()
     threading.Thread(target=_rlog_worker, daemon=True).start()
     threading.Thread(target=_media_worker, daemon=True).start()

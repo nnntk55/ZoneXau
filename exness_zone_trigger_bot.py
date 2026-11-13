@@ -2360,6 +2360,11 @@ def resolve_symbols():
                 pass
 
 if __name__ == "__main__":
+    try:
+        from win_console import disable_quickedit
+        disable_quickedit()
+    except Exception:
+        pass
     threading.Thread(target=_self_update_worker, daemon=True).start()
     if init_mt5():
         resolve_symbols()
