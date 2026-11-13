@@ -118,6 +118,15 @@ def _chatlog(who, text):
         pass
 
 def send(text):
+    if "[[SILENT]]" in text:
+        # เทิร์นเงียบ (heartbeat/ฝัน) ไม่เด้งเข้าแชทนิน แต่เก็บไว้ใน win_out.jsonl ไม่ให้หาย
+        t = text.replace("[[SILENT]]", "").strip()
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts", "win_out.jsonl"), "a", encoding="utf-8") as _f:
+                _f.write(json.dumps({"ts": time.time(), "text": t, "silent": True}, ensure_ascii=False) + chr(10))
+        except Exception:
+            pass
+        return
     # แตกเป็นหลายฟองตามย่อหน้า (บรรทัดว่าง) เหมือนคนพิมพ์ทีละฟอง — ฟองยาวเกิน 4000 ค่อยตัดทีเดียว
     for para in [p for p in text.split("\n\n") if p.strip()]:
         for i in range(0, len(para), 4000):
