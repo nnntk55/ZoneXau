@@ -376,6 +376,18 @@ def _local_children():
            if not name.lower().replace(".exe", "").startswith(skip) and cl.strip()]
     return out[:4]
 
+def _local_diag():
+    """ตอนวิน local ค้าง: ส่งขึ้น remote log ว่าเครื่องรันอะไรอยู่ + ท้าย prompt_out/err ให้วินฝั่ง cloud เห็นสาเหตุ"""
+    parts = [f"busy {_busy_min()} min", "children: " + (" | ".join(_local_children()) or "none")]
+    for f in LOCAL.get("io") or ():
+        try:
+            age = int(time.time() - os.path.getmtime(f))
+            tail = _ANSI.sub("", open(f, encoding="utf-8", errors="replace").read())[-300:]
+            parts.append(f"{os.path.basename(f)} {os.path.getsize(f)}B, เขียนล่าสุด {age}s ก่อน: {tail!r}")
+        except OSError:
+            pass
+    return "local diag: " + " ; ".join(parts)
+
 def _busy_info():
     t_end = time.gmtime(LOCAL.get("started", time.time()) + LOCAL_TIMEOUT + 7 * 3600)
     kids = _local_children()
@@ -484,6 +496,7 @@ def local_run(st, text, srcs=None):
         # subprocess.run(capture_output) เลยค้างตลอดไป -> bridge busy ค้าง ไม่ตอบนินอีกเลย
         of, ef = pf[:-4] + "_out.txt", pf[:-4] + "_err.txt"
         t0 = time.time()
+        LOCAL["io"] = (of, ef)
         _rlog(f"local start ({len(text)} chars, {'new' if first else 'continue'}): {text[:150]!r}")
         with open(of, "w", encoding="utf-8") as fo, open(ef, "w", encoding="utf-8") as fe:
             proc = subprocess.Popen(cmd, cwd=LOCAL_DIR, stdout=fo, stderr=fe, stdin=subprocess.DEVNULL)
@@ -496,6 +509,7 @@ def local_run(st, text, srcs=None):
                 rc = None
         LOCAL["proc"] = None
         if LOCAL.pop("cancelled", False):
+            _rlog(_local_diag())
             _rlog(f"local cancelled by /stop after {int(time.time() - t0)}s")
             if srcs:
                 _report_all(srcs, False, "นินสั่งหยุดงานนี้ (/stop)")
@@ -561,6 +575,7 @@ def local_tick(st):
             return
         if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
             LOCAL["pings"] = LOCAL.get("pings", 0) + 1
+            _rlog(_local_diag())
             send(_busy_info() + ("\nข้อความใหม่เข้าคิวไว้แล้ว เสร็จงานนี้จะทำต่อทันที" if q else "") + "\n/stop หยุดงานนี้")
         if time.time() - LOCAL.get("typing", 0) > 5:
             LOCAL["typing"] = time.time()
