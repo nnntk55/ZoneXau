@@ -361,9 +361,10 @@ def _local_children():
     try:
         if os.name == "nt":
             r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                                "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"],
+                                "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,UserModeTime,KernelModeTime | ConvertTo-Json -Compress"],
                                capture_output=True, text=True, timeout=30)
-            rows = [(x["ProcessId"], x["ParentProcessId"], x.get("Name") or "", x.get("CommandLine") or "")
+            rows = [(x["ProcessId"], x["ParentProcessId"], x.get("Name") or "",
+                     (x.get("CommandLine") or "") + f" [cpu {((x.get('UserModeTime') or 0) + (x.get('KernelModeTime') or 0)) // 10**7}s]")
                     for x in json.loads(r.stdout or "[]")]
         else:
             r = subprocess.run(["ps", "-eo", "pid=,ppid=,comm=,args="], capture_output=True, text=True, timeout=30)
@@ -380,7 +381,8 @@ def _local_children():
         for pid, ppid, name, cl in rows:
             if ppid == pp and pid not in kids:
                 kids[pid] = (name, cl); todo.append(pid)
-    skip = ("conhost", "devin", "node", "powershell", "pwsh", "bash", "sh", "cmd")
+    # powershell/cmd ต้องโชว์ — Devin CLI บน Windows รันคำสั่งผ่าน PowerShell (เคยซ่อนไว้จน diag ขึ้น "none" ทั้งที่ PowerShell ลูกกิน CPU 26%)
+    skip = ("conhost", "devin", "node")
     out = [cl.strip()[:160] for name, cl in kids.values()
            if not name.lower().replace(".exe", "").startswith(skip) and cl.strip()]
     return out[:4]
