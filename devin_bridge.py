@@ -1,6 +1,7 @@
 # devin_bridge.py — สะพาน Telegram ↔ Devin Cloud
 # นินคุยกับวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
+import glob
 import os, sys, json, time, re, shutil, subprocess, threading, requests, random
 
 BOT = os.getenv("DEVIN_BOT_TOKEN", "")
@@ -394,7 +395,27 @@ def _local_diag():
             parts.append(f"{os.path.basename(f)} {os.path.getsize(f)}B, เขียนล่าสุด {age}s ก่อน: {tail!r}")
         except OSError:
             pass
+    parts.append("cli log: " + _cli_log_tail())
     return "local diag: " + " ; ".join(parts)
+
+def _cli_log_tail(n=6):
+    """บรรทัดท้ายของ log ที่ Devin CLI เขียนเอง (<cli>/logs/devin_<เวลา>_<pid>.log) บอกว่า CLI ค้างตรงไหน เช่น compaction/retry/รอ server"""
+    try:
+        exe = devin_cli()
+        d = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(exe))), "logs")
+        if not os.path.isdir(d):
+            d = os.path.join(os.path.dirname(os.path.realpath(exe)), "..", "..", "..", "logs")
+        p = LOCAL.get("proc")
+        fs = glob.glob(os.path.join(d, f"*_{p.pid}.log")) if p else []
+        fs = fs or sorted(glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime)[-1:]
+        if not fs:
+            return f"ไม่เจอ log ใน {d}"
+        f = fs[0]
+        lines = [l for l in open(f, encoding="utf-8", errors="replace").read().splitlines() if "time.busy" not in l]
+        age = int(time.time() - os.path.getmtime(f))
+        return f"{os.path.basename(f)} เขียนล่าสุด {age}s ก่อน: " + " | ".join(l[-220:] for l in lines[-n:])
+    except Exception as e:
+        return f"err {e}"
 
 def _busy_info():
     t_end = time.gmtime(LOCAL.get("started", time.time()) + LOCAL_TIMEOUT + 7 * 3600)
