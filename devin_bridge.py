@@ -2,7 +2,7 @@
 # นินคุยกับวินได้ตรงผ่านบอท Devin โดยไม่ต้องเปิดคอม
 # env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID
 import glob
-import os, sys, json, time, re, shutil, subprocess, threading, requests, random
+import os, sys, json, time, re, shutil, subprocess, threading, queue, requests, random
 
 BOT = os.getenv("DEVIN_BOT_TOKEN", "")
 KEY = os.getenv("DEVIN_API_KEY", "")
