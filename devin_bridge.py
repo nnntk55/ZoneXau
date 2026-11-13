@@ -403,10 +403,20 @@ def _local_diag():
 def _cli_log_tail(n=6):
     """บรรทัดท้ายของ log ที่ Devin CLI เขียนเอง (<cli>/logs/devin_<เวลา>_<pid>.log) บอกว่า CLI ค้างตรงไหน เช่น compaction/retry/รอ server"""
     try:
-        exe = devin_cli()
-        d = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(exe))), "logs")
-        if not os.path.isdir(d):
-            d = os.path.join(os.path.dirname(os.path.realpath(exe)), "..", "..", "..", "logs")
+        exe = os.path.realpath(devin_cli() or "devin")
+        cands = [os.path.join(os.path.dirname(os.path.dirname(exe)), "logs")]
+        for env in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME"):
+            if os.getenv(env):
+                cands.append(os.path.join(os.environ[env], "devin", "cli", "logs"))
+        cands.append(os.path.expanduser(os.path.join("~", ".local", "share", "devin", "cli", "logs")))
+        for env in ("LOCALAPPDATA", "APPDATA"):
+            for pat in (("devin", "*", "logs"), ("devin", "*", "*", "logs"), ("devin", "logs")):
+                if os.getenv(env):
+                    cands += glob.glob(os.path.join(os.environ[env], *pat))
+        ds = [c for c in cands if os.path.isdir(c)]
+        if not ds:
+            return "ไม่เจอโฟลเดอร์ log (ลองแล้ว: " + " , ".join(cands[:5]) + ")"
+        d = ds[0]
         p = LOCAL.get("proc")
         fs = glob.glob(os.path.join(d, f"*_{p.pid}.log")) if p else []
         fs = fs or sorted(glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime)[-1:]
