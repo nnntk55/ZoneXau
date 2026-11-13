@@ -230,6 +230,31 @@ def route(st):
         return mode
     return "cloud" if st.get("cloud_active") and time.time() < st.get("cloud_until", 0) else "local"
 
+_MEDIA_Q = queue.Queue()   # (msg, caption, tag, is_voice, local, what) — สื่อรอประมวลผล
+_MEDIA_DONE = []           # (body, tag, is_voice) — ผลพร้อมเข้าคิวข้อความ (loop หลักเป็นคนรวม)
+
+def _media_worker():
+    """แยกเธรดโหลดรูป/ไฟล์/ถอดเสียง — เดิมทำใน loop หลัก ตอนส่งรูป-เสียงทำให้กด /status /stop ไม่ติด"""
+    while True:
+        msg, caption, tag, is_voice, local, what = _MEDIA_Q.get()
+        try:
+            att = tg_image_attachment(msg, local=local)
+        except Exception as e:
+            print(f"media worker err: {e}")
+            att = ""
+        if not att:
+            send(f"อัป{what}ให้วินไม่สำเร็จ ลองส่งใหม่อีกครั้งนะนิน" + (" (ส่งข้อความไปก่อนแล้ว)" if caption else ""))
+            continue
+        if att.startswith("ถอดเสียง"):
+            send(att.split("\n")[0].replace("ถอดเสียงที่นินพูด:", "วินได้ยินว่า:"))
+        is_video = bool(msg.get("video") or msg.get("video_note"))
+        mime = str((msg.get("document") or {}).get("mime_type", ""))
+        body = (caption or ("นินส่งข้อความเสียงมา ฟังแล้วทำตามที่พูด" if is_voice
+                            else "นินส่งวิดีโอมา แตกเฟรมด้วย vidframes.py แล้ววิเคราะห์" if is_video or mime.startswith("video/")
+                            else "นินส่งไฟล์มา เก็บไว้แล้ว เปิดดูเนื้อในได้ตามประเภท" if (msg.get("document") or {}).get("file_id") and not mime.startswith("image/")
+                            else "นินส่งรูปมา เปิดดูและวิเคราะห์")) + "\n" + att
+        _MEDIA_DONE.append((body, tag, is_voice))
+
 def deliver(st, text, force_cloud=False):
     """ส่งข้อความถึงวินใน session เดิมเสมอ (session ที่หลับ ส่งข้อความเข้าไปแล้วตื่นเอง)
     เปิด session ใหม่เฉพาะตอน session เดิมหมดโควต้า/หมดอายุจริง หรือยังไม่เคยมี session
@@ -915,6 +940,7 @@ def _self_update_worker():
 def main():
     threading.Thread(target=_self_update_worker, daemon=True).start()
     threading.Thread(target=_rlog_worker, daemon=True).start()
+    threading.Thread(target=_media_worker, daemon=True).start()
     if not all([BOT, KEY, CHAT]):
         print("ขาด env: DEVIN_BOT_TOKEN, DEVIN_API_KEY, TELEGRAM_CHAT_ID")
         return
@@ -1005,6 +1031,12 @@ def main():
                 _chatlog("nin", tag + text if tag else text)
                 last_in = time.time()
                 save_state(st)
+            while _MEDIA_DONE:
+                body, tag_m, isv = _MEDIA_DONE.pop(0)
+                _NIN_VOICE[0] = isv
+                st.setdefault("pending", []).append(tag_m + body if tag_m else body)
+                _chatlog("nin", body)
+                last_in = time.time()
             if st.get("pending") and time.time() - last_in >= BATCH_WAIT and time.time() >= retry_at:
                 text = "\n\n".join(st["pending"])
                 had = st.get("session_id")
