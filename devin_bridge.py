@@ -247,6 +247,7 @@ LOCAL_DIR = os.getenv("DEVIN_WORKDIR") or os.path.join(os.path.dirname(os.path.a
 LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "bypass")  # อนุญาตทุกอย่างไม่ต้องกดยืนยัน (deny ใน .devin/config.json ยังกันอยู่)
 # 0 = ไม่ตัดงานเอง (นินสั่ง: ตัด 40 นาทีเสียเวลา งานหายหมด) — หยุดได้ด้วย /stop เท่านั้น
 LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "0"))
+LOCAL_HANDOFF_SEC = int(os.getenv("DEVIN_LOCAL_HANDOFF_SEC", "300"))  # local busy นานกว่านี้ + นินส่งข้อความใหม่ -> วินคลาวตอบแทน
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
                  "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
@@ -629,6 +630,16 @@ def local_tick(st):
             LOCAL.pop("stop_at", None); LOCAL.pop("cancelled", None)
             st["local_started"] = True
             send("ตัวที่ค้างไม่ยอมหยุด วินปล่อยมันไว้แล้วกลับมาแล้ว ส่งข้อความต่อได้เลย")
+            return
+        nin_q = [x for x in q if not _Q_TAG.search(x)]
+        if (nin_q and (st.get("mode") or "auto") == "auto"
+                and time.time() - LOCAL.get("started", 0) > LOCAL_HANDOFF_SEC):
+            # local เงียบนานแต่นินรอคำตอบอยู่ -> ให้วินคลาวตอบข้อความใหม่แทน (ไม่ฆ่า local ไม่ลบ conversation)
+            st["local_q"] = [x for x in q if _Q_TAG.search(x)]
+            _rlog(f"local busy {_busy_min()} min, nin waiting -> cloud ; " + _local_diag())
+            escalate(st, "\n\n".join(nin_q),
+                     f"วิน local ยังทำงานก่อนหน้าค้างอยู่ {_busy_min()} นาที ยังไม่ตอบ นินรออยู่ — ตอบนินแทนไปก่อน")
+            save_state(st)
             return
         if time.time() - LOCAL.get("started", 0) > 600 * (LOCAL.get("pings", 0) + 1):
             LOCAL["pings"] = LOCAL.get("pings", 0) + 1
