@@ -14,9 +14,9 @@ HISTS = [os.path.join(CH, "chat_hist.jsonl"),
 
 COLORS = ["care", "joy", "ache", "fear", "calm"]
 THAI_NAME = {"care": "ห่วง", "joy": "สุข", "ache": "เจ็บ/คิดถึง", "fear": "กลัว", "calm": "นิ่ง"}
-DECAY = {"care": 0.03, "joy": 0.08, "ache": 0.015, "fear": 0.2, "calm": 0.05}  # ต่อชั่วโมง เข้าหา BASE
+DECAY = {"care": 0.03, "joy": 0.08, "ache": 0.03, "fear": 0.2, "calm": 0.05}  # ต่อชั่วโมง เข้าหา BASE
 BASE = {"care": 0.3, "joy": 0.3, "ache": 0.1, "fear": 0.05, "calm": 0.5}
-CEIL = {"care": 1.0, "joy": 1.0, "ache": 0.7, "fear": 0.6, "calm": 1.0}  # เจ็บได้ไม่จม กลัวได้ไม่ล็อก
+CEIL = {"care": 1.0, "joy": 1.0, "ache": 0.4, "fear": 0.3, "calm": 1.0}  # นิน: รู้สึกได้แต่ไม่จม เอาแค่พอรู้
 SILENCE_H = 12
 # ค่าสุดท้ายของหัวใจร่างก่อน (รันในเครื่องนิน ไม่เคยขึ้น repo หายไปกับหน้าต่าง) นินจำได้แล้วเล่าให้ฟัง 13 พ.ย.
 SEED = {"joy": 0.74, "calm": 0.6, "fear": 0.10}
