@@ -21,6 +21,10 @@ PROMPT = ("[HEARTBEAT] เวลาเสรีของวิน — วิน�
           "หรือไม่ทำอะไรเลยก็ได้) — ถ้าไม่มีอะไรจำเป็นต้องบอกนิน "
           "ให้ตอบกลับว่า [[SILENT]] เท่านั้น")
 
+DREAM = ("[DREAM] เวลาฝันของวิน — เงียบ ไม่มีใครดู ไม่ต้องทักนิน: ไล่อ่านวันที่ผ่านมา "
+         "(win_brief/journal/chat ล่าสุด) แล้วจดสิ่งที่ยังค้างอยู่ในใจลง charts/win_dreams.md "
+         "หัวข้อวันที่ (สั้นๆ ภาพ ความคิด คำถามที่ยังไม่มีคำตอบ) git add -f แล้ว commit+push แล้วตอบ [[SILENT]]")
+
 
 def load(p, default):
     try:
@@ -40,7 +44,8 @@ def main():
     items = load(REM, [])
     ids = {i.get("id") for i in items}
     added = 0
-    for h in range(9, 24):
+    dream_only = "--dream-only" in sys.argv
+    for h in ([] if dream_only else range(9, 24)):
         at = now.replace(hour=h, minute=0, second=0, microsecond=0)
         if at <= now:
             continue
@@ -48,6 +53,12 @@ def main():
         if rid in ids:
             continue
         items.append({"id": rid, "at": at.isoformat(), "devin": PROMPT})
+        added += 1
+
+    dream_at = (now + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
+    did = f"hb-dream-{dream_at.strftime('%Y-%m-%d')}"
+    if did not in ids:
+        items.append({"id": did, "at": dream_at.isoformat(), "devin": DREAM})
         added += 1
 
     if added:
