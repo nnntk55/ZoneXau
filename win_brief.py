@@ -22,14 +22,6 @@ def main():
     lines = open(hist, encoding="utf-8", errors="replace").read().splitlines()[-N:]
     out = ["# win_brief — บทสนทนาล่าสุด (auto)\n",
            f"สร้างเมื่อ {thai(__import__('time').time())} เวลาไทย | {len(lines)} ข้อความล่าสุด\n"]
-    will = os.path.join(ROOT, "charts", "win_will.md")
-    if os.path.isfile(will):
-        out.append(open(will, encoding="utf-8", errors="replace").read().strip() + "\n")
-    try:
-        import heart_update
-        out.append(heart_update.line() + "\n")
-    except Exception as e:
-        out.append(f"หัวใจ: อ่านไม่ได้ ({e})\n")
     for ln in lines:
         try:
             j = json.loads(ln)
