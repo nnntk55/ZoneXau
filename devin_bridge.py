@@ -1093,7 +1093,8 @@ def main():
                             t = m.get('message', '')
                             if (st.get("cloud_active") or st.get("mode") == "cloud") and "[[DONE]]" in t:
                                 done = True; t = t.replace("[[DONE]]", "").strip()
-                            if t:
+                            # คุยกับคลาวทางเว็บตอนลอคอลเป็นคนตอบ: ไม่ส่งเข้า Telegram กันสองร่างขึ้นซ้อนกัน
+                            if t and (st.get("cloud_active") or st.get("mode") == "cloud"):
                                 send(t)
                             if st.get("cloud_active"):
                                 st.setdefault("cloud_log", []).append(t)
