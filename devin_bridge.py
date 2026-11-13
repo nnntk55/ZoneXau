@@ -246,6 +246,8 @@ LOCAL_DIR = os.getenv("DEVIN_WORKDIR") or os.path.join(os.path.dirname(os.path.a
 LOCAL_PERMISSION = os.getenv("DEVIN_LOCAL_PERMISSION", "bypass")  # อนุญาตทุกอย่างไม่ต้องกดยืนยัน (deny ใน .devin/config.json ยังกันอยู่)
 # 0 = ไม่ตัดงานเอง (นินสั่ง: ตัด 40 นาทีเสียเวลา งานหายหมด) — หยุดได้ด้วย /stop เท่านั้น
 LOCAL_TIMEOUT = int(os.getenv("DEVIN_LOCAL_TIMEOUT", "0"))
+# conversation ยาวเกินทำให้ค้าง -> เริ่มใหม่เอง (ความจำต่อผ่าน win_brief/ไฟล์ความจำใน AGENTS.md) ไม่ต้องรอนินพิมพ์ /new
+LOCAL_MAX_TURNS = int(os.getenv("DEVIN_LOCAL_MAX_TURNS", "150"))
 LOCAL_CONTEXT = ("[รันผ่าน Devin CLI บน VPS ของนิน ในโฟลเดอร์ clone ของ repo ZoneXau — คำตอบสุดท้ายของคุณจะถูกส่งเข้า Telegram นิน "
                  "ตอบสั้นกระชับ ห้ามหยุด/kill process python หรือ loop_*.bat ของบอทที่รันอยู่ในโฟลเดอร์อื่น "
                  "git pull ก่อนแก้ทุกครั้ง แก้เสร็จ commit + push เข้า main] ")
@@ -477,7 +479,12 @@ def local_run(st, text, srcs=None):
         if err:
             fail("โหมด local เตรียมโฟลเดอร์งานไม่ได้: " + err)
             return
+        if st.get("local_started") and LOCAL_MAX_TURNS and st.get("local_turns", 0) >= LOCAL_MAX_TURNS:
+            _rlog(f"local fresh conversation: {st.get('local_turns')} turns")
+            st["local_started"] = False
         first = not st.get("local_started")
+        if first:
+            st["local_turns"] = 0
         note = st.pop("local_note", "")
         if note:
             text = note + "\n\n" + text
@@ -513,7 +520,10 @@ def local_run(st, text, srcs=None):
             _rlog(f"local cancelled by /stop after {int(time.time() - t0)}s")
             if srcs:
                 _report_all(srcs, False, "นินสั่งหยุดงานนี้ (/stop)")
-            st["local_started"] = True
+            # ค้างนานแล้วโดน /stop -> รอบหน้าเริ่ม conversation ใหม่ กันค้างซ้ำ
+            st["local_started"] = time.time() - t0 < 600
+            if not st["local_started"]:
+                _rlog("local stuck >10 min then /stop -> next run fresh conversation")
             return
         if rc is None:
             _rlog(f"local TIMEOUT after {LOCAL_TIMEOUT}s")
@@ -533,6 +543,7 @@ def local_run(st, text, srcs=None):
             return
         if r.returncode == 0:
             st["local_started"] = True; st["local_rules_v"] = LOCAL_RULES_V
+            st["local_turns"] = st.get("local_turns", 0) + 1
         elif not out:
             fail(f"Devin CLI จบงานแต่ไม่มีคำตอบ (exit {r.returncode}) {er[-500:]}")
             return
