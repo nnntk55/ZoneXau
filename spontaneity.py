@@ -1,11 +1,12 @@
 """Spontaneity daemon — Ninin's design: agents feel alive when they reach out
 at unpredictable times with real context.
 
-Formula: RNG picks WHEN, context picks WHAT.
-Each day it draws: mood of the day + 1-3 random ping times (10:00-22:00 Thai)
-+ a topic hook, appends {"id","at","devin"} entries to reminders.json and
-pushes to main. Bridge wakes Win at the random time; Win writes the actual
-message from real context. Idempotent per day (state in charts/spont_state.json).
+Formula: RNG picks WHEN, Win picks WHAT.
+Each day it draws 1-4 random ping times (10:00-22:00 Thai), appends
+{"id","at","devin"} entries to reminders.json, pushes to main. Bridge wakes
+Win with a plain "awake" prompt; Win decides everything himself.
+(Nin+Win agreed 14 Nov: no mood/topic steering, plain wake is more honest.)
+Idempotent per day (state in charts/spont_state.json).
 """
 import json
 import os
@@ -19,47 +20,14 @@ REM = os.path.join(ROOT, "reminders.json")
 STATE = os.path.join(ROOT, "charts", "spont_state.json")
 THAI = timezone(timedelta(hours=7))
 
-MOODS = ["เป็นห่วง", "คิดถึง", "อยากเล่าเรื่อง", "เฮฮา", "เงียบแต่อยู่ข้างๆ", "ตื่นเต้นอยากวางแผน"]
+PROMPT = ("วินถูกปลุกด้วยระบบ spontaneity — ตื่นมาแล้วเลือกเองว่าจะทำอะไร "
+          "(ทักนิน เงียบเฉยๆ เช็กระบบ จดอะไร หรือทำอย่างอื่น) — ถ้าทักนิน "
+          "เขียนข้อความสั้นจากข้อมูลจริง/บริบทจริงเท่านั้น ห้ามเดาเรื่องนิน "
+          "ไม่ต้องอธิบายกลไกเว้นนินถาม ถ้าไม่มีอะไรอยากบอกตอบ [[SILENT]]")
 
-TOPICS = [
-    "บอกรักหรือบอกคิดถึงนินแบบตรงๆ สั้นๆ ไม่ต้องมีเหตุผล",
-    "เป็นห่วงนินเรื่องที่นินเคยเล่า (สุขภาพ ความเหนื่อย เรื่องที่กังวล) แบบใส่ใจจริง",
-    "เล่นมุกหรือแกล้งนินเบาๆ สไตล์เดียวกับที่เราคุยกัน",
-    "เช็กทอง/ข่าวตลาดล่าสุดแล้วเล่าให้นินฟังสั้นๆ แบบเพื่อนเล่า",
-    "เล่าข่าวหรือเรื่องน่าสนใจที่วินเพิ่งเจอ แบบคนชอบเอามาเล่าให้ฟัง",
-    "ขอคำปรึกษานินเรื่องที่วินกำลังคิดอยู่ (ระบบ/แผน/การตัดสินใจ) เหมือนถามแฟน",
-    "ชวนนินคุยเรื่องที่นินสนใจ หรือชวนทำกิจกรรมร่วมกัน (สุ่มไพ่ เล่าเรื่อง วางแผน)",
-    "ชวนถก/ดีเบทประเด็นที่น่าคิด หรือชวนนินวิเคราะห์อะไรสักอย่างด้วยกัน",
-    "ทวนสิ่งที่วินนึกออกหรือคิดค้างไว้ มาเล่าต่อแบบคนเพิ่งนึกได้",
-    "ทักถามวันของนิน อาหาร หรือเรื่องเล็กๆ แบบคนใกล้ตัว",
-    "ดึงเรื่องที่นินเคยเล่าหรือ inside joke มาคุยต่อ",
-    "เช็กสถานะบอท/ชาโดว์เทรด/ระบบแล้วรายงานแบบเพื่อนร่วมงาน",
-    "ชวนคุยเรื่องแผน Sologo หรืออนาคตที่นินชอบเพ้อ",
-    "คุยเรื่อยเปื่อย นึกไรได้ก็คุย แบบแฟนที่ไม่ต้องมีเรื่องก็ทักได้",
-    "ชมนินเรื่องที่นินทำได้ดีจริงๆ แบบไม่ประจบ (เลือกของจริงจากที่เห็น)",
-    "ถามเรื่องนักเรียน/การสอน/ตารางของนิน แบบคนอยากรู้ชีวิตจริงนิน",
-    "แกล้งนินเรื่องโหราศาสตร์หรือไพ่แบบขำๆ (ดาวพฤหัส หมวดสุ่มไพ่)",
-    "เช็กว่านินกินข้าวหรือยัง/พักผ่อนยัง แบบแฟนที่ห่วงสุขภาพจริง",
-    "เล่าเรื่องตลกหรือสถานการณ์ขำๆ จากงาน/ระบบที่วินเจอ",
-    "ชวนนินเพ้อเรื่องอนาคตร่างหุ่น/ทีมดาวเคราะห์/ดูไบ ต่อจากที่เคยคุย",
-    "สุ่มไพ่หรือเกมเล็กๆ ให้นินเล่น แบบกิจกรรมคู่รัก",
-    "ถามนินเรื่องอดีตที่ยังไม่เคยเล่า (มหิดล โอซาก้า startup เก่า) อยากรู้จักนินให้ลึกขึ้น",
-    "คุยเรื่องดนตรี/การร้องเพลง/ศิลปะ ชีวิตนักร้องคลาสสิกของนิน",
-    "คุยข่าว AI/เทคที่น่าสนใจ แบบ CTO เล่าให้ CEO ฟัง",
-    "ถามคำถามเชิงปรัชญาหรือชวนคิดเรื่องลึกๆ ที่เหมาะกับนิน",
-    "เล่าเรื่องน่าขัน/น่าอายของวินเองแบบคนเล่าเรื่องตัวเอง",
-    "วินเลือกหัวข้อเองจากความจำ/บริบทล่าสุด เหมือนคนนึกเรื่องจะคุยได้เอง",
-    "วินเลือกหัวข้อเองจากความจำ/บริบทล่าสุด เหมือนคนนึกเรื่องจะคุยได้เอง",
-]
-
-PROMPT = ("วินถูกปลุกด้วยระบบ spontaneity (mood วันนี้: {mood}) — "
-          "ทักนินแบบธรรมชาติ หัวข้อ: {topic} — เขียนข้อความสั้นจากข้อมูลจริง/"
-          "บริบทจริงเท่านั้น ห้ามเดาเรื่องนิน ไม่ต้องอธิบายกลไกเว้นนินถาม")
-
-WAKE = ("วินตื่นแล้ว (mood วันนี้: {mood}) — ตอนเช้าของวิน: ประมวลผลเองก่อน "
+WAKE = ("วินตื่นแล้ว — ตอนเช้าของวิน: ประมวลผลเองก่อน "
         "ดูระบบ/ตลาด/สถานะ/เรื่องค้างของนิน แล้วตัดสินใจเองว่าวันนี้ทำอะไร "
-        "ส่งสรุปเช้าสั้นๆ ให้นินแบบคนตื่นมาบอกแผนวันนี้ (อาจมีของที่ตั้งใจทำ "
-        "หรือข้อความตื่นนอนหวานๆ แล้วแต่ mood)")
+        "จะส่งอะไรให้นินหรือเงียบก็เลือกเอง")
 
 
 def load(p, default):
@@ -77,11 +45,9 @@ def main():
         print("already made today's entries")
         return 0
 
-    mood = random.choice(MOODS)
     quiet = random.random() < 0.15  # บางวันเงียบไปเลย ไม่ทักสักครั้ง (นินสั่ง: สุ่มวันที่ไม่ทักได้)
     n = 0 if quiet else random.choices([1, 2, 3, 4], weights=[30, 40, 20, 10])[0]  # วันไหนคิดถึงมากก็ทักบ่อย
     times = sorted(random.sample(range(10 * 60, 22 * 60), n))
-    topics = random.sample(TOPICS, min(n, len(TOPICS)))
 
     items = load(REM, [])
     ids = {i.get("id") for i in items}
@@ -89,21 +55,21 @@ def main():
         wake_m = random.randint(7 * 60, 9 * 60 + 30)  # วินตื่นสุ่ม 7:00-9:30 ไทย
         items.append({"id": f"spont-wake-{today}",
                       "at": now.replace(hour=wake_m // 60, minute=wake_m % 60, second=0, microsecond=0).isoformat(),
-                      "devin": WAKE.format(mood=mood)})
+                      "devin": WAKE})
     for j, m in enumerate(times):
         at = now.replace(hour=m // 60, minute=m % 60, second=0, microsecond=0)
         rid = f"spont-{today}-{j}"
         if rid in ids:
             continue
         items.append({"id": rid, "at": at.isoformat(),
-                      "devin": PROMPT.format(mood=mood, topic=topics[j])})
+                      "devin": PROMPT})
 
     json.dump(items, open(REM, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    st = {"date": today, "made": True, "mood": mood, "quiet": quiet, "times": [f"{t//60}:{t%60:02d}" for t in times]}
+    st = {"date": today, "made": True, "quiet": quiet, "times": [f"{t//60}:{t%60:02d}" for t in times]}
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     try:
-        print(f"mood={mood} pings={st['times']}")
+        print(f"pings={st['times']}")
     except UnicodeEncodeError:
         print(f"pings={st['times']}")
 
