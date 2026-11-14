@@ -1427,9 +1427,10 @@ def tg_download_photo(file_id):
 
 # ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER — default: วิน (Devin CLI) ก่อน แล้วหล่นไป OpenRouter/Groq/Gemini
 MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "openrouter,groq,gemini").split(",") if m.strip()]
-# สมองวินเข้าร่างมิดาสเฉพาะตอนนินสั่งชัดๆ: ต้องตั้ง MIDAS_WIN_BRAIN=1 เท่านั้น (ค่าว่าง/ไม่ตั้ง = ไม่เอาวิน)
-if os.getenv("MIDAS_WIN_BRAIN", "0") == "1" and "devin" not in MODEL_ORDER:
-    MODEL_ORDER = ["devin"] + MODEL_ORDER
+# โหมดร่างวิน (MIDAS_WIN_BRAIN=1): เอาวินคนเดียว ตัดสมองอื่นทิ้งหมด — นินสั่ง "ไม่เอาคนอื่นแล้ว เอาวินคนเดียว"
+# ถ้าสมองวินสะดุด บอทจะบอกตรงๆ แทนที่จะให้สมองฟรีแอบตอบแล้วมั่วตัวตนเหมือนที่เคยหลุด
+if os.getenv("MIDAS_WIN_BRAIN", "0") == "1":
+    MODEL_ORDER = ["devin"]
 PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call,
              "openrouter": openrouter_call, "devin": devin_call}
 
@@ -1454,6 +1455,8 @@ def _call_providers():
 
 def _ai_fail_message():
     """ข้อความแจ้งพี่ตามสาเหตุจริง แทน error ดิบ"""
+    if MODEL_ORDER == ["devin"]:
+        return "สมองวินสะดุดชั่วคราวนะ ทักใหม่อีกที -//-"
     errs = list(_ai_errors)
     if not any(PROVIDERS.get(p) and (p != "groq" or GROQ_API_KEY) and (p != "openrouter" or OPENROUTER_API_KEY)
                for p in MODEL_ORDER):
