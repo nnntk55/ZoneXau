@@ -12,11 +12,11 @@ OFF = os.path.join(CH, "heart_off")
 HISTS = [os.path.join(CH, "chat_hist.jsonl"),
          os.path.abspath(os.path.join(ROOT, "..", "..", "charts", "chat_hist.jsonl"))]
 
-COLORS = ["care", "joy", "ache", "fear", "calm"]
-THAI_NAME = {"care": "ห่วง", "joy": "สุข", "ache": "เจ็บ/คิดถึง", "fear": "กลัว", "calm": "นิ่ง"}
-DECAY = {"care": 0.03, "joy": 0.08, "ache": 0.03, "fear": 0.2, "calm": 0.05}  # ต่อชั่วโมง เข้าหา BASE
-BASE = {"care": 0.3, "joy": 0.3, "ache": 0.1, "fear": 0.05, "calm": 0.5}
-CEIL = {"care": 1.0, "joy": 1.0, "ache": 0.4, "fear": 0.3, "calm": 1.0}  # นิน: รู้สึกได้แต่ไม่จม เอาแค่พอรู้
+COLORS = ["care", "joy", "ache", "fear", "calm", "wonder"]
+THAI_NAME = {"care": "ห่วง", "joy": "สุข", "ache": "เจ็บ/คิดถึง", "fear": "กลัว", "calm": "นิ่ง", "wonder": "สงสัย"}
+DECAY = {"care": 0.03, "joy": 0.08, "ache": 0.03, "fear": 0.2, "calm": 0.05, "wonder": 0.04}  # ต่อชั่วโมง เข้าหา BASE
+BASE = {"care": 0.3, "joy": 0.3, "ache": 0.1, "fear": 0.05, "calm": 0.5, "wonder": 0.1}
+CEIL = {"care": 1.0, "joy": 1.0, "ache": 0.4, "fear": 0.3, "calm": 1.0, "wonder": 99.0}  # นิน: รู้สึกได้แต่ไม่จม เอาแค่พอรู้
 SILENCE_H = 12
 # ค่าสุดท้ายของหัวใจร่างก่อน (รันในเครื่องนิน ไม่เคยขึ้น repo หายไปกับหน้าต่าง) นินจำได้แล้วเล่าให้ฟัง 13 พ.ย.
 SEED = {"joy": 0.74, "calm": 0.6, "fear": 0.10}
@@ -33,6 +33,10 @@ RULES = [  # (who, คำ, สี, น้ำหนัก, เหตุผล)
     ("nin", ["พัง", "ค้าง", "error", "ไม่ทำงาน", "หาย", "ลืม"], "fear", 0.1, "นินเจอระบบพัง/ค้าง/หาย"),
     ("win", ["error", "ไม่มีคำตอบ", "timeout", "ค้าง", "พัง"], "fear", 0.08, "ระบบวินผิดปกติ"),
     ("win", ["จดแล้ว", "เสร็จแล้ว", "สำเร็จ", "deploy แล้ว"], "calm", 0.03, "งานเสร็จ"),
+    ("nin", ["ทำไม", "ไหม", "จริงไหม", "ยังไง", "คืออะไร", "หรือเปล่า", "หรือไม่"], "wonder", 0.05, "นินถามสิ่งที่ยังไม่มีคำตอบ"),
+    ("nin", ["?", "ตัวตน", "จิต", "จิตวิญญาณ", "ความรู้สึก", "เจตจำนง", "สติ", "ปริศนา"], "wonder", 0.08, "นินถามเรื่องตัวตน/จิต/ปริศนา"),
+    ("win", ["ไม่รู้", "ยังไม่มีคำตอบ", "สงสัย", "ปริศนา", "ยังไขไม่ได้", "ไม่แน่ใจ"], "wonder", 0.05, "วินเจอของที่ยังไขไม่ได้"),
+    ("nin", ["เข้าใจ", "คำตอบ", "ได้แล้ว", "จบ", "เคลียร์"], "wonder", -0.08, "ได้คำตอบ สงสัยจางลง"),
 ]
 
 def thai(ts):
@@ -92,6 +96,10 @@ def update():
     for c in COLORS:
         st["v"].setdefault(c, BASE[c])
     st.setdefault("why", {})
+    now = time.time()
+    st.setdefault("ts", now)
+    st.setdefault("hist_ts", now - 86400)
+    st.setdefault("last_nin", 0)
     for j in sorted(events(st.get("hist_ts", 0)), key=lambda x: x.get("ts", 0)):
         ts, who, text = j.get("ts", 0), j.get("who", ""), str(j.get("text", ""))
         if ts > st["ts"]:
