@@ -1426,9 +1426,9 @@ def tg_download_photo(file_id):
     return requests.get(f"https://api.telegram.org/file/bot{ASSISTANT_BOT_TOKEN}/{path}", timeout=30).content
 
 # ลำดับสมอง — ปรับได้ผ่าน env MODEL_ORDER — default: วิน (Devin CLI) ก่อน แล้วหล่นไป OpenRouter/Groq/Gemini
-MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "devin,openrouter,groq,gemini").split(",") if m.strip()]
-# นินสั่งให้วินเป็นสมองมิดาส — บังคับ devin นำหน้าเสมอ ยกเว้นตั้ง MIDAS_WIN_BRAIN=0
-if os.getenv("MIDAS_WIN_BRAIN", "1") != "0" and "devin" not in MODEL_ORDER:
+MODEL_ORDER = [m.strip() for m in os.getenv("MODEL_ORDER", "openrouter,groq,gemini").split(",") if m.strip()]
+# สมองวินเข้าร่างมิดาสเฉพาะตอนนินสั่งชัดๆ: ต้องตั้ง MIDAS_WIN_BRAIN=1 เท่านั้น (ค่าว่าง/ไม่ตั้ง = ไม่เอาวิน)
+if os.getenv("MIDAS_WIN_BRAIN", "0") == "1" and "devin" not in MODEL_ORDER:
     MODEL_ORDER = ["devin"] + MODEL_ORDER
 PROVIDERS = {"gemini": lambda: gemini_call(chat_history), "groq": groq_call,
              "openrouter": openrouter_call, "devin": devin_call}
